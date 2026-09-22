@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ねこ城</title>
+<meta name="description" content="村を出た子猫が侍に仕えて出世し、家臣を育て、自分の城と村を大きくしていく">
+<meta name="theme-color" content="#151a2e">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<div id="app">
+  <header id="topbar">
+    <h1 class="title">ねこ城</h1>
+    <div class="rank-badge" id="rankBadge">村の子猫</div>
+    <div class="merit-badge" id="meritBadge">手柄 0</div>
+  </header>
+
+  <main id="stage">
+
+    <section class="view" id="view-training" data-view="training">
+      <div class="lord-line" id="lordLine"></div>
+      <div class="progress-wrap">
+        <div class="progress-label" id="progressLabel">つぎの出世まで</div>
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      </div>
+      <div class="training-field" id="trainingField">
+        <div class="player-cat" id="playerCat"></div>
+        <button type="button" class="tap-target" id="tapTarget" hidden aria-label="つかまえる"></button>
+      </div>
+      <p class="hint">出てきた小判をタップして手柄を稼ごう</p>
+    </section>
+
+    <section class="view" id="view-vassals" data-view="vassals" hidden>
+      <div class="section-head">
+        <h2>家臣</h2>
+        <div class="slot-count" id="vassalSlotCount">0 / 0 人</div>
+      </div>
+      <p class="locked-note" id="vassalsLocked" hidden></p>
+      <div id="vassalsContent" class="view" hidden>
+        <ul class="vassal-list" id="vassalList"></ul>
+        <button type="button" class="btn btn-primary btn-wide" id="btnRecruit">仲間を誘う</button>
+      </div>
+    </section>
+
+    <section class="view" id="view-castle" data-view="castle" hidden>
+      <div class="section-head">
+        <h2>城</h2>
+        <div class="material-count" id="materialCountCastle">資材 0</div>
+      </div>
+      <p class="locked-note" id="castleLocked" hidden></p>
+      <div id="castleContent" class="view" hidden>
+        <p class="castle-banner" id="castleBanner" hidden></p>
+        <div class="castle-grid" id="castleGrid"></div>
+        <div class="build-picker" id="buildPicker" hidden></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-village" data-view="village" hidden>
+      <div class="section-head">
+        <h2>村</h2>
+        <div class="material-count" id="materialCountVillage">資材 0</div>
+      </div>
+      <p class="locked-note" id="villageLocked" hidden></p>
+      <div id="villageContent" class="view" hidden>
+        <div class="progress-wrap">
+          <div class="progress-label" id="popLabel">村人猫 0 / 0</div>
+          <div class="progress-bar"><div class="progress-fill" id="popFill"></div></div>
+        </div>
+        <div class="village-cats" id="villageCats"></div>
+        <button type="button" class="btn btn-primary btn-wide" id="btnBuildHouse">家を建てる</button>
+      </div>
+    </section>
+
+  </main>
+
+  <nav id="tabbar">
+    <button type="button" class="tab" id="tab-training" data-tab="training">
+      <span class="tab-icon">🐾</span><span class="tab-label">しゅぎょう</span>
+    </button>
+    <button type="button" class="tab" id="tab-vassals" data-tab="vassals">
+      <span class="tab-icon">⚔️</span><span class="tab-label">家臣</span>
+    </button>
+    <button type="button" class="tab" id="tab-castle" data-tab="castle">
+      <span class="tab-icon">🏯</span><span class="tab-label">城</span>
+    </button>
+    <button type="button" class="tab" id="tab-village" data-tab="village">
+      <span class="tab-icon">🏘️</span><span class="tab-label">村</span>
+    </button>
+  </nav>
+
+  <div class="toast" id="toast" hidden></div>
+</div>
+
+<script src="./core.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>

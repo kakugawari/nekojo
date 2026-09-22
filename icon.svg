@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="ねこ城">
+  <rect width="512" height="512" rx="108" fill="#151a2e"/>
+  <polygon points="120,190 165,60 210,195" fill="#e8a33d"/>
+  <polygon points="302,195 347,60 392,190" fill="#e8a33d"/>
+  <polygon points="140,175 165,100 190,178" fill="#ffd9b3"/>
+  <polygon points="322,178 347,100 372,175" fill="#ffd9b3"/>
+  <circle cx="256" cy="290" r="150" fill="#e8a33d"/>
+  <path d="M110 250 Q256 190 402 250" stroke="#ffd166" stroke-width="34" fill="none" stroke-linecap="round"/>
+  <circle cx="402" cy="250" r="18" fill="#ffd166"/>
+  <ellipse cx="220" cy="296" rx="16" ry="22" fill="#2a2200"/>
+  <ellipse cx="292" cy="296" rx="16" ry="22" fill="#2a2200"/>
+  <polygon points="238,332 274,332 256,352" fill="#e08a8a"/>
+</svg>
