@@ -3,17 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ねこ城</title>
-<meta name="description" content="村を出た子猫が侍に仕えて出世し、家臣を育て、自分の城と村を大きくしていく">
+<title>にゃん将</title>
+<meta name="description" content="猫じゃらしで出世するにゃ〜。村を出た子猫が侍に仕えて出世し、家臣を育て、自分の城と村を大きくしていく">
 <meta name="theme-color" content="#151a2e">
-<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<meta name="apple-mobile-web-app-title" content="にゃん将">
+<link rel="icon" href="./apple-touch-icon.png" type="image/png">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 
+<div id="titleScreen" class="title-screen">
+  <div class="title-frame">
+    <img class="title-art" src="./title.jpg" alt="にゃん将 猫じゃらしで出世するにゃ〜" draggable="false">
+    <button type="button" class="title-start" id="btnStart" aria-label="はじめる"><span class="title-start-glow"></span></button>
+  </div>
+</div>
+
 <div id="app">
   <header id="topbar">
-    <h1 class="title">ねこ城</h1>
+    <h1 class="title">にゃん将</h1>
     <div class="rank-badge" id="rankBadge">村の子猫</div>
     <div class="merit-badge" id="meritBadge">手柄 0</div>
   </header>
@@ -30,7 +39,7 @@
         <div class="player-cat" id="playerCat"></div>
         <button type="button" class="tap-target" id="tapTarget" hidden aria-label="つかまえる"></button>
       </div>
-      <p class="hint">出てきた小判をタップして手柄を稼ごう</p>
+      <p class="hint">出てきた猫じゃらしをタップして手柄を稼ごう</p>
     </section>
 
     <section class="view" id="view-vassals" data-view="vassals" hidden>

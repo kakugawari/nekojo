@@ -124,12 +124,80 @@ async function run() {
     const catShown = await phone.evaluate(() => document.querySelectorAll('#playerCat svg').length === 1);
     ok(catShown, '自分のねこ (2頭身) が描かれている');
 
+    // ------------------------------------------------ タイトル画面
+    section('タイトル画面');
+    // 題字 (元の絵で x165〜915, y40〜) と「はじめる」の札が画面に収まっているか。
+    // Safari で開いた高さ (端末の既定) と、ホーム画面から開いた実寸 (932) の両方で見る
+    for (const vp of [device.viewport, { width: 430, height: 932 }]) {
+      const ctx = await browser.newContext({ ...device, viewport: vp });
+      const page = await ctx.newPage();
+      page.on('pageerror', (e) => errors.push('タイトル: ' + e.message));
+      await page.goto(URL);
+      await page.waitForFunction(() => window.__app && document.querySelector('.title-art').complete);
+      const t = await page.evaluate(() => {
+        const f = document.querySelector('.title-frame').getBoundingClientRect();
+        const s = f.width / 1086;
+        const b = document.getElementById('btnStart').getBoundingClientRect();
+        return {
+          logoL: f.left + 165 * s, logoR: f.left + 915 * s, logoT: f.top + 40 * s,
+          btnB: b.bottom, btnL: b.left, btnR: b.right,
+          imgW: document.querySelector('.title-art').naturalWidth,
+          vw: innerWidth, vh: innerHeight
+        };
+      });
+      const tag = `${t.vw}x${t.vh}`;
+      ok(t.imgW === 1086, `${tag}: タイトルの絵が読み込まれる`);
+      ok(t.logoL >= 0 && t.logoR <= t.vw && t.logoT >= 0,
+        `${tag}: 題字が画面からはみ出さない (左${t.logoL.toFixed(0)} 右${t.logoR.toFixed(0)} 上${t.logoT.toFixed(0)})`);
+      ok(t.btnL >= 0 && t.btnR <= t.vw && t.btnB <= t.vh, `${tag}: 「はじめる」が画面の中にある`);
+
+      // 重ねたボタンが、絵に描いた札の上にちゃんと乗っているか。
+      // 光る範囲の上寄り (字の無い所) を元の絵の画素に戻して、札のクリーム色かを見る
+      const plaque = await page.evaluate(() => {
+        const img = document.querySelector('.title-art');
+        const f = img.getBoundingClientRect();
+        const g = document.querySelector('.title-start-glow').getBoundingClientRect();
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+        const s = img.naturalWidth / f.width;
+        return [0.3, 0.5, 0.7].map((fx) => {
+          const px = Math.round((g.left + g.width * fx - f.left) * s);
+          const py = Math.round((g.top + g.height * 0.15 - f.top) * s);
+          const d = x.getImageData(px, py, 1, 1).data;
+          return [d[0], d[1], d[2]];
+        });
+      });
+      const cream = plaque.every(([r, g, b]) => r > 220 && g > 200 && b > 150 && r > b);
+      ok(cream, `${tag}: 重ねたボタンが札の上に乗っている (${plaque.map((c) => 'rgb(' + c.join(',') + ')').join(' ')})`);
+      await ctx.close();
+    }
+
+    ok(await phone.evaluate(() => window.__app.titleShown()), '開くとタイトル画面が出る');
+    await phone.evaluate(() => window.__app.forceSpawn());
+    ok(!(await phone.evaluate(() => window.__app.tapTargetVisible())), 'タイトル中は、しゅぎょうの的が出ない');
+
+    // 絵に描いた札の上に重ねたボタンを、指で押す
+    await phone.locator('#btnStart').tap();
+    await phone.waitForTimeout(500);
+    const started = await phone.evaluate(() => ({
+      shown: window.__app.titleShown(),
+      hidden: document.getElementById('titleScreen').hidden
+    }));
+    ok(!started.shown && started.hidden, '「はじめる」を押すとタイトルが消える');
+
     // ------------------------------------------------ しゅぎょう
     section('しゅぎょう (タップで手柄)');
     await phone.evaluate(() => window.__app.forceSpawn());
     await phone.waitForTimeout(50);
     const targetVisible = await phone.evaluate(() => window.__app.tapTargetVisible());
     ok(targetVisible, 'タップする的が出る');
+    const onTop = await phone.evaluate(() => {
+      const r = document.getElementById('tapTarget').getBoundingClientRect();
+      const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return el && el.closest('#tapTarget') ? 'tapTarget' : (el ? el.id || el.className : 'none');
+    });
+    ok(onTop === 'tapTarget', `消えたタイトルが的をふさいでいない (指の下: ${onTop})`);
 
     await phone.locator('#tapTarget').tap();
     await phone.waitForTimeout(120);
@@ -241,8 +309,20 @@ async function run() {
     if (!apple) {
       skip('ホーム画面用のアイコンはまだ無い (PWA にするときに用意する)');
     } else {
+      // iOS は SVG のアイコンを使えない
       ok(apple.endsWith('.png'), `ホーム画面用アイコンが PNG (${apple})`);
+      const res = await desk.request.get(URL + apple.replace('./', ''));
+      ok(res.ok() && res.headers()['content-type'] === 'image/png', `${apple} が PNG として配信される`);
+      const size = await desk.evaluate((src) => new Promise((done) => {
+        const im = new Image(); im.onload = () => done([im.naturalWidth, im.naturalHeight]); im.onerror = () => done([0, 0]); im.src = src;
+      }), apple);
+      ok(size[0] === 180 && size[1] === 180, `アイコンが 180x180 (${size.join('x')})`);
     }
+    const art = await desk.request.get(URL + 'title.jpg');
+    const artKB = Math.round((await art.body()).length / 1024);
+    ok(art.headers()['content-type'] === 'image/jpeg', 'タイトルの絵が JPEG として配信される');
+    // 元の PNG は 2.2MB あった。開くのが重くならないよう、焼き直した大きさを見張る
+    ok(artKB < 600, `タイトルの絵が軽い (${artKB}KB)`);
 
     section('エラー');
     ok(errors.length === 0, errors.length ? '画面のエラー: ' + errors.join(' / ') : 'JS エラーなし');

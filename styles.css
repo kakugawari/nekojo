@@ -50,6 +50,65 @@ body {
   user-select: none;
 }
 
+/* --------------------------------------------------------- タイトル画面 */
+
+/* 絵 (1086x1448) は画面より縦横比が太いので、幅 --tw で下端に合わせて置く。
+   左右は画面からはみ出すが、題字 (元の絵で x165〜915) は切れない。
+   上に余る分は、絵の上端と同じ空の色 (#4ea6f1) で埋めて、境目はマスクでぼかす。 */
+.title-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  overflow: hidden;
+  --tw: clamp(500px, calc(100vh * 0.6), 560px);
+  background: linear-gradient(to bottom, #3a8fe0 0px, #4ea6f1 calc(100% - var(--tw) * 1448 / 1086));
+}
+.title-screen[hidden] { display: none; }
+
+/* 背が高い画面 (ホーム画面から開いたとき 932pt) では空が間延びするので少し大きくする。
+   上限 560px = 左右に 65px ずつはみ出す (元の絵で 126px。題字は x165〜915 なので切れない) */
+.title-frame {
+  position: absolute;
+  bottom: 0;
+  left: calc(50% - var(--tw) / 2);
+  width: var(--tw);
+  aspect-ratio: 1086 / 1448;
+}
+
+.title-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 56px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 56px);
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+
+/* 絵に描いてある「はじめる」の札 (元の絵で x268〜818, y1230〜1370。左右の飾り帯を含む) */
+.title-start {
+  position: absolute;
+  left: 24.68%;
+  top: 84.94%;
+  width: 50.64%;
+  height: 9.67%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+/* 札そのもの (x328〜758, y1238〜1362) だけを押したときに光らせる */
+.title-start-glow {
+  position: absolute;
+  left: 10.9%;
+  top: 5.7%;
+  width: 78.2%;
+  height: 88.6%;
+  border-radius: 22px;
+  pointer-events: none;
+}
+.title-start:active .title-start-glow { background: rgba(255, 255, 255, .3); }
+
 #app {
   position: absolute;
   inset: 0;
@@ -169,13 +228,12 @@ body {
   height: 64px;
   border-radius: 999px;
   border: none;
-  background: radial-gradient(circle at 35% 30%, #fff3c4, var(--accent) 70%);
-  font-size: 30px;
-  line-height: 64px;
-  padding: 0;
+  background: radial-gradient(circle at 40% 35%, #ffffff, #ffe9f0 60%, #ffd3e2);
+  padding: 6px;
   cursor: pointer;
   box-shadow: 0 4px 10px rgba(0,0,0,.25);
 }
+.tap-target svg { display: block; width: 100%; height: 100%; pointer-events: none; }
 .tap-target[hidden] { display: none; }
 
 .hint { margin: 0; text-align: center; font-size: 12px; color: var(--muted); }

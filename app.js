@@ -44,7 +44,9 @@
     villageCats: document.getElementById('villageCats'),
     btnBuildHouse: document.getElementById('btnBuildHouse'),
 
-    toast: document.getElementById('toast')
+    toast: document.getElementById('toast'),
+    titleScreen: document.getElementById('titleScreen'),
+    btnStart: document.getElementById('btnStart')
   };
 
   const views = {
@@ -70,6 +72,7 @@
   let hideTimer = null;
   let toastTimer = null;
   let saveTimer = null;
+  let titleShown = true;
 
   // ---------------------------------------------------------- 見た目 (2頭身のねこ)
 
@@ -99,6 +102,83 @@
         '<path d="M50 69 Q50 73 56 74" stroke="#5a4632" stroke-width="1.6" fill="none" stroke-linecap="round"/>' +
       '</svg>'
     );
+  }
+
+  /** 自分のねこ。タイトルの絵に合わせて、キジトラ白に紺の着物。 */
+  function playerSVG(headband) {
+    const fur = '#8b7d6b';
+    const stripe = '#5a4e40';
+    const kimono = '#26335a';
+    const bandMarkup = headband
+      ? '<path d="M17 45 Q50 32 83 45" stroke="' + headband + '" stroke-width="8" fill="none" stroke-linecap="round"/>' +
+        '<circle cx="83" cy="45" r="5" fill="' + headband + '"/>'
+      : '';
+    return (
+      '<svg viewBox="0 0 100 150" aria-hidden="true">' +
+        // しっぽ (しま模様)
+        '<path d="M68 134 Q94 132 90 104" stroke="' + fur + '" stroke-width="9" fill="none" stroke-linecap="round"/>' +
+        '<path d="M68 134 Q94 132 90 104" stroke="' + stripe + '" stroke-width="9" fill="none" stroke-dasharray="4 6"/>' +
+        // 着物の袖と、白い手
+        '<path d="M30 118 Q12 122 14 138 Q24 146 34 136 Z" fill="' + kimono + '"/>' +
+        '<path d="M70 118 Q88 122 86 138 Q76 146 66 136 Z" fill="' + kimono + '"/>' +
+        '<circle cx="16" cy="139" r="6" fill="#fffaf2"/>' +
+        '<circle cx="84" cy="139" r="6" fill="#fffaf2"/>' +
+        // 足と胴 (着物)
+        '<ellipse cx="41" cy="146" rx="8" ry="4" fill="#fffaf2"/>' +
+        '<ellipse cx="59" cy="146" rx="8" ry="4" fill="#fffaf2"/>' +
+        '<ellipse cx="50" cy="128" rx="23" ry="19" fill="' + kimono + '"/>' +
+        '<path d="M40 111 L50 125 L60 111" stroke="#e9e2d0" stroke-width="3" fill="none"/>' +
+        '<rect x="28" y="128" width="44" height="6" rx="2" fill="#c8a86a"/>' +
+        '<circle cx="62" cy="119" r="3.2" fill="#e9e2d0"/>' +
+        // 耳
+        '<polygon points="21,29 31,3 42,31" fill="' + fur + '"/>' +
+        '<polygon points="58,31 69,3 79,29" fill="' + fur + '"/>' +
+        '<polygon points="25,25 31,11 37,26" fill="#f2aaa2"/>' +
+        '<polygon points="63,26 69,11 75,25" fill="#f2aaa2"/>' +
+        // 頭と、白い口まわり・額のしるし・しま
+        '<circle cx="50" cy="52" r="34" fill="' + fur + '"/>' +
+        '<ellipse cx="50" cy="68" rx="22" ry="17" fill="#fffaf2"/>' +
+        '<ellipse cx="50" cy="31" rx="3" ry="6" fill="#fffaf2"/>' +
+        '<path d="M37 22 Q41 30 39 37" stroke="' + stripe + '" stroke-width="3" fill="none" stroke-linecap="round"/>' +
+        '<path d="M63 22 Q59 30 61 37" stroke="' + stripe + '" stroke-width="3" fill="none" stroke-linecap="round"/>' +
+        '<path d="M17 50 L25 52" stroke="' + stripe + '" stroke-width="3" stroke-linecap="round"/>' +
+        '<path d="M83 50 L75 52" stroke="' + stripe + '" stroke-width="3" stroke-linecap="round"/>' +
+        bandMarkup +
+        // 目 (こはく色 + ひとみ + 光)
+        '<circle cx="38" cy="54" r="7" fill="#d9a520"/>' +
+        '<circle cx="62" cy="54" r="7" fill="#d9a520"/>' +
+        '<ellipse cx="38" cy="54.5" rx="4.6" ry="6" fill="#2a1a00"/>' +
+        '<ellipse cx="62" cy="54.5" rx="4.6" ry="6" fill="#2a1a00"/>' +
+        '<circle cx="36" cy="51.5" r="2" fill="#fff"/>' +
+        '<circle cx="60" cy="51.5" r="2" fill="#fff"/>' +
+        // 鼻と、あけた口
+        '<polygon points="47.5,63 52.5,63 50,66" fill="#e08a8a"/>' +
+        '<path d="M44 69 Q50 78 56 69 Z" fill="#e46a6a"/>' +
+      '</svg>'
+    );
+  }
+
+  /** しゅぎょうの的。タイトルの絵の猫じゃらし (赤い柄・鈴・桃と白と黄の羽)。 */
+  const TEASER_SVG =
+    '<svg viewBox="0 0 52 52" aria-hidden="true">' +
+      '<path d="M10 48 L30 20" stroke="#a8342c" stroke-width="3" stroke-linecap="round"/>' +
+      '<ellipse cx="38" cy="12" rx="13" ry="6" transform="rotate(-35 38 12)" fill="#ffe27a"/>' +
+      '<ellipse cx="36" cy="14" rx="12" ry="5.5" transform="rotate(-55 36 14)" fill="#ffffff"/>' +
+      '<ellipse cx="40" cy="15" rx="11" ry="5" transform="rotate(-15 40 15)" fill="#f7a8c4"/>' +
+      '<circle cx="30" cy="21" r="4.5" fill="#e0b030" stroke="#b07d10" stroke-width="1"/>' +
+      '<path d="M28 22.5 L32 22.5" stroke="#6b4a10" stroke-width="1"/>' +
+    '</svg>';
+
+  // ---------------------------------------------------------- タイトル
+
+  function startGame() {
+    if (!titleShown) return;
+    titleShown = false;
+    // 消えるまでの間も下の画面を押せるように、まず押せなくしてから薄くする
+    els.titleScreen.style.pointerEvents = 'none';
+    const anim = els.titleScreen.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 350, easing: 'ease-out' });
+    anim.onfinish = function () { els.titleScreen.hidden = true; };
+    scheduleSpawn(500);
   }
 
   function headbandForRank(rankIndex) {
@@ -204,7 +284,7 @@
     const rank = C.RANKS[rankIndex];
     const next = C.nextRankInfo(state);
     els.lordLine.textContent = rank.story + (next ? '　つぎは「' + next.rank.name + '」' : '');
-    els.playerCat.innerHTML = catSVG({ fur: '#e8a33d', headband: headbandForRank(rankIndex) });
+    els.playerCat.innerHTML = playerSVG(headbandForRank(rankIndex));
   }
 
   function renderTrainingProgress() {
@@ -264,7 +344,7 @@
   }
 
   function spawnTarget() {
-    if (currentTab !== 'training' || document.hidden) { scheduleSpawn(300); return; }
+    if (titleShown || currentTab !== 'training' || document.hidden) { scheduleSpawn(300); return; }
     const field = els.trainingField;
     const w = field.clientWidth;
     const h = field.clientHeight;
@@ -279,7 +359,7 @@
 
     els.tapTarget.style.left = x + 'px';
     els.tapTarget.style.top = y + 'px';
-    els.tapTarget.textContent = '🪙';
+    if (!els.tapTarget.firstChild) els.tapTarget.innerHTML = TEASER_SVG;
     els.tapTarget.hidden = false;
     els.tapTarget.animate(
       [{ transform: 'scale(0)' }, { transform: 'scale(1)' }],
@@ -610,6 +690,7 @@
 
   function main() {
     els.tapTarget.addEventListener('click', onTapTarget);
+    els.btnStart.addEventListener('click', startGame);
     els.btnRecruit.addEventListener('click', doRecruit);
     els.btnBuildHouse.addEventListener('click', doBuildHouse);
 
@@ -630,6 +711,8 @@
 
     // 自動テストから中身をのぞく・操作するための入口
     window.__app = {
+      titleShown: function () { return titleShown; },
+      start: startGame,
       state: function () { return state; },
       tab: function () { return currentTab; },
       setTab: switchTab,
