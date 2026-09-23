@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>にゃん将</title>
-<meta name="description" content="猫じゃらしで出世するにゃ〜。村を出た子猫が侍に仕えて出世し、家臣を育て、自分の城と村を大きくしていく">
-<meta name="theme-color" content="#151a2e">
+<meta name="description" content="猫じゃらしで出世するにゃ〜。村を出た子猫が猫侍に仕えて出世し、仲間を増やし、自分の城と村を大きくしていく">
+<meta name="theme-color" content="#f3ead8">
 <meta name="apple-mobile-web-app-title" content="にゃん将">
 <link rel="icon" href="./apple-touch-icon.png" type="image/png">
 <link rel="apple-touch-icon" href="./apple-touch-icon.png">
@@ -21,86 +21,182 @@
 </div>
 
 <div id="app">
-  <header id="topbar">
-    <h1 class="title">にゃん将</h1>
-    <div class="rank-badge" id="rankBadge">村の子猫</div>
-    <div class="merit-badge" id="meritBadge">手柄 0</div>
-  </header>
 
-  <main id="stage">
-
-    <section class="view" id="view-training" data-view="training">
-      <div class="lord-line" id="lordLine"></div>
-      <div class="progress-wrap">
-        <div class="progress-label" id="progressLabel">つぎの出世まで</div>
-        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-      </div>
-      <div class="training-field" id="trainingField">
-        <div class="player-cat" id="playerCat"></div>
-        <button type="button" class="tap-target" id="tapTarget" hidden aria-label="つかまえる"></button>
-      </div>
-      <p class="hint">出てきた猫じゃらしをタップして手柄を稼ごう</p>
-    </section>
-
-    <section class="view" id="view-vassals" data-view="vassals" hidden>
-      <div class="section-head">
-        <h2>家臣</h2>
-        <div class="slot-count" id="vassalSlotCount">0 / 0 人</div>
-      </div>
-      <p class="locked-note" id="vassalsLocked" hidden></p>
-      <div id="vassalsContent" class="view" hidden>
-        <ul class="vassal-list" id="vassalList"></ul>
-        <button type="button" class="btn btn-primary btn-wide" id="btnRecruit">仲間を誘う</button>
-      </div>
-    </section>
-
-    <section class="view" id="view-castle" data-view="castle" hidden>
-      <div class="section-head">
-        <h2>城</h2>
-        <div class="material-count" id="materialCountCastle">資材 0</div>
-      </div>
-      <p class="locked-note" id="castleLocked" hidden></p>
-      <div id="castleContent" class="view" hidden>
-        <p class="castle-banner" id="castleBanner" hidden></p>
-        <div class="castle-grid" id="castleGrid"></div>
-        <div class="build-picker" id="buildPicker" hidden></div>
-      </div>
-    </section>
-
-    <section class="view" id="view-village" data-view="village" hidden>
-      <div class="section-head">
-        <h2>村</h2>
-        <div class="material-count" id="materialCountVillage">資材 0</div>
-      </div>
-      <p class="locked-note" id="villageLocked" hidden></p>
-      <div id="villageContent" class="view" hidden>
-        <div class="progress-wrap">
-          <div class="progress-label" id="popLabel">村人猫 0 / 0</div>
-          <div class="progress-bar"><div class="progress-fill" id="popFill"></div></div>
+  <!-- ================================================= 合戦 -->
+  <section class="view" id="view-battle" data-view="battle">
+    <header class="hud paper">
+      <div class="portrait" id="portrait"><img id="portraitImg" src="./img/face-normal.png" alt=""></div>
+      <div class="hud-main">
+        <div class="hud-row">
+          <h1 class="hud-name">にゃん将</h1>
+          <span class="rank-tag" id="rankTag">村の子猫</span>
+          <span class="merit" id="meritBadge"><i class="coin"></i><b id="meritValue">0</b></span>
         </div>
-        <div class="village-cats" id="villageCats"></div>
-        <button type="button" class="btn btn-primary btn-wide" id="btnBuildHouse">家を建てる</button>
+        <div class="hp">
+          <span class="hp-icon">♥</span>
+          <div class="hp-bar"><div class="hp-fill" id="hpFill"></div></div>
+          <span class="hp-text" id="hpText">60</span>
+        </div>
+        <div class="next-rank">
+          <span id="nextRankLabel">つぎの出世まで</span>
+          <div class="next-bar"><div class="next-fill" id="nextFill"></div></div>
+        </div>
       </div>
-    </section>
+    </header>
 
-  </main>
+    <div class="field" id="field">
+      <canvas class="field-bg" id="fieldBg"></canvas>
+      <canvas class="field-fg" id="fieldFg"></canvas>
+      <div class="field-banner" id="fieldBanner" hidden></div>
+
+      <div class="field-panel" id="readyPanel">
+        <div class="panel-title" id="readyTitle">第一戦</div>
+        <p class="panel-text" id="readyText">猫じゃらしで ひきつけて、猫パンチで たたこう!</p>
+        <button type="button" class="btn-gold btn-big" id="btnSortie">出陣!</button>
+      </div>
+
+      <div class="field-panel" id="resultPanel" hidden>
+        <div class="panel-title" id="resultTitle">勝利!</div>
+        <div class="result-rows" id="resultRows"></div>
+        <div class="offer" id="offer" hidden>
+          <img class="offer-cat" id="offerImg" src="./img/cat-chatora.png" alt="">
+          <div class="offer-body">
+            <p class="offer-text" id="offerText"></p>
+            <div class="offer-actions">
+              <button type="button" class="btn-gold" id="btnOfferYes">仲間にする</button>
+              <button type="button" class="btn-paper" id="btnOfferNo">見送る</button>
+            </div>
+          </div>
+        </div>
+        <button type="button" class="btn-gold btn-big" id="btnNext">つぎの戦へ</button>
+      </div>
+    </div>
+
+    <div class="special-row">
+      <span class="special-label">スペシャル</span>
+      <div class="special-bar"><div class="special-fill" id="specialFill"></div></div>
+      <span class="combo" id="comboText"></span>
+    </div>
+
+    <div class="skills">
+      <button type="button" class="skill skill-lure" id="btnLure" aria-label="猫じゃらし">
+        <svg viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M14 56 L38 22" stroke="#b8402f" stroke-width="4" stroke-linecap="round"/>
+          <path d="M40 20 C46 6 58 4 62 8 C56 10 50 16 44 24 Z" fill="#ffe27a"/>
+          <path d="M40 20 C48 10 60 12 62 16 C54 16 48 20 44 26 Z" fill="#ffffff"/>
+          <path d="M40 22 C50 16 60 22 60 26 C52 24 46 26 42 28 Z" fill="#f7a8c4"/>
+          <circle cx="38" cy="23" r="5.5" fill="#f0c040" stroke="#9a6a10" stroke-width="1.5"/>
+          <path d="M35.5 25 H40.5" stroke="#6b4a10" stroke-width="1.4"/>
+        </svg>
+        <span class="skill-name">猫じゃらし</span>
+        <span class="skill-cd" id="lureCd"></span>
+      </button>
+
+      <button type="button" class="skill-special" id="btnSpecial" aria-label="スペシャル技" disabled>
+        <span class="special-ring"></span>
+        <span class="special-text">必殺<br>じゃらし</span>
+      </button>
+
+      <button type="button" class="skill skill-punch" id="btnPunch" aria-label="猫パンチ">
+        <svg viewBox="0 0 64 64" aria-hidden="true">
+          <ellipse cx="32" cy="40" rx="14" ry="12" fill="#fff"/>
+          <ellipse cx="17" cy="24" rx="6" ry="7.5" fill="#fff"/>
+          <ellipse cx="27" cy="16" rx="6" ry="7.5" fill="#fff"/>
+          <ellipse cx="38" cy="16" rx="6" ry="7.5" fill="#fff"/>
+          <ellipse cx="48" cy="24" rx="6" ry="7.5" fill="#fff"/>
+          <ellipse cx="32" cy="41" rx="8" ry="6.5" fill="#f4a0a8"/>
+          <ellipse cx="17" cy="25" rx="3" ry="3.8" fill="#f4a0a8"/>
+          <ellipse cx="27" cy="17" rx="3" ry="3.8" fill="#f4a0a8"/>
+          <ellipse cx="38" cy="17" rx="3" ry="3.8" fill="#f4a0a8"/>
+          <ellipse cx="48" cy="25" rx="3" ry="3.8" fill="#f4a0a8"/>
+        </svg>
+        <span class="skill-name">猫パンチ</span>
+        <span class="skill-cd" id="punchCd"></span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ================================================= 家臣 -->
+  <section class="view view-page" id="view-vassals" data-view="vassals" hidden>
+    <div class="page-head">
+      <h2 class="tag-title">家臣</h2>
+      <div class="page-sub" id="vassalSlotCount">0 / 0 人</div>
+    </div>
+    <p class="locked-note paper" id="vassalsLocked" hidden></p>
+    <div id="vassalsContent" class="page-body" hidden>
+      <p class="page-note">役目: <b>自主練</b>=手柄が増える / <b>普請</b>=資材が増える / <b>出陣</b>=合戦でいっしょに戦う (2人まで)</p>
+      <ul class="vassal-list" id="vassalList"></ul>
+      <button type="button" class="btn-gold btn-wide" id="btnRecruit">村で仲間を募る</button>
+    </div>
+  </section>
+
+  <!-- ================================================= 城 -->
+  <section class="view view-page" id="view-castle" data-view="castle" hidden>
+    <div class="page-head">
+      <h2 class="tag-title">城</h2>
+      <div class="page-sub" id="materialCountCastle">資材 0</div>
+    </div>
+    <p class="locked-note paper" id="castleLocked" hidden></p>
+    <div id="castleContent" class="page-body" hidden>
+      <p class="castle-banner" id="castleBanner" hidden></p>
+      <div class="castle-grid paper" id="castleGrid"></div>
+      <div class="build-picker paper" id="buildPicker" hidden></div>
+    </div>
+  </section>
+
+  <!-- ================================================= 村 -->
+  <section class="view view-page" id="view-village" data-view="village" hidden>
+    <div class="page-head">
+      <h2 class="tag-title">村</h2>
+      <div class="page-sub" id="materialCountVillage">資材 0</div>
+    </div>
+    <p class="locked-note paper" id="villageLocked" hidden></p>
+    <div id="villageContent" class="page-body" hidden>
+      <div class="pop paper">
+        <div class="pop-label" id="popLabel">村人猫 0 / 0</div>
+        <div class="next-bar"><div class="next-fill" id="popFill"></div></div>
+      </div>
+      <div class="village-cats paper" id="villageCats"></div>
+      <button type="button" class="btn-gold btn-wide" id="btnBuildHouse">家を建てる</button>
+    </div>
+  </section>
 
   <nav id="tabbar">
-    <button type="button" class="tab" id="tab-training" data-tab="training">
-      <span class="tab-icon">🐾</span><span class="tab-label">しゅぎょう</span>
-    </button>
-    <button type="button" class="tab" id="tab-vassals" data-tab="vassals">
-      <span class="tab-icon">⚔️</span><span class="tab-label">家臣</span>
-    </button>
-    <button type="button" class="tab" id="tab-castle" data-tab="castle">
-      <span class="tab-icon">🏯</span><span class="tab-label">城</span>
-    </button>
-    <button type="button" class="tab" id="tab-village" data-tab="village">
-      <span class="tab-icon">🏘️</span><span class="tab-label">村</span>
-    </button>
+    <button type="button" class="tab" id="tab-battle" data-tab="battle"><span class="tab-icon">⚔️</span><span class="tab-label">合戦</span></button>
+    <button type="button" class="tab" id="tab-vassals" data-tab="vassals"><span class="tab-icon">🐾</span><span class="tab-label">家臣</span></button>
+    <button type="button" class="tab" id="tab-castle" data-tab="castle"><span class="tab-icon">🏯</span><span class="tab-label">城</span></button>
+    <button type="button" class="tab" id="tab-village" data-tab="village"><span class="tab-icon">🏘️</span><span class="tab-label">村</span></button>
   </nav>
 
   <div class="toast" id="toast" hidden></div>
+</div>
+
+<!-- ================================================= 必殺技のカットイン -->
+<div class="cutin" id="cutin" hidden>
+  <div class="cutin-band"></div>
+  <img class="cutin-art" src="./img/pose-special.png" alt="">
+  <div class="cutin-text">猫じゃらし<br>コンボ!</div>
+</div>
+
+<!-- ================================================= 物語・出世 -->
+<div class="modal" id="storyModal" hidden>
+  <div class="modal-card paper">
+    <div class="tag-title">🐾 主人公の猫</div>
+    <p class="modal-lead">小さな村から、大きな夢を。</p>
+    <img class="modal-art" src="./img/stage0.png" alt="">
+    <p class="modal-text">とある村に生まれた、元気で好奇心いっぱいの子猫。<br>ある日、村を出て「猫侍」に仕えることを決意する。<br>猫じゃらしと猫パンチを武器に、たくさんの仲間たちと出会いながら、のし上がっていく──<br><br>目指すは、立派なお城と、たくさんの仲間が暮らす、最高の村!</p>
+    <button type="button" class="btn-gold btn-big" id="btnStory">旅立つ!</button>
+  </div>
+</div>
+
+<div class="modal" id="rankModal" hidden>
+  <div class="modal-card paper">
+    <div class="rank-up-label">出世!</div>
+    <div class="rank-up-name" id="rankUpName">草履取り</div>
+    <img class="modal-art" id="rankUpArt" src="./img/stage0.png" alt="">
+    <p class="modal-text" id="rankUpText"></p>
+    <button type="button" class="btn-gold btn-big" id="btnRankOk">やったにゃ!</button>
+  </div>
 </div>
 
 <script src="./core.js"></script>

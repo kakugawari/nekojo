@@ -121,8 +121,20 @@ async function run() {
     ok(fit.wide <= 1, 'スマホ幅で横スクロールが出ない');
     ok(fit.title.length > 0, `見出しが出ている (${fit.title})`);
 
-    const catShown = await phone.evaluate(() => document.querySelectorAll('#playerCat svg').length === 1);
-    ok(catShown, '自分のねこ (2頭身) が描かれている');
+    // 設定資料から切り出した絵が全部読み込めるか
+    const sprites = await phone.evaluate(async () => {
+      const names = ['stage0', 'stage1', 'stage2', 'stage3', 'cat-normal', 'cat-chatora', 'cat-kuro', 'cat-gray', 'cat-red',
+        'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-special'];
+      const bad = [];
+      await Promise.all(names.map((n) => new Promise((done) => {
+        const im = new Image();
+        im.onload = () => { if (!(im.naturalWidth > 20)) bad.push(n); done(); };
+        im.onerror = () => { bad.push(n); done(); };
+        im.src = './img/' + n + '.png';
+      })));
+      return { total: names.length, bad };
+    });
+    ok(sprites.bad.length === 0, `設定資料の絵が ${sprites.total} 枚とも読み込める${sprites.bad.length ? ' (だめ: ' + sprites.bad.join(',') + ')' : ''}`);
 
     // ------------------------------------------------ タイトル画面
     section('タイトル画面');
@@ -174,8 +186,6 @@ async function run() {
     }
 
     ok(await phone.evaluate(() => window.__app.titleShown()), '開くとタイトル画面が出る');
-    await phone.evaluate(() => window.__app.forceSpawn());
-    ok(!(await phone.evaluate(() => window.__app.tapTargetVisible())), 'タイトル中は、しゅぎょうの的が出ない');
 
     // 絵に描いた札の上に重ねたボタンを、指で押す
     await phone.locator('#btnStart').tap();
@@ -186,91 +196,187 @@ async function run() {
     }));
     ok(!started.shown && started.hidden, '「はじめる」を押すとタイトルが消える');
 
-    // ------------------------------------------------ しゅぎょう
-    section('しゅぎょう (タップで手柄)');
-    await phone.evaluate(() => window.__app.forceSpawn());
-    await phone.waitForTimeout(50);
-    const targetVisible = await phone.evaluate(() => window.__app.tapTargetVisible());
-    ok(targetVisible, 'タップする的が出る');
-    const onTop = await phone.evaluate(() => {
-      const r = document.getElementById('tapTarget').getBoundingClientRect();
-      const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return el && el.closest('#tapTarget') ? 'tapTarget' : (el ? el.id || el.className : 'none');
+    // ------------------------------------------------ 物語
+    section('はじめての物語');
+    ok(await phone.evaluate(() => !document.getElementById('storyModal').hidden), 'はじめて遊ぶと、主人公の物語が出る');
+    await phone.locator('#btnStory').tap();
+    await phone.waitForTimeout(100);
+    ok(await phone.evaluate(() => document.getElementById('storyModal').hidden && window.__app.state().storySeen),
+      '「旅立つ!」で閉じ、次からは出ない');
+
+    // ------------------------------------------------ 合戦
+    section('合戦');
+    const fs0 = await phone.evaluate(() => window.__app.fieldSize());
+    ok(fs0.w > 300 && fs0.h > 250, `戦場の大きさが決まっている (${fs0.w}x${fs0.h})`);
+    const bgPainted = await phone.evaluate(() => {
+      const c = document.getElementById('fieldBg');
+      const d = c.getContext('2d').getImageData(Math.floor(c.width / 2), Math.floor(c.height * 0.1), 1, 1).data;
+      return d[3] > 0 && d[2] > d[0];
     });
-    ok(onTop === 'tapTarget', `消えたタイトルが的をふさいでいない (指の下: ${onTop})`);
+    ok(bgPainted, '背景 (空) が描かれている');
+    // 画素の倍率 2 で描くと、CPU4倍遅の戦闘中に 1コマ 33ms (30fps) まで落ちた。1.5 なら 16.7ms
+    const dprUsed = await phone.evaluate(() => {
+      const c = document.getElementById('fieldFg');
+      return c.width / c.getBoundingClientRect().width;
+    });
+    ok(dprUsed <= 1.51, `戦場を描く面の画素の倍率が 1.5 以下 (${dprUsed.toFixed(2)}。端末は ${await phone.evaluate(() => devicePixelRatio)})`);
+    ok(await phone.evaluate(() => !document.getElementById('readyPanel').hidden), '出陣の札が出ている');
 
-    await phone.locator('#tapTarget').tap();
-    await phone.waitForTimeout(120);
-    const afterTap = await phone.evaluate(() => window.__app.state().merit);
-    ok(afterTap > 0, `タップすると手柄が増える (${afterTap})`);
+    await phone.locator('#btnSortie').tap();
+    await phone.waitForTimeout(100);
+    ok(await phone.evaluate(() => !!window.__app.battle() && document.getElementById('readyPanel').hidden), '「出陣!」で戦が始まる');
 
-    // 手柄が増えた直後、進捗バーやねこの表示が飛ばないか
-    const jump = await measureJump(phone, '#trainingField', 'window.__app.forceSpawn()');
-    ok(jump < 12, `的が出た直後に画面が飛ばない (最大ずれ ${jump}px)`);
+    // 技のボタンが、札やカットインにふさがれていないか (指の下にボタンがあるか)
+    const under = await phone.evaluate(() => ['btnLure', 'btnPunch', 'btnSpecial'].map((id) => {
+      const r = document.getElementById(id).getBoundingClientRect();
+      const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return el && el.closest('#' + id) ? 'ok' : id + '→' + (el ? el.id || el.className : 'none');
+    }));
+    ok(under.every((u) => u === 'ok'), `技のボタンが押せる位置にある (${under.join(', ')})`);
 
-    // ------------------------------------------------ 出世で家臣タブが解放される
-    section('出世 → 家臣が解放される');
-    ok(await phone.evaluate(() => document.getElementById('tab-vassals').classList.contains('locked')),
-      'はじめは家臣タブが鍵つき');
+    await phone.waitForFunction(() => {
+      const b = window.__app.battle();
+      return b && b.enemies.some((e) => e.spawned && e.alive && e.x - b.player.x <= 84);
+    }, null, { timeout: 15000 });
+    ok(await phone.evaluate(() => window.__app.face() === 'serious'), '戦っている間は真剣な顔');
 
-    await phone.evaluate(() => window.__app.debugAddMerit(160)); // 足軽 (150) に到達
-    await phone.waitForTimeout(50);
-    const rankAfter = await phone.evaluate(() => window.__app.state().merit >= 150);
-    ok(rankAfter, '手柄をためると出世する');
+    await phone.locator('#btnLure').tap();
+    await phone.waitForTimeout(60);
+    const charmed = await phone.evaluate(() => window.__app.battle().enemies.some((e) => e.charm > 0));
+    ok(charmed, '猫じゃらしを指で押すと、敵が夢中になる');
+    const lureCd = await phone.evaluate(() => getComputedStyle(document.getElementById('lureCd')).getPropertyValue('--cd'));
+    ok(Number(lureCd) > 0.5, `使ったあとは待ち時間がボタンに出る (--cd=${lureCd.trim()})`);
+
+    const hpBefore = await phone.evaluate(() => { const b = window.__app.battle(); return b.enemies.filter((e) => e.spawned && e.alive).sort((x, y) => x.x - y.x)[0].hp; });
+    await phone.locator('#btnPunch').tap();
+    await phone.waitForTimeout(60);
+    const hpAfter = await phone.evaluate(() => { const b = window.__app.battle(); return b.enemies.filter((e) => e.spawned).sort((x, y) => x.x - y.x)[0].hp; });
+    ok(hpAfter < hpBefore, `猫パンチを指で押すと、敵が減る (${hpBefore} → ${hpAfter})`);
+
+    // スペシャル: たまると押せるようになり、カットインが出る
+    await phone.evaluate(() => { window.__app.battle().special = 100; });
+    await phone.waitForTimeout(80);
+    ok(await phone.evaluate(() => !document.getElementById('btnSpecial').disabled && document.getElementById('btnSpecial').classList.contains('ready')),
+      'スペシャルがたまると、ボタンが光って押せる');
+    await phone.locator('#btnSpecial').tap();
+    await phone.waitForTimeout(80);
+    ok(await phone.evaluate(() => !document.getElementById('cutin').hidden), '必殺技のカットインが出る');
+    await phone.waitForTimeout(1100);
+    ok(await phone.evaluate(() => document.getElementById('cutin').hidden), 'カットインは1秒ほどで消える');
+
+    // 実際に踏んだ不具合の見張り: 最後の1匹をパンチで倒すと「勝った」の知らせが
+    // stepBattle の外で出る。それを読まずにいたため、勝利の札が出ずに止まった
+    await phone.evaluate(() => {
+      const b = window.__app.battle();
+      const f = b.enemies[0];
+      b.enemies.forEach((e) => { if (e !== f) { e.alive = false; e.spawned = true; e.hp = 0; } });
+      f.spawned = true; f.alive = true; f.hp = 1; f.x = b.player.x + 58; f.charm = 3;
+      f.reward = 30; // 1勝で草履取り (20) に届くように
+      b.cd.punch = 0;
+    });
+    await phone.locator('#btnPunch').tap();
+    await phone.waitForFunction(() => !document.getElementById('resultPanel').hidden, null, { timeout: 4000 }).catch(() => {});
+    const won = await phone.evaluate(() => ({
+      panel: !document.getElementById('resultPanel').hidden,
+      title: document.getElementById('resultTitle').textContent,
+      wins: window.__app.state().battlesWon
+    }));
+    ok(won.panel && won.title === '勝利!', `最後の1匹をパンチで倒しても、勝利の札が出る (${won.title})`);
+    ok(won.wins === 1, `勝った数が増える (${won.wins})`);
+    const rankUp = await phone.evaluate(() => ({ shown: !document.getElementById('rankModal').hidden, name: document.getElementById('rankUpName').textContent }));
+    ok(rankUp.shown && rankUp.name === '草履取り', `勝って手柄がたまると出世の札が出る (${rankUp.name})`);
+    const rankArt = await phone.evaluate(() => document.getElementById('rankUpArt').src);
+    ok(/stage1\.png/.test(rankArt), `出世の札に、成長した姿 (旅立ち) が出る (${rankArt.split('/').pop().slice(0, 20)})`);
+    await phone.locator('#btnRankOk').tap();
+    await phone.locator('#btnNext').tap();
+    await phone.waitForTimeout(80);
+    const title2 = await phone.evaluate(() => document.getElementById('readyTitle').textContent);
+    ok(title2 === '第二戦', `つぎの戦へ進める (${title2})`);
+
+    // 負けたとき
+    await phone.locator('#btnSortie').tap();
+    await phone.evaluate(() => { const b = window.__app.battle(); b.player.hp = 0; });
+    await phone.waitForFunction(() => !document.getElementById('resultPanel').hidden, null, { timeout: 4000 }).catch(() => {});
+    const lost = await phone.evaluate(() => ({
+      title: document.getElementById('resultTitle').textContent,
+      next: document.getElementById('btnNext').textContent,
+      wins: window.__app.state().battlesWon
+    }));
+    ok(lost.title === 'ひと休み…' && lost.next === 'もう一度', `負けると「ひと休み」になり、やり直せる (${lost.title})`);
+    ok(lost.wins === 1, '負けても何も減らない');
+    await phone.locator('#btnNext').tap();
+    await phone.waitForTimeout(80);
+    ok(await phone.evaluate(() => !!window.__app.battle()), '「もう一度」ですぐ次の戦が始まる');
+
+    // ------------------------------------------------ 家臣
+    section('家臣');
+    await phone.evaluate(() => { window.__app.debugAddMerit(400); window.__app.closeModals(); });
     ok(await phone.evaluate(() => !document.getElementById('tab-vassals').classList.contains('locked')),
       '足軽になると家臣タブの鍵が開く');
+    await phone.locator('#tab-vassals').tap();
+    await phone.waitForTimeout(80);
+    ok(await phone.evaluate(() => window.__app.battle() && window.__app.tab() === 'vassals'), '合戦の途中で家臣の画面へ行ける');
+    const tBefore = await phone.evaluate(() => window.__app.battle().t);
+    await phone.waitForTimeout(400);
+    const tAfter = await phone.evaluate(() => window.__app.battle().t);
+    ok(tAfter === tBefore, '合戦の画面を離れている間は、戦が止まっている');
 
-    await phone.evaluate(() => window.__app.setTab('vassals'));
-    await phone.waitForTimeout(50);
-    const recruited = await phone.evaluate(() => window.__app.recruit());
-    ok(recruited, '家臣を誘える');
-    const vassalCount = await phone.evaluate(() => window.__app.state().vassals.length);
-    ok(vassalCount === 1, `家臣の一覧に反映される (${vassalCount}人)`);
+    await phone.locator('#btnRecruit').tap();
+    await phone.waitForTimeout(80);
+    const vs = await phone.evaluate(() => window.__app.state().vassals.length);
+    ok(vs === 1, `村で仲間を募れる (${vs}人)`);
+    ok(await phone.evaluate(() => { const im = document.querySelector('.vassal-card img'); return im && im.naturalWidth > 20; }),
+      '家臣の姿が設定資料の絵で出る');
+    await phone.locator('.vassal-card .job').nth(2).tap();
+    await phone.waitForTimeout(60);
+    ok(await phone.evaluate(() => window.__app.state().vassals[0].job === 'battle'), '役目を「出陣」にできる');
+    await phone.locator('.vassal-train').first().tap();
+    await phone.waitForTimeout(60);
+    ok(await phone.evaluate(() => window.__app.state().vassals[0].level === 2), '家臣を鍛えるとレベルが上がる');
 
-    const vassalId = await phone.evaluate(() => window.__app.state().vassals[0].id);
-    await phone.evaluate((id) => window.__app.trainVassal(id), vassalId);
-    const level = await phone.evaluate(() => window.__app.state().vassals[0].level);
-    ok(level === 2, `家臣を鍛えるとレベルが上がる (Lv.${level})`);
-
-    await phone.evaluate((id) => window.__app.assignJob(id, 'labor'), vassalId);
-    const job = await phone.evaluate(() => window.__app.state().vassals[0].job);
-    ok(job === 'labor', '家臣の役目を普請に変えられる');
+    await phone.locator('#tab-battle').tap();
+    await phone.evaluate(() => { const b = window.__app.battle(); if (b) b.player.hp = 0; });
+    await phone.waitForFunction(() => !document.getElementById('resultPanel').hidden, null, { timeout: 4000 }).catch(() => {});
+    await phone.locator('#btnNext').tap();
+    await phone.waitForTimeout(80);
+    ok(await phone.evaluate(() => window.__app.battle().allies.length === 1), '出陣の家臣が、次の戦でいっしょに戦う');
 
     // ------------------------------------------------ 城主 → 城と村
     section('城主になる → 城と村が解放される');
-    await phone.evaluate(() => window.__app.debugAddMerit(10000));
-    await phone.evaluate(() => window.__app.debugSetMaterials(1000));
-    await phone.waitForTimeout(50);
+    await phone.evaluate(() => { window.__app.debugAddMerit(10000); window.__app.closeModals(); window.__app.debugSetMaterials(1000); });
     ok(await phone.evaluate(() => !document.getElementById('tab-castle').classList.contains('locked')),
       '城主になると城タブの鍵が開く');
+    await phone.locator('#tab-castle').tap();
+    await phone.waitForTimeout(60);
+    await phone.locator('.castle-cell').nth(5).tap();
+    await phone.waitForTimeout(60);
+    ok(await phone.evaluate(() => !document.getElementById('buildPicker').hidden), '空き地を押すと、建てる物を選べる');
+    await phone.locator('.build-option').first().tap();
+    await phone.waitForTimeout(60);
+    ok(await phone.evaluate(() => window.__app.state().castle.cells[5] === 'keep' && !document.getElementById('castleBanner').hidden),
+      '天守を建てると、お城完成の札が出る');
 
-    await phone.evaluate(() => window.__app.setTab('castle'));
-    await phone.waitForTimeout(50);
-    const placed = await phone.evaluate(() => window.__app.buildCastle(0, 'keep'));
-    ok(placed, '天守を建てられる');
-    const complete = await phone.evaluate(() => window.__app.state().castle.cells.includes('keep'));
-    ok(complete, 'グリッドに天守が反映される');
-    const bannerShown = await phone.evaluate(() => !document.getElementById('castleBanner').hidden);
-    ok(bannerShown, 'お城完成のバナーが出る');
-
-    await phone.evaluate(() => window.__app.buildCastle(1, 'storehouse'));
-    await phone.evaluate(() => window.__app.buildCastle(2, 'barracks'));
-    const cells = await phone.evaluate(() => window.__app.state().castle.cells.slice(0, 3));
-    ok(cells[1] === 'storehouse' && cells[2] === 'barracks', '別の枠にも別の建物を建てられる (重ならない)');
-
-    await phone.evaluate(() => window.__app.setTab('village'));
-    await phone.waitForTimeout(50);
-    const houseBuilt = await phone.evaluate(() => window.__app.buildHouse());
-    ok(houseBuilt, '家を建てられる');
-
-    // 人口は放っておくと増える (実時間で少し待つ)
+    await phone.locator('#tab-village').tap();
+    await phone.waitForTimeout(60);
+    await phone.locator('#btnBuildHouse').tap();
+    ok(await phone.evaluate(() => window.__app.state().village.houses === 1), '家を建てられる');
     const popBefore = await phone.evaluate(() => window.__app.state().village.population);
-    await phone.waitForTimeout(2500);
+    await phone.waitForTimeout(2000);
     const popAfter = await phone.evaluate(() => window.__app.state().village.population);
     ok(popAfter > popBefore, `村人猫が時間で増える (${popBefore.toFixed(2)} → ${popAfter.toFixed(2)})`);
+    const catsShown = await phone.evaluate(() => [...document.querySelectorAll('#villageCats img')].filter((im) => im.naturalWidth > 0).length);
+    ok(catsShown > 0, `村人猫が絵で並ぶ (${catsShown}匹ぶん)`);
 
-    const catsShown = await phone.evaluate(() => document.querySelectorAll('#villageCats .mini-cat').length);
-    ok(catsShown > 0, `村人猫のアイコンが画面に出る (${catsShown}匹ぶん)`);
+    const wideAll = await phone.evaluate(async () => {
+      const out = [];
+      for (const t of ['battle', 'vassals', 'castle', 'village']) {
+        window.__app.setTab(t);
+        await new Promise((r) => requestAnimationFrame(r));
+        out.push(document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      }
+      return Math.max(...out);
+    });
+    ok(wideAll <= 1, 'どのタブでも横スクロールが出ない');
 
     // ------------------------------------------------ 留守の間の進み (保存 → 再読み込み)
     section('留守の間も育つ (保存と再読み込み)');
