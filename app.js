@@ -291,10 +291,14 @@
   // 柵・のぼり・村人猫) を並べて、いただいたプレイ画面に近い村の景色を組み立てる。
 
   // 背景だけの絵が届いたら、ここにファイル名を書く (例: './img/battle-bg.jpg')。空なら組み立てた景色
-  const BATTLE_BG_SRC = '';
+  const BATTLE_BG_SRC = './img/battle-bg.jpg';
+  // その絵の中で、ねこの足もとに来てほしい高さ (土の広場のまん中。元の絵 1536x1024 で y800)
+  const BATTLE_BG_GROUND_Y = 800;
   const battleBg = new Image();
   let battleBgReady = false;
+  let battleBgFailed = false;
   battleBg.onload = function () { battleBgReady = battleBg.naturalWidth > 0; drawBackground(); };
+  battleBg.onerror = function () { battleBgFailed = true; drawBackground(); }; // 読めなければ組み立てた景色
   if (BATTLE_BG_SRC) battleBg.src = BATTLE_BG_SRC;
   ['b-castle', 'b-sakura', 'b-house', 'b-farm', 'b-woodfence', 'b-nobori', 'b-villager', 'cat-chatora', 'cat-gray'].forEach(function (n) {
     imgs[n].addEventListener('load', function () { drawBackground(); });
@@ -308,10 +312,22 @@
     ctx.clearRect(0, 0, w, h);
 
     if (battleBgReady) {
-      // 画面いっぱいに敷く (はみ出した分は切る)
-      const sc = Math.max(w / battleBg.naturalWidth, h / battleBg.naturalHeight);
-      const dw = battleBg.naturalWidth * sc, dh = battleBg.naturalHeight * sc;
-      ctx.drawImage(battleBg, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      // 画面いっぱいに敷く (はみ出した分は切る)。上下は、絵の土の広場がねこの足もとに来るように
+      // ずらす。ただし画面の端に絵の無い所が出ない範囲で (縦は高さで合わせるので、ずらす余地は無い)
+      const iw = battleBg.naturalWidth, ih = battleBg.naturalHeight;
+      const sc = Math.max(w / iw, h / ih);
+      const dw = iw * sc, dh = ih * sc;
+      const dy = Math.min(0, Math.max(h - dh, fieldSize.ground - BATTLE_BG_GROUND_Y * sc));
+      ctx.drawImage(battleBg, (w - dw) / 2, dy, dw, dh);
+      fieldSize.bgGroundY = (fieldSize.ground - dy) / sc; // 足もとが絵のどの高さに来たか (見張り用)
+      return;
+    }
+    if (BATTLE_BG_SRC && !battleBgFailed) {
+      // 絵を読み込んでいる間は、空と土の色だけ (組み立てた景色を一瞬見せてから絵に替わると、ちらつく)
+      const g0 = ctx.createLinearGradient(0, 0, 0, h);
+      g0.addColorStop(0, '#5aa8ec'); g0.addColorStop(0.55, '#cfe6c0'); g0.addColorStop(0.62, '#e2c98f'); g0.addColorStop(1, '#c9a86a');
+      ctx.fillStyle = g0;
+      ctx.fillRect(0, 0, w, h);
       return;
     }
 
@@ -1585,7 +1601,7 @@
           const im = imgs[e.look];
           enterLeft = Math.min(enterLeft, enemyX(e) - im.naturalWidth * enemyScale(e) / 2);
         });
-        return { land: !!fieldSize.land, w: fieldSize.w, h: fieldSize.h, s: fieldSize.s, ground: fieldSize.ground,
+        return { bg: battleBgReady ? 'image' : 'drawn', bgGroundY: fieldSize.bgGroundY, land: !!fieldSize.land, w: fieldSize.w, h: fieldSize.h, s: fieldSize.s, ground: fieldSize.ground,
           heroX: heroX(), enemyX: fx(C.ENEMY_X), heroHalf: imgs.stage1.naturalWidth * fieldSize.s / 2, enterLeft: enterLeft };
       },
       recruit: doRecruit,

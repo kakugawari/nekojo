@@ -112,6 +112,26 @@ async function checkTitle(page, safeB) {
   ok(cream, `${tag}: 重ねたボタンが札の上に乗っている (${plaque.map((c) => 'rgb(' + c.join(',') + ')').join(' ')})`);
 }
 
+/** 戦場の背景の見張り。もらった背景の絵が敷かれ、ねこの足もとが絵の土の広場に来ているか */
+async function checkBattleBg(page, tag) {
+  await page.waitForFunction(() => window.__app.layout().bg === 'image', null, { timeout: 8000 });
+  const L = await page.evaluate(() => window.__app.layout());
+  // 土の色が多いのは元の絵の y760〜840 (測った値)。足もとをその帯に合わせている
+  ok(L.bgGroundY >= 740 && L.bgGroundY <= 880, `${tag}: 足もとが、背景の絵の土の広場の高さに来る (絵の y${Math.round(L.bgGroundY)})`);
+  const dirt = await page.evaluate((L) => {
+    const c = document.getElementById('fieldBg');
+    const k = c.width / L.w;
+    let n = 0;
+    for (let i = 0; i <= 8; i++) {
+      const x = L.heroX + (L.enemyX - L.heroX) * i / 8;
+      const d = c.getContext('2d').getImageData(Math.floor(x * k), Math.floor((L.ground - 4) * k), 1, 1).data;
+      if (d[0] > 150 && d[0] - d[2] > 30 && d[0] >= d[1]) n++;
+    }
+    return n;
+  }, L);
+  ok(dirt >= 6, `${tag}: 自分と敵のあいだの足もとは土の色 (${dirt}/9 点)`);
+}
+
 function pickPhoneDevice(devices) {
   // 実機は iPhone 16 Plus (430pt 幅) だが、入っている playwright に
   // その名前が無いことがある。同じ幅の控えで代える。
@@ -221,6 +241,7 @@ async function run() {
       return d[3] > 0 && d[2] > d[0];
     });
     ok(bgPainted, '背景 (空) が描かれている');
+    await checkBattleBg(phone, '縦');
     // 画素の倍率 2 で描くと、CPU4倍遅の戦闘中に 1コマ 33ms (30fps) まで落ちた。1.5 なら 16.7ms
     const dprUsed = await phone.evaluate(() => {
       const c = document.getElementById('fieldFg');
@@ -520,6 +541,7 @@ async function run() {
       ok(L.enterLeft >= L.w, `敵は画面の右の外から歩いてくる (出だしの左端 ${Math.round(L.enterLeft)} ≥ 幅 ${L.w})`);
       ok(await lp.evaluate(() => { const c = document.getElementById('fieldBg'); const d = c.getContext('2d').getImageData(c.width - 4, Math.floor(c.height * 0.3), 1, 1).data; return d[3] > 0; }),
         '背景が戦場の右端まで描かれている');
+      await checkBattleBg(lp, '横');
 
       // 猫じゃらしとパンチを指で押す
       await lp.locator('#btnLure').tap();
