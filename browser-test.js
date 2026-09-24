@@ -342,30 +342,66 @@ async function run() {
     ok(await phone.evaluate(() => window.__app.battle().allies.length === 1), '出陣の家臣が、次の戦でいっしょに戦う');
 
     // ------------------------------------------------ 城主 → 城と村
-    section('城主になる → 城と村が解放される');
-    await phone.evaluate(() => { window.__app.debugAddMerit(10000); window.__app.closeModals(); window.__app.debugSetMaterials(1000); });
+    section('城と村 (マスに建てる地図)');
+    await phone.evaluate(() => { window.__app.debugAddMerit(10000); window.__app.closeModals(); window.__app.debugSetMaterials(3000); });
     ok(await phone.evaluate(() => !document.getElementById('tab-castle').classList.contains('locked')),
       '城主になると城タブの鍵が開く');
     await phone.locator('#tab-castle').tap();
+    await phone.waitForTimeout(100);
+    const tapCell = async (zone, idx) => {
+      const p = await phone.evaluate(([z, i]) => window.__app.cellPoint(z, i), [zone, idx]);
+      await phone.touchscreen.tap(p.x, p.y);
+      await phone.waitForTimeout(60);
+      return phone.evaluate((z) => window.__app.selected(z), zone);
+    };
+    // 押した場所の読み取りが合っているか: 真ん中だけでなく、四隅のマスでも確かめる
+    const picks = [];
+    for (const idx of [0, 5, 30, 35, 14]) {
+      const got = await tapCell('castle', idx);
+      picks.push(idx + '→' + got);
+      await tapCell('castle', idx); // もう一度押して閉じる
+    }
+    ok(picks.every((p) => { const [a, b] = p.split('→'); return a === b; }), `マスを指で押すと、そのマスが選ばれる (${picks.join(' ')})`);
+
+    await tapCell('castle', 14);
+    ok(await phone.evaluate(() => !document.getElementById('castleSheet').hidden), '空きマスを押すと、建てる物の札が出る');
+    const cards = await phone.evaluate(() => [...document.querySelectorAll('#castleSheet .build-card')].map((c) => c.dataset.type));
+    ok(cards.includes('keep') && !cards.includes('house'), `城の札には城の建物だけが並ぶ (${cards.length}種)`);
+    const cardImgs = await phone.evaluate(() => [...document.querySelectorAll('#castleSheet .build-card img')].every((im) => im.naturalWidth > 20));
+    ok(cardImgs, '札に施設の絵が出る');
+    await phone.locator('#castleSheet .build-card[data-type="keep"]').tap();
+    await phone.waitForTimeout(80);
+    ok(await phone.evaluate(() => window.__app.state().castle.cells[14] === 'keep' && !document.getElementById('castleBanner').hidden),
+      'お城を建てると、お城完成の札が出る');
+    ok(await phone.evaluate(() => [...document.querySelectorAll('#castleEffects span')].some((s) => s.textContent.includes('手柄'))),
+      '建てた物の効果が、地図の下に出る');
+
+    await tapCell('castle', 14);
+    ok(await phone.evaluate(() => !!document.querySelector('#castleSheet .demolish')), '建っているマスを押すと、取り壊しの札が出る');
+    const mat0 = await phone.evaluate(() => window.__app.state().materials);
+    await phone.locator('#castleSheet .demolish').tap();
     await phone.waitForTimeout(60);
-    await phone.locator('.castle-cell').nth(5).tap();
-    await phone.waitForTimeout(60);
-    ok(await phone.evaluate(() => !document.getElementById('buildPicker').hidden), '空き地を押すと、建てる物を選べる');
-    await phone.locator('.build-option').first().tap();
-    await phone.waitForTimeout(60);
-    ok(await phone.evaluate(() => window.__app.state().castle.cells[5] === 'keep' && !document.getElementById('castleBanner').hidden),
-      '天守を建てると、お城完成の札が出る');
+    const afterDemolish = await phone.evaluate(() => ({ cell: window.__app.state().castle.cells[14], mat: window.__app.state().materials }));
+    ok(afterDemolish.cell === null && afterDemolish.mat > mat0, '取り壊すとマスが空き、資材が少し戻る');
 
     await phone.locator('#tab-village').tap();
+    await phone.waitForTimeout(100);
+    await tapCell('village', 0);
+    await phone.locator('#villageSheet .build-card[data-type="house"]').tap();
     await phone.waitForTimeout(60);
-    await phone.locator('#btnBuildHouse').tap();
-    ok(await phone.evaluate(() => window.__app.state().village.houses === 1), '家を建てられる');
+    ok(await phone.evaluate(() => window.__app.state().village.cells[0] === 'house'), '村の角のマスに民家を建てられる');
     const popBefore = await phone.evaluate(() => window.__app.state().village.population);
     await phone.waitForTimeout(2000);
     const popAfter = await phone.evaluate(() => window.__app.state().village.population);
     ok(popAfter > popBefore, `村人猫が時間で増える (${popBefore.toFixed(2)} → ${popAfter.toFixed(2)})`);
-    const catsShown = await phone.evaluate(() => [...document.querySelectorAll('#villageCats img')].filter((im) => im.naturalWidth > 0).length);
-    ok(catsShown > 0, `村人猫が絵で並ぶ (${catsShown}匹ぶん)`);
+    const walkers = await phone.evaluate(() => window.__app.walkers('village'));
+    ok(walkers === Math.min(16, Math.floor(popAfter)), `村人猫が地図の上を歩いている (${walkers}匹)`);
+    const mapPx = await phone.evaluate(() => {
+      const c = document.querySelector('#villageMap .map-bg');
+      const d = c.getContext('2d').getImageData(Math.floor(c.width / 2), Math.floor(c.height * 0.6), 1, 1).data;
+      return d[1] > d[0] && d[3] > 0;
+    });
+    ok(mapPx, '村の地面 (草のマス) が描かれている');
 
     const wideAll = await phone.evaluate(async () => {
       const out = [];

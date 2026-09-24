@@ -11,7 +11,6 @@
   const C = window.Core;
   const SAVE_KEY = 'nekojo-save-v1';
   const OFFLINE_CAP_SECONDS = 8 * 60 * 60;
-  const MAX_VILLAGE_ICONS = 60;
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -29,9 +28,9 @@
     vassalSlotCount: $('vassalSlotCount'), vassalsLocked: $('vassalsLocked'), vassalsContent: $('vassalsContent'),
     vassalList: $('vassalList'), btnRecruit: $('btnRecruit'),
     materialCountCastle: $('materialCountCastle'), castleLocked: $('castleLocked'), castleContent: $('castleContent'),
-    castleBanner: $('castleBanner'), castleGrid: $('castleGrid'), buildPicker: $('buildPicker'),
+    castleBanner: $('castleBanner'),
     materialCountVillage: $('materialCountVillage'), villageLocked: $('villageLocked'), villageContent: $('villageContent'),
-    popLabel: $('popLabel'), popFill: $('popFill'), villageCats: $('villageCats'), btnBuildHouse: $('btnBuildHouse'),
+    popLabel: $('popLabel'), popFill: $('popFill'),
     toast: $('toast'), cutin: $('cutin'),
     storyModal: $('storyModal'), btnStory: $('btnStory'),
     rankModal: $('rankModal'), rankUpName: $('rankUpName'), rankUpArt: $('rankUpArt'), rankUpText: $('rankUpText'), btnRankOk: $('btnRankOk')
@@ -43,7 +42,8 @@
   // ---------------------------------------------------------- 絵
 
   const IMG_NAMES = ['stage0', 'stage1', 'stage2', 'stage3', 'cat-normal', 'cat-chatora', 'cat-kuro', 'cat-gray', 'cat-red',
-    'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-special'];
+    'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-special', 'b-villager']
+    .concat(Object.keys(C.BUILDINGS).map(function (t) { return C.BUILDINGS[t].img; }));
   const imgs = {};
   IMG_NAMES.forEach(function (n) {
     const im = new Image();
@@ -69,8 +69,6 @@
   let battle = null;        // 戦っている最中の中身 (core の createBattle)
   let lastBattle = null;    // 終わった戦 (結果の札を出している間)
   let pendingOffer = null;
-  let openCellIndex = null;
-  let lastPopFloor = -1;
   let toastTimer = null;
   let saveTimer = null;
 
@@ -171,8 +169,7 @@
   function renderActiveView() {
     if (currentTab === 'battle') renderHud(true);
     else if (currentTab === 'vassals') renderVassalsView();
-    else if (currentTab === 'castle') renderCastleView();
-    else if (currentTab === 'village') renderVillageView();
+    else if (currentTab === 'castle' || currentTab === 'village') renderTownView(currentTab);
   }
 
   // ---------------------------------------------------------- 上の顔と体力
@@ -882,7 +879,7 @@
   function showRankUp(prev, idx) {
     const rank = C.RANKS[idx];
     els.rankUpName.textContent = rank.name;
-    els.rankUpArt.src = imgs[stageForRank(idx)].src;
+    els.rankUpArt.src = (prev < C.CASTLE_UNLOCK_RANK && idx >= C.CASTLE_UNLOCK_RANK) ? imgs['b-castle'].src : imgs[stageForRank(idx)].src;
     let text = rank.story;
     if (prev < C.VASSAL_UNLOCK_RANK && idx >= C.VASSAL_UNLOCK_RANK) text += '<br><b>家臣を持てるようになった!</b>';
     if (prev < C.CASTLE_UNLOCK_RANK && idx >= C.CASTLE_UNLOCK_RANK) text += '<br><b>城と村を持てるようになった!</b>';
@@ -972,119 +969,372 @@
     return r.ok;
   }
 
-  // ---------------------------------------------------------- 城
+  // ---------------------------------------------------------- 城と村の地図
+  //
+  // 斜め上から見た 6x6 のマス。地面は大きさが変わったときだけ描き (map-bg)、
+  // 建物と歩くねこは奥から順に毎コマ描く (map-fg)。
 
-  function renderCastleView() {
-    const unlocked = isUnlocked('castle');
-    els.castleLocked.hidden = unlocked;
-    els.castleContent.hidden = !unlocked;
-    if (!unlocked) { els.castleLocked.textContent = lockedMessage('castle'); return; }
-    els.materialCountCastle.textContent = '資材 ' + Math.floor(state.materials);
-    els.castleBanner.hidden = !C.isCastleComplete(state);
-    els.castleBanner.textContent = '🎉 天守が建った! お城の完成にゃ!';
-    els.castleGrid.innerHTML = '';
-    state.castle.cells.forEach(function (type, i) {
-      const cell = document.createElement('button');
-      cell.type = 'button';
-      cell.className = 'castle-cell' + (type ? ' filled' : '');
-      cell.textContent = type ? C.BUILDING_DEFS[type].icon : '＋';
-      cell.setAttribute('aria-label', type ? C.BUILDING_DEFS[type].name : '空き地');
-      cell.addEventListener('click', function () { onCastleCellClick(i); });
-      els.castleGrid.appendChild(cell);
+  const selected = { castle: null, village: null };
+  const townMaps = { castle: makeTownMap('castle'), village: makeTownMap('village') };
+
+  function makeTownMap(zone) {
+    const root = $(zone + 'Map');
+    const m = {
+      zone: zone, root: root,
+      bg: root.querySelector('.map-bg'), fg: root.querySelector('.map-fg'),
+      w: 0, h: 0, dpr: 1, tw: 0, th: 0, ox: 0, oy: 0, walkers: []
+    };
+    m.bgCtx = m.bg.getContext('2d');
+    m.fgCtx = m.fg.getContext('2d');
+    m.fg.addEventListener('pointerdown', function (e) {
+      const r = m.fg.getBoundingClientRect();
+      const idx = cellAt(m, e.clientX - r.left, e.clientY - r.top);
+      if (idx >= 0) selectCell(zone, idx);
     });
-    if (openCellIndex !== null) renderBuildPicker(openCellIndex);
-    else els.buildPicker.hidden = true;
+    return m;
   }
 
-  function onCastleCellClick(index) {
-    const type = state.castle.cells[index];
-    if (type) { showToast(C.BUILDING_DEFS[type].name + 'が建っている。', 1600); return; }
-    openCellIndex = (openCellIndex === index) ? null : index;
-    renderCastleView();
+  function sizeMap(m) {
+    const w = m.root.clientWidth;
+    if (!(w >= 1)) return; // 隠れている間は 0。前の大きさのまま
+    const N = C.MAP_SIZE;
+    const tw = (w - 12) / N;
+    const th = tw / 2;
+    const top = tw * 1.35; // 建物が上へはみ出す分
+    const h = Math.round(top + N * th + th * 0.9);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    if (w === m.w && h === m.h && dpr === m.dpr) return;
+    m.w = w; m.h = h; m.dpr = dpr; m.tw = tw; m.th = th; m.ox = w / 2; m.oy = top;
+    m.root.style.height = h + 'px';
+    [m.bg, m.fg].forEach(function (c) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); });
+    drawGround(m);
   }
 
-  function renderBuildPicker(index) {
-    els.buildPicker.hidden = false;
-    els.buildPicker.innerHTML = '';
+  /** マスの上の頂点 (画面の位置) */
+  function cellTop(m, gx, gy) {
+    return { x: m.ox + (gx - gy) * m.tw / 2, y: m.oy + (gx + gy) * m.th / 2 };
+  }
+
+  /** 画面の位置 → マスの番号 (外なら -1) */
+  function cellAt(m, x, y) {
+    const dx = (x - m.ox) / (m.tw / 2);
+    const dy = (y - m.oy) / (m.th / 2);
+    const gx = Math.floor((dy + dx) / 2);
+    const gy = Math.floor((dy - dx) / 2);
+    if (gx < 0 || gy < 0 || gx >= C.MAP_SIZE || gy >= C.MAP_SIZE) return -1;
+    return gy * C.MAP_SIZE + gx;
+  }
+
+  function diamond(ctx, m, gx, gy) {
+    const t = cellTop(m, gx, gy);
+    ctx.beginPath();
+    ctx.moveTo(t.x, t.y);
+    ctx.lineTo(t.x + m.tw / 2, t.y + m.th / 2);
+    ctx.lineTo(t.x, t.y + m.th);
+    ctx.lineTo(t.x - m.tw / 2, t.y + m.th / 2);
+    ctx.closePath();
+  }
+
+  function drawGround(m) {
+    const ctx = m.bgCtx, N = C.MAP_SIZE;
+    ctx.setTransform(m.dpr, 0, 0, m.dpr, 0, 0);
+    ctx.clearRect(0, 0, m.w, m.h);
+    const castle = m.zone === 'castle';
+    const L = { x: m.ox - N * m.tw / 2, y: m.oy + N * m.th / 2 };
+    const B = { x: m.ox, y: m.oy + N * m.th };
+    const Rr = { x: m.ox + N * m.tw / 2, y: m.oy + N * m.th / 2 };
+    const depth = m.th * 0.7;
+    // 台の側面 (手前の2面)
+    ctx.fillStyle = castle ? '#8f8778' : '#a9794a';
+    ctx.beginPath(); ctx.moveTo(L.x, L.y); ctx.lineTo(B.x, B.y); ctx.lineTo(B.x, B.y + depth); ctx.lineTo(L.x, L.y + depth); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = castle ? '#7a7366' : '#93673d';
+    ctx.beginPath(); ctx.moveTo(B.x, B.y); ctx.lineTo(Rr.x, Rr.y); ctx.lineTo(Rr.x, Rr.y + depth); ctx.lineTo(B.x, B.y + depth); ctx.closePath(); ctx.fill();
+    if (castle) {
+      // 石垣の目地
+      ctx.strokeStyle = 'rgba(40,35,30,.25)';
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 2 * N; i++) {
+        const k = i / (2 * N);
+        const ax = L.x + (Rr.x - L.x) * k;
+        const ay = ax <= B.x ? L.y + (B.y - L.y) * ((ax - L.x) / (B.x - L.x)) : B.y + (Rr.y - B.y) * ((ax - B.x) / (Rr.x - B.x));
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax, ay + depth); ctx.stroke();
+      }
+    }
+    // マス
+    for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) {
+      diamond(ctx, m, gx, gy);
+      ctx.fillStyle = castle ? ((gx + gy) % 2 ? '#e4d8bd' : '#d9ccae') : ((gx + gy) % 2 ? '#a4d273' : '#96c865');
+      ctx.fill();
+      ctx.strokeStyle = castle ? 'rgba(120,100,70,.25)' : 'rgba(60,110,40,.22)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    // 村は草のつぶつぶ、城は砂利
+    const R = C.mulberry32(castle ? 11 : 22);
+    for (let i = 0; i < 220; i++) {
+      const gx = R() * N, gy = R() * N;
+      const x = m.ox + (gx - gy) * m.tw / 2, y = m.oy + (gx + gy) * m.th / 2;
+      ctx.fillStyle = castle ? 'rgba(110,95,70,.25)' : (i % 3 ? 'rgba(70,130,50,.35)' : 'rgba(255,255,220,.35)');
+      ctx.fillRect(x, y, 2, castle ? 1.5 : 2);
+    }
+  }
+
+  function buildingSize(m, type, im) {
+    const def = C.BUILDINGS[type];
+    // 施設の絵は、ふつうの建物が幅 190px ほど。それを 1 マスの 1.3 倍に合わせ、小物は小さいまま
+    const w = def.big ? m.tw * 2.2 : im.naturalWidth * (m.tw * 1.3 / 190);
+    return { w: w, h: w * im.naturalHeight / im.naturalWidth };
+  }
+
+  function wantedWalkers(zone) {
+    if (zone === 'village') {
+      const n = Math.min(16, Math.floor(state.village.population));
+      const out = [];
+      for (let i = 0; i < n; i++) out.push(i % 3 === 2 ? (i % 2 ? 'cat-chatora' : 'cat-gray') : 'b-villager');
+      return out;
+    }
+    return state.vassals.slice(0, 8).map(function (v) { return v.look; });
+  }
+
+  function emptyCells(zone) {
+    const out = [];
+    state[zone].cells.forEach(function (c, i) { if (!c) out.push(i); });
+    return out;
+  }
+
+  function pickTarget(zone) {
+    const empty = emptyCells(zone);
+    const N = C.MAP_SIZE;
+    const i = empty.length ? empty[Math.floor(Math.random() * empty.length)] : Math.floor(Math.random() * N * N);
+    return { gx: (i % N) + 0.3 + Math.random() * 0.4, gy: Math.floor(i / N) + 0.3 + Math.random() * 0.4 };
+  }
+
+  function updateWalkers(m, dt) {
+    const want = wantedWalkers(m.zone);
+    while (m.walkers.length > want.length) m.walkers.pop();
+    while (m.walkers.length < want.length) {
+      const p = pickTarget(m.zone);
+      m.walkers.push({ gx: p.gx, gy: p.gy, tx: p.gx, ty: p.gy, wait: Math.random() * 2, phase: Math.random() * 6 });
+    }
+    m.walkers.forEach(function (wk, i) {
+      wk.look = want[i];
+      if (wk.wait > 0) { wk.wait -= dt; wk.moving = false; return; }
+      const dx = wk.tx - wk.gx, dy = wk.ty - wk.gy;
+      const d = Math.hypot(dx, dy);
+      if (d < 0.05) {
+        wk.wait = 1 + Math.random() * 2.5;
+        const p = pickTarget(m.zone);
+        wk.tx = p.gx; wk.ty = p.gy;
+        wk.moving = false;
+        return;
+      }
+      const step = Math.min(d, 0.7 * dt);
+      wk.gx += dx / d * step;
+      wk.gy += dy / d * step;
+      wk.moving = true;
+      wk.flip = (dx - dy) < 0; // 画面で左へ向かうとき
+    });
+  }
+
+  function drawTownMap(m, now) {
+    if (!m.w) return;
+    const ctx = m.fgCtx;
+    ctx.setTransform(m.dpr, 0, 0, m.dpr, 0, 0);
+    ctx.clearRect(0, 0, m.w, m.h);
+    const t = now / 1000;
+    const N = C.MAP_SIZE;
+
+    const sel = selected[m.zone];
+    if (sel !== null) {
+      diamond(ctx, m, sel % N, Math.floor(sel / N));
+      ctx.fillStyle = 'rgba(255,226,122,' + (0.35 + 0.2 * Math.sin(t * 5)) + ')';
+      ctx.fill();
+      ctx.strokeStyle = '#b98b34';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
+
+    const items = [];
+    state[m.zone].cells.forEach(function (type, i) {
+      if (type) items.push({ depth: (i % N) + Math.floor(i / N) + 1, type: type, i: i });
+    });
+    m.walkers.forEach(function (wk) { items.push({ depth: wk.gx + wk.gy, walker: wk }); });
+    items.sort(function (a, b) { return a.depth - b.depth; });
+
+    items.forEach(function (it) {
+      if (it.walker) {
+        const wk = it.walker;
+        const im = imgs[wk.look];
+        if (!ready(im)) return;
+        const x = m.ox + (wk.gx - wk.gy) * m.tw / 2;
+        const y = m.oy + (wk.gx + wk.gy) * m.th / 2;
+        const h = m.tw * 0.42;
+        const w = h * im.naturalWidth / im.naturalHeight;
+        const bob = wk.moving ? Math.abs(Math.sin(t * 9 + wk.phase)) * 3 : 0;
+        ctx.fillStyle = 'rgba(60,40,20,.22)';
+        ctx.beginPath(); ctx.ellipse(x, y, w * 0.32, w * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.save();
+        ctx.translate(x, y - bob);
+        if (wk.flip) ctx.scale(-1, 1);
+        ctx.drawImage(im, -w / 2, -h, w, h);
+        ctx.restore();
+        return;
+      }
+      const def = C.BUILDINGS[it.type];
+      const im = imgs[def.img];
+      if (!ready(im)) return;
+      const top = cellTop(m, it.i % N, Math.floor(it.i / N));
+      const sz = buildingSize(m, it.type, im);
+      const bottom = top.y + m.th * (def.big ? 1.25 : 1.1);
+      ctx.drawImage(im, top.x - sz.w / 2, bottom - sz.h, sz.w, sz.h);
+    });
+  }
+
+  function effectChips(zone) {
+    const fx = C.townEffects(state);
+    const pct = function (mul) { return Math.round((mul - 1) * 100); };
+    const chips = [];
+    if (zone === 'castle') {
+      if (fx.slots) chips.push('家臣の枠 +' + fx.slots);
+      if (fx.trainMul > 1) chips.push('自主練 +' + pct(fx.trainMul) + '%');
+      if (fx.laborMul > 1) chips.push('普請 +' + pct(fx.laborMul) + '%');
+      if (fx.atkMul > 1) chips.push('猫パンチ +' + pct(fx.atkMul) + '%');
+      if (fx.hpMul > 1) chips.push('体力 +' + pct(fx.hpMul) + '%');
+      if (fx.meritMul > 1) chips.push('手柄 +' + pct(fx.meritMul) + '%');
+    } else {
+      chips.push('村人猫の上限 ' + C.villageCapacity(state) + '匹');
+      if (fx.matMul > 1) chips.push('資材 +' + pct(fx.matMul) + '%');
+      if (fx.popMatMul > 1) chips.push('村人の資材 +' + pct(fx.popMatMul) + '%');
+      if (fx.growthMul > 1) chips.push('増え方 +' + pct(fx.growthMul) + '%');
+    }
+    return chips;
+  }
+
+  function renderTownView(zone) {
+    const unlocked = isUnlocked(zone);
+    const lockedEl = zone === 'castle' ? els.castleLocked : els.villageLocked;
+    const contentEl = zone === 'castle' ? els.castleContent : els.villageContent;
+    lockedEl.hidden = unlocked;
+    contentEl.hidden = !unlocked;
+    if (!unlocked) { lockedEl.querySelector('p').textContent = lockedMessage(zone); return; }
+    sizeMap(townMaps[zone]);
+    updateTownNumbers(zone);
+    if (zone === 'castle') {
+      els.castleBanner.hidden = !C.isCastleComplete(state);
+      els.castleBanner.textContent = '🎉 お城の完成にゃ!';
+    }
+    $(zone + 'Effects').innerHTML = effectChips(zone).map(function (c) { return '<span>' + c + '</span>'; }).join('');
+    renderSheet(zone);
+  }
+
+  function updateTownNumbers(zone) {
+    const matText = '資材 ' + Math.floor(state.materials);
+    if (zone === 'castle') els.materialCountCastle.textContent = matText;
+    else {
+      els.materialCountVillage.textContent = matText;
+      const cap = C.villageCapacity(state);
+      els.popLabel.textContent = '村人猫 ' + Math.floor(state.village.population) + ' / ' + cap + ' 匹';
+      els.popFill.style.width = Math.min(100, state.village.population / cap * 100) + '%';
+    }
+  }
+
+  function selectCell(zone, idx) {
+    selected[zone] = (selected[zone] === idx) ? null : idx;
+    renderSheet(zone);
+  }
+
+  function renderSheet(zone) {
+    const sheet = $(zone + 'Sheet');
+    const idx = selected[zone];
+    if (idx === null) { sheet.hidden = true; sheet.innerHTML = ''; return; }
+    sheet.hidden = false;
+    sheet.innerHTML = '';
+    const type = state[zone].cells[idx];
     const head = document.createElement('div');
-    head.className = 'picker-head';
-    head.innerHTML = '<span>ここに建てる</span>';
+    head.className = 'sheet-head';
+    head.innerHTML = '<span></span>';
+    head.firstChild.textContent = type ? '建っている物' : 'ここに建てる';
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'btn-paper';
     close.textContent = 'とじる';
-    close.addEventListener('click', function () { openCellIndex = null; renderCastleView(); });
+    close.addEventListener('click', function () { selected[zone] = null; renderSheet(zone); });
     head.appendChild(close);
-    els.buildPicker.appendChild(head);
-    Object.keys(C.BUILDING_DEFS).forEach(function (type) {
-      const def = C.BUILDING_DEFS[type];
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'build-option';
-      b.disabled = !C.canPlaceBuilding(state, index, type);
-      const note = def.max ? ' (' + C.countCastleBuildings(state, type) + '/' + def.max + ')' : '';
-      b.innerHTML = '<span class="icon">' + def.icon + '</span><span class="name">' + def.name + note + '</span><span class="cost">資材 ' + def.cost + '</span>';
-      b.addEventListener('click', function () { doPlaceBuilding(index, type); });
-      els.buildPicker.appendChild(b);
+    sheet.appendChild(head);
+
+    if (type) {
+      const def = C.BUILDINGS[type];
+      const info = document.createElement('div');
+      info.className = 'built-info';
+      info.innerHTML = '<img alt=""><div><div class="name"></div><div class="effect"></div></div>';
+      info.querySelector('img').src = imgs[def.img].src;
+      info.querySelector('.name').textContent = def.name;
+      info.querySelector('.effect').textContent = def.deco ? C.DECO_EFFECT : def.effect;
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'btn-paper demolish';
+      del.textContent = '取り壊す (資材 +' + Math.floor(def.cost / 2) + ')';
+      del.addEventListener('click', function () { doDemolish(zone, idx); });
+      info.querySelector('div').appendChild(del);
+      sheet.appendChild(info);
+      return;
+    }
+
+    const grid = document.createElement('div');
+    grid.className = 'build-grid';
+    Object.keys(C.BUILDINGS).forEach(function (t) {
+      const def = C.BUILDINGS[t];
+      if (def.zone !== zone) return;
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'build-card';
+      card.dataset.type = t;
+      card.innerHTML = '<img alt=""><span class="name"></span><span class="effect"></span><span class="cost"></span>';
+      card.querySelector('img').src = imgs[def.img].src;
+      card.querySelector('.name').textContent = def.name;
+      card.querySelector('.effect').textContent = def.deco ? 'かざり・にぎわい' : def.effect;
+      card.addEventListener('click', function () { doPlaceBuilding(zone, idx, t); });
+      grid.appendChild(card);
+    });
+    sheet.appendChild(grid);
+    refreshSheet(zone);
+  }
+
+  /** 資材が増えたときは、札を作り直さずに押せるかどうかと値段だけ直す (押している最中に札が入れ替わらないように) */
+  function refreshSheet(zone) {
+    const idx = selected[zone];
+    if (idx === null) return;
+    $(zone + 'Sheet').querySelectorAll('.build-card').forEach(function (card) {
+      const t = card.dataset.type;
+      const def = C.BUILDINGS[t];
+      const n = C.countBuildings(state, t);
+      card.disabled = !C.canPlaceBuilding(state, zone, idx, t);
+      card.querySelector('.cost').textContent = '資材 ' + C.buildingCost(state, t) + (def.max ? ' (' + n + '/' + def.max + ')' : '');
     });
   }
 
-  function doPlaceBuilding(index, type) {
+  function doPlaceBuilding(zone, idx, type) {
     const was = C.isCastleComplete(state);
-    const r = C.placeBuilding(state, index, type);
+    const r = C.placeBuilding(state, zone, idx, type);
     if (r.ok) {
       state = r.state;
-      openCellIndex = null;
-      renderCastleView();
+      selected[zone] = null;
+      renderTownView(zone);
       saveSoon();
-      if (!was && C.isCastleComplete(state)) showToast('🎉 天守が建った! お城の完成にゃ!', 3200);
+      if (!was && C.isCastleComplete(state)) showToast('🎉 お城の完成にゃ!', 3200);
+      else showToast(C.BUILDINGS[type].name + 'を建てた!', 1400);
     }
     return r.ok;
   }
 
-  // ---------------------------------------------------------- 村
-
-  function renderVillageView() {
-    const unlocked = isUnlocked('village');
-    els.villageLocked.hidden = unlocked;
-    els.villageContent.hidden = !unlocked;
-    if (!unlocked) { els.villageLocked.textContent = lockedMessage('village'); return; }
-    updateVillageNumbers();
-    lastPopFloor = Math.floor(state.village.population);
-    updateVillageCats();
-  }
-
-  function updateVillageNumbers() {
-    const cap = C.villageCapacity(state);
-    els.materialCountVillage.textContent = '資材 ' + Math.floor(state.materials);
-    els.popLabel.textContent = '村人猫 ' + Math.floor(state.village.population) + ' / ' + cap + ' 匹';
-    els.popFill.style.width = Math.min(100, state.village.population / cap * 100) + '%';
-    els.btnBuildHouse.textContent = '家を建てる (資材 ' + C.houseCost(state) + ')';
-    els.btnBuildHouse.disabled = !C.canBuildHouse(state);
-  }
-
-  function updateVillageCats() {
-    els.villageCats.innerHTML = '';
-    const looks = ['cat-chatora', 'cat-gray', 'cat-kuro', 'cat-normal'];
-    const count = Math.floor(state.village.population);
-    const shown = Math.min(count, MAX_VILLAGE_ICONS);
-    for (let i = 0; i < shown; i++) {
-      const im = document.createElement('img');
-      im.src = imgs[looks[i % looks.length]].src;
-      im.alt = '';
-      els.villageCats.appendChild(im);
+  function doDemolish(zone, idx) {
+    const r = C.demolish(state, zone, idx);
+    if (r.ok) {
+      state = r.state;
+      selected[zone] = null;
+      renderTownView(zone);
+      saveSoon();
     }
-    if (count > shown) {
-      const more = document.createElement('span');
-      more.className = 'village-more';
-      more.textContent = '+' + (count - shown) + ' 匹';
-      els.villageCats.appendChild(more);
-    }
-  }
-
-  function doBuildHouse() {
-    const r = C.buildHouse(state);
-    if (r.ok) { state = r.state; renderVillageView(); saveSoon(); }
     return r.ok;
   }
 
@@ -1155,19 +1405,20 @@
       renderHud(false);
     }
 
+    if ((currentTab === 'castle' || currentTab === 'village') && isUnlocked(currentTab)) {
+      const m = townMaps[currentTab];
+      updateWalkers(m, Math.min(dt, 0.1));
+      drawTownMap(m, now);
+    }
+
     uiAcc += dt;
     if (uiAcc >= 0.25) {
       uiAcc = 0;
-      if (currentTab === 'village' && isUnlocked('village')) {
-        updateVillageNumbers();
-        const f = Math.floor(state.village.population);
-        if (f !== lastPopFloor) { lastPopFloor = f; updateVillageCats(); }
+      if ((currentTab === 'castle' || currentTab === 'village') && isUnlocked(currentTab)) {
+        updateTownNumbers(currentTab);
+        refreshSheet(currentTab);
       }
       if (currentTab === 'vassals') updateRecruitButton();
-      if (currentTab === 'castle' && isUnlocked('castle')) {
-        els.materialCountCastle.textContent = '資材 ' + Math.floor(state.materials);
-        if (openCellIndex !== null) renderBuildPicker(openCellIndex);
-      }
     }
 
     requestAnimationFrame(frame);
@@ -1190,7 +1441,6 @@
     onDown(els.btnPunch, doPunch);
     onDown(els.btnSpecial, doSpecial);
     els.btnRecruit.addEventListener('click', doRecruit);
-    els.btnBuildHouse.addEventListener('click', doBuildHouse);
     Object.keys(tabEls).forEach(function (tab) {
       tabEls[tab].addEventListener('click', function () { switchTab(tab); });
     });
@@ -1199,7 +1449,10 @@
     window.addEventListener('pagehide', saveNow);
     setInterval(saveNow, 5000);
     if (window.ResizeObserver) new ResizeObserver(sizeField).observe(els.field);
-    window.addEventListener('resize', sizeField);
+    window.addEventListener('resize', function () {
+      sizeField();
+      if (currentTab === 'castle' || currentTab === 'village') sizeMap(townMaps[currentTab]);
+    });
 
     switchTab('battle');
     showReady();
@@ -1226,8 +1479,18 @@
       recruit: doRecruit,
       trainVassal: doTrainVassal,
       assignJob: doAssignJob,
-      buildCastle: doPlaceBuilding,
-      buildHouse: doBuildHouse,
+      build: doPlaceBuilding,
+      demolish: doDemolish,
+      select: selectCell,
+      selected: function (zone) { return selected[zone]; },
+      walkers: function (zone) { return townMaps[zone].walkers.length; },
+      /** マスの真ん中の、画面での位置 (指で押すテスト用) */
+      cellPoint: function (zone, idx) {
+        const m = townMaps[zone];
+        const r = m.fg.getBoundingClientRect();
+        const t = cellTop(m, idx % C.MAP_SIZE, Math.floor(idx / C.MAP_SIZE));
+        return { x: r.left + t.x, y: r.top + t.y + m.th / 2 };
+      },
       debugAddMerit: function (n) {
         const res = C.addMerit(state, n);
         state = res.state;

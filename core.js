@@ -109,13 +109,8 @@
     return 8;
   }
 
-  function countCastleBuildings(state, type) {
-    return state.castle.cells.filter(function (c) { return c === type; }).length;
-  }
-
   function vassalSlots(state) {
-    const rankIndex = rankIndexOf(state);
-    return vassalSlotBase(rankIndex) + countCastleBuildings(state, 'barracks') * 2;
+    return vassalSlotBase(rankIndexOf(state)) + townEffects(state).slots;
   }
 
   function hasVassalSlot(state) {
@@ -250,6 +245,7 @@
     const r = rankIndexOf(state);
     const count = Math.min(7, 3 + Math.floor(r / 2));
     const pool = enemyPool(r);
+    const fx = townEffects(state);
     const baseHp = 50 + 28 * r;
     const baseAtk = 5 + 1.8 * r;
     const enemies = [];
@@ -262,15 +258,15 @@
         x: SPAWN_X, hp: hp, maxHp: hp, atk: Math.round(baseAtk * k.atk),
         speed: k.speed, interval: k.interval, cd: k.interval,
         windup: false, charm: 0, spawnAt: 0.8 + i * 2.1, spawned: false, alive: true,
-        reward: enemyReward(r, kind)
+        reward: Math.round(enemyReward(r, kind) * fx.meritMul)
       });
     }
     const allies = state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, MAX_BATTLE_VASSALS)
       .map(function (v) { return { id: v.id, name: v.name, look: v.look, level: v.level, cd: allyInterval(v.level) }; });
-    const maxHp = playerMaxHp(r);
+    const maxHp = Math.round(playerMaxHp(r) * fx.hpMul);
     return {
       rank: r, t: 0, phase: 'fight', rng: random,
-      player: { x: PLAYER_X, hp: maxHp, maxHp: maxHp, atk: playerAtk(r) },
+      player: { x: PLAYER_X, hp: maxHp, maxHp: maxHp, atk: Math.round(playerAtk(r) * fx.atkMul) },
       enemies: enemies, allies: allies,
       cd: { lure: 0, punch: 0 },
       special: 0, combo: 0, comboTimer: 0,
@@ -476,70 +472,132 @@
     return { state: state, prevRankIndex: idx, rankIndex: idx, rankedUp: false };
   }
 
-  // ---------------------------------------------------------- 村
+  // ---------------------------------------------------------- 城と村 (マスに建てる)
+  //
+  // 城と村は、それぞれ 6x6 のマス。1 マスに 1 つ建てる。建物ごとに建てられる場所 (zone) が決まっている。
+  // 効果は townEffects にまとめ、家臣の枠・時の流れ・合戦の強さから読む。
+
+  const MAP_SIZE = 6;
+  const MAP_CELLS = MAP_SIZE * MAP_SIZE;
+  const ZONES = ['castle', 'village'];
+
+  const BUILDINGS = {
+    // 城
+    keep: { zone: 'castle', name: 'お城', img: 'b-castle', cost: 300, max: 1, big: true, effect: 'お城の完成! 合戦の手柄 +20%' },
+    mansion: { zone: 'castle', name: '猫侍の屋敷', img: 'b-mansion', cost: 60, max: 4, effect: '家臣の枠 +2' },
+    dojo: { zone: 'castle', name: '訓練場', img: 'b-dojo', cost: 80, max: 2, effect: '自主練の手柄 +50%' },
+    armory: { zone: 'castle', name: '武器屋', img: 'b-armory', cost: 120, max: 2, effect: '猫パンチ +15%' },
+    tower: { zone: 'castle', name: '見張り台', img: 'b-tower', cost: 50, max: 2, effect: '合戦の体力 +10%' },
+    stable: { zone: 'castle', name: '厩舎', img: 'b-stable', cost: 70, max: 2, effect: '普請の資材 +25%' },
+    stonewall: { zone: 'castle', name: '城の石垣', img: 'b-stonewall', cost: 10, max: null, deco: true },
+    fence: { zone: 'castle', name: '柵', img: 'b-fence', cost: 8, max: null, deco: true },
+    flags: { zone: 'castle', name: '旗', img: 'b-flags', cost: 5, max: null, deco: true },
+    torch: { zone: 'castle', name: 'たいまつ', img: 'b-torch', cost: 5, max: null, deco: true },
+    // 村
+    house: { zone: 'village', name: '民家', img: 'b-house', cost: 30, costStep: 20, max: null, effect: '村人猫の上限 +8' },
+    farm: { zone: 'village', name: '農場', img: 'b-farm', cost: 40, max: 4, effect: '村人の集める資材 +50%' },
+    rice: { zone: 'village', name: '田んぼ', img: 'b-rice', cost: 30, max: 4, effect: '村人猫が早く増える +30%' },
+    workshop: { zone: 'village', name: '工房', img: 'b-workshop', cost: 80, max: 4, effect: '資材 +50%' },
+    shop: { zone: 'village', name: '商店', img: 'b-shop', cost: 90, max: 2, effect: '合戦の手柄 +10%' },
+    onsen: { zone: 'village', name: '温泉', img: 'b-onsen', cost: 150, max: 1, effect: '合戦の体力 +20%' },
+    well: { zone: 'village', name: '井戸', img: 'b-well', cost: 20, max: 2, effect: '村人猫の上限 +3' },
+    sakura: { zone: 'village', name: '桜の木', img: 'b-sakura', cost: 25, max: null, deco: true },
+    garden: { zone: 'village', name: '庭', img: 'b-garden', cost: 25, max: null, deco: true },
+    bridge: { zone: 'village', name: '橋', img: 'b-bridge', cost: 20, max: null, deco: true },
+    lantern: { zone: 'village', name: '石灯籠', img: 'b-lantern', cost: 8, max: null, deco: true },
+    signboard: { zone: 'village', name: '看板', img: 'b-signboard', cost: 5, max: null, deco: true },
+    barrels: { zone: 'village', name: '樽・箱', img: 'b-barrels', cost: 5, max: null, deco: true },
+    cart: { zone: 'village', name: '荷車', img: 'b-cart', cost: 8, max: null, deco: true },
+    straw: { zone: 'village', name: '藁の束', img: 'b-straw', cost: 3, max: null, deco: true },
+    woodfence: { zone: 'village', name: '木の柵', img: 'b-woodfence', cost: 3, max: null, deco: true },
+    nobori: { zone: 'village', name: 'のぼり', img: 'b-nobori', cost: 3, max: null, deco: true }
+  };
+  const DECO_EFFECT = 'にぎわい (村人猫が少し早く増える)';
+
+  function isTownUnlocked(state) {
+    return rankIndexOf(state) >= CASTLE_UNLOCK_RANK;
+  }
+
+  function countBuildings(state, type) {
+    const def = BUILDINGS[type];
+    if (!def) return 0;
+    return state[def.zone].cells.filter(function (c) { return c === type; }).length;
+  }
+
+  function countDeco(state) {
+    let n = 0;
+    ZONES.forEach(function (z) {
+      state[z].cells.forEach(function (c) { if (c && BUILDINGS[c].deco) n++; });
+    });
+    return n;
+  }
+
+  function buildingCost(state, type) {
+    const def = BUILDINGS[type];
+    return def.cost + (def.costStep || 0) * countBuildings(state, type);
+  }
+
+  /** 建てた物ぜんぶの効果をまとめる。掛け算のものは 1 が「効果なし」 */
+  function townEffects(state) {
+    const n = function (t) { return countBuildings(state, t); };
+    return {
+      slots: 2 * n('mansion'),
+      trainMul: 1 + 0.5 * n('dojo'),
+      laborMul: 1 + 0.25 * n('stable'),
+      popMatMul: 1 + 0.5 * n('farm'),
+      matMul: 1 + 0.5 * n('workshop'),
+      growthMul: 1 + 0.3 * n('rice') + Math.min(0.5, 0.05 * countDeco(state)),
+      atkMul: 1 + 0.15 * n('armory'),
+      hpMul: 1 + 0.1 * n('tower') + 0.2 * n('onsen'),
+      meritMul: 1 + 0.2 * n('keep') + 0.1 * n('shop')
+    };
+  }
+
+  function canPlaceBuilding(state, zone, cellIndex, type) {
+    const def = BUILDINGS[type];
+    if (!def || def.zone !== zone || ZONES.indexOf(zone) < 0) return false;
+    if (!isTownUnlocked(state)) return false;
+    if (!(cellIndex >= 0 && cellIndex < MAP_CELLS)) return false;
+    if (state[zone].cells[cellIndex] !== null) return false;
+    if (def.max !== null && countBuildings(state, type) >= def.max) return false;
+    return state.materials >= buildingCost(state, type);
+  }
+
+  function placeBuilding(state, zone, cellIndex, type) {
+    if (!canPlaceBuilding(state, zone, cellIndex, type)) return { ok: false, state: state };
+    const cost = buildingCost(state, type);
+    const cells = state[zone].cells.slice();
+    cells[cellIndex] = type;
+    const next = Object.assign({}, state, { materials: state.materials - cost });
+    next[zone] = Object.assign({}, state[zone], { cells: cells });
+    return { ok: true, state: next, cost: cost };
+  }
+
+  /** 取り壊す。建てたときの元の値段の半分が戻る */
+  function demolish(state, zone, cellIndex) {
+    if (ZONES.indexOf(zone) < 0) return { ok: false, state: state };
+    const type = state[zone].cells[cellIndex];
+    if (!type) return { ok: false, state: state };
+    const refund = Math.floor(BUILDINGS[type].cost / 2);
+    const cells = state[zone].cells.slice();
+    cells[cellIndex] = null;
+    const next = Object.assign({}, state, { materials: state.materials + refund });
+    next[zone] = Object.assign({}, state[zone], { cells: cells });
+    let village = next.village;
+    // 家を減らしたら、上限を超えた村人猫はよそへ移る
+    if (zone === 'village') {
+      const cap = villageCapacity(next);
+      if (village.population > cap) next.village = Object.assign({}, village, { population: cap });
+    }
+    return { ok: true, state: next, refund: refund };
+  }
 
   function villageCapacity(state) {
-    return 10 + state.village.houses * 8;
-  }
-
-  function houseCost(state) {
-    return 30 + state.village.houses * 20;
-  }
-
-  function canBuildHouse(state) {
-    return rankIndexOf(state) >= CASTLE_UNLOCK_RANK && state.materials >= houseCost(state);
-  }
-
-  function buildHouse(state) {
-    if (!canBuildHouse(state)) return { ok: false, state: state };
-    const cost = houseCost(state);
-    return {
-      ok: true,
-      state: Object.assign({}, state, {
-        materials: state.materials - cost,
-        village: Object.assign({}, state.village, { houses: state.village.houses + 1 })
-      })
-    };
-  }
-
-  // ---------------------------------------------------------- 城
-
-  const CASTLE_SIZE = 16;
-  const BUILDING_DEFS = {
-    keep: { name: '天守', cost: 300, max: 1, icon: '🏯' },
-    storehouse: { name: '蔵', cost: 80, max: 4, icon: '📦' },
-    barracks: { name: '長屋', cost: 60, max: 4, icon: '🛖' },
-    well: { name: '井戸', cost: 20, max: 2, icon: '⛲' },
-    wall: { name: '塀', cost: 10, max: null, icon: '🧱' }
-  };
-
-  function canPlaceBuilding(state, cellIndex, type) {
-    const def = BUILDING_DEFS[type];
-    if (!def) return false;
-    if (rankIndexOf(state) < CASTLE_UNLOCK_RANK) return false;
-    if (cellIndex < 0 || cellIndex >= state.castle.cells.length) return false;
-    if (state.castle.cells[cellIndex] !== null) return false;
-    if (def.max !== null && countCastleBuildings(state, type) >= def.max) return false;
-    if (state.materials < def.cost) return false;
-    return true;
-  }
-
-  function placeBuilding(state, cellIndex, type) {
-    if (!canPlaceBuilding(state, cellIndex, type)) return { ok: false, state: state };
-    const def = BUILDING_DEFS[type];
-    const cells = state.castle.cells.slice();
-    cells[cellIndex] = type;
-    return {
-      ok: true,
-      state: Object.assign({}, state, {
-        materials: state.materials - def.cost,
-        castle: Object.assign({}, state.castle, { cells: cells })
-      })
-    };
+    return 10 + 8 * countBuildings(state, 'house') + 3 * countBuildings(state, 'well');
   }
 
   function isCastleComplete(state) {
-    return countCastleBuildings(state, 'keep') >= 1;
+    return countBuildings(state, 'keep') >= 1;
   }
 
   // ---------------------------------------------------------- 時の流れ (放置成長)
@@ -547,30 +605,29 @@
   function tick(state, dt) {
     if (!(dt > 0)) return state; // dt が 0 以下なら何もしない (負の dt が来ても暴れない)
 
-    const rankIndex = rankIndexOf(state);
-    const storehouseBonus = 1 + countCastleBuildings(state, 'storehouse') * 0.5;
+    const fx = townEffects(state);
 
     let materialGain = 0;
     let meritGain = 0;
     for (let i = 0; i < state.vassals.length; i++) {
       const v = state.vassals[i];
-      if (v.job === 'labor') materialGain += v.level * 0.5;
-      else if (v.job === 'training') meritGain += v.level * 0.4;
+      if (v.job === 'labor') materialGain += v.level * 0.5 * fx.laborMul;
+      else if (v.job === 'training') meritGain += v.level * 0.4 * fx.trainMul;
     }
 
     let village = state.village;
-    if (rankIndex >= CASTLE_UNLOCK_RANK) {
+    if (isTownUnlocked(state)) {
       const capacity = villageCapacity(state);
-      const growthRate = Math.max(0.15, (capacity - state.village.population) * 0.12);
+      const growthRate = Math.max(0.15, (capacity - state.village.population) * 0.12) * fx.growthMul;
       const population = Math.min(capacity, state.village.population + growthRate * dt);
-      materialGain += population * 0.02;
+      materialGain += population * 0.02 * fx.popMatMul;
       village = Object.assign({}, state.village, { population: population });
     }
 
     return Object.assign({}, state, {
       merit: state.merit + meritGain * dt,
       totalMerit: state.totalMerit + meritGain * dt,
-      materials: state.materials + materialGain * storehouseBonus * dt,
+      materials: state.materials + materialGain * fx.matMul * dt,
       village: village
     });
   }
@@ -587,8 +644,8 @@
       vassals: [],
       battlesWon: 0,
       storySeen: false,
-      village: { houses: 0, population: 0 },
-      castle: { cells: new Array(CASTLE_SIZE).fill(null) }
+      village: { population: 0, cells: new Array(MAP_CELLS).fill(null) },
+      castle: { cells: new Array(MAP_CELLS).fill(null) }
     };
   }
 
@@ -616,18 +673,31 @@
         look: VASSAL_LOOKS.indexOf(v.look) >= 0 ? v.look : VASSAL_LOOKS[v.id % VASSAL_LOOKS.length]
       };
     }) : base.vassals;
+    out.castle = { cells: new Array(MAP_CELLS).fill(null) };
     out.village = {
-      houses: (raw.village && Number.isInteger(raw.village.houses)) ? Math.max(0, raw.village.houses) : base.village.houses,
-      population: (raw.village && Number.isFinite(raw.village.population)) ? Math.max(0, raw.village.population) : base.village.population
+      population: (raw.village && Number.isFinite(raw.village.population)) ? Math.max(0, raw.village.population) : 0,
+      cells: new Array(MAP_CELLS).fill(null)
     };
-    const cells = new Array(CASTLE_SIZE).fill(null);
-    if (raw.castle && Array.isArray(raw.castle.cells)) {
-      for (let i = 0; i < CASTLE_SIZE; i++) {
-        const c = raw.castle.cells[i];
-        if (typeof c === 'string' && BUILDING_DEFS[c]) cells[i] = c;
-      }
+    const put = function (zone, type) {
+      const i = out[zone].cells.indexOf(null);
+      if (i >= 0) out[zone].cells[i] = type;
+    };
+    const oldCastle = raw.castle && Array.isArray(raw.castle.cells) ? raw.castle.cells : [];
+    if (oldCastle.length === MAP_CELLS) {
+      oldCastle.forEach(function (c, i) { if (BUILDINGS[c] && BUILDINGS[c].zone === 'castle') out.castle.cells[i] = c; });
+    } else {
+      // 前の版 (城 4x4・家は数だけ) からの引っ越し。似た役目の建物に置き換える
+      const OLD = { keep: ['castle', 'keep'], barracks: ['castle', 'mansion'], wall: ['castle', 'stonewall'],
+        storehouse: ['village', 'workshop'], well: ['village', 'well'] };
+      oldCastle.forEach(function (c) { if (OLD[c]) put(OLD[c][0], OLD[c][1]); });
     }
-    out.castle = { cells: cells };
+    const oldVillage = raw.village && Array.isArray(raw.village.cells) ? raw.village.cells : null;
+    if (oldVillage && oldVillage.length === MAP_CELLS) {
+      oldVillage.forEach(function (c, i) { if (BUILDINGS[c] && BUILDINGS[c].zone === 'village') out.village.cells[i] = c; });
+    } else if (raw.village && Number.isInteger(raw.village.houses)) {
+      for (let i = 0; i < Math.min(raw.village.houses, MAP_CELLS); i++) put('village', 'house');
+    }
+    out.village.population = Math.min(out.village.population, villageCapacity(out));
     return out;
   }
 
@@ -670,16 +740,20 @@
     trainVassal: trainVassal,
     assignVassalJob: assignVassalJob,
 
-    villageCapacity: villageCapacity,
-    houseCost: houseCost,
-    canBuildHouse: canBuildHouse,
-    buildHouse: buildHouse,
-
-    CASTLE_SIZE: CASTLE_SIZE,
-    BUILDING_DEFS: BUILDING_DEFS,
-    countCastleBuildings: countCastleBuildings,
+    MAP_SIZE: MAP_SIZE,
+    MAP_CELLS: MAP_CELLS,
+    ZONES: ZONES,
+    BUILDINGS: BUILDINGS,
+    DECO_EFFECT: DECO_EFFECT,
+    isTownUnlocked: isTownUnlocked,
+    countBuildings: countBuildings,
+    countDeco: countDeco,
+    buildingCost: buildingCost,
+    townEffects: townEffects,
     canPlaceBuilding: canPlaceBuilding,
     placeBuilding: placeBuilding,
+    demolish: demolish,
+    villageCapacity: villageCapacity,
     isCastleComplete: isCastleComplete,
 
     tick: tick,

@@ -136,11 +136,16 @@
       <h2 class="tag-title">城</h2>
       <div class="page-sub" id="materialCountCastle">資材 0</div>
     </div>
-    <p class="locked-note paper" id="castleLocked" hidden></p>
+    <div class="locked-art paper" id="castleLocked" hidden>
+      <img src="./img/b-castle.png" alt="">
+      <p></p>
+    </div>
     <div id="castleContent" class="page-body" hidden>
       <p class="castle-banner" id="castleBanner" hidden></p>
-      <div class="castle-grid paper" id="castleGrid"></div>
-      <div class="build-picker paper" id="buildPicker" hidden></div>
+      <div class="town-map" id="castleMap"><canvas class="map-bg"></canvas><canvas class="map-fg"></canvas></div>
+      <p class="map-hint">マスを押すと、建てる物を選べるにゃ</p>
+      <div class="town-effects" id="castleEffects"></div>
+      <div class="build-sheet paper" id="castleSheet" hidden></div>
     </div>
   </section>
 
@@ -150,14 +155,19 @@
       <h2 class="tag-title">村</h2>
       <div class="page-sub" id="materialCountVillage">資材 0</div>
     </div>
-    <p class="locked-note paper" id="villageLocked" hidden></p>
+    <div class="locked-art paper" id="villageLocked" hidden>
+      <img src="./img/b-village.png" alt="">
+      <p></p>
+    </div>
     <div id="villageContent" class="page-body" hidden>
       <div class="pop paper">
         <div class="pop-label" id="popLabel">村人猫 0 / 0</div>
         <div class="next-bar"><div class="next-fill" id="popFill"></div></div>
       </div>
-      <div class="village-cats paper" id="villageCats"></div>
-      <button type="button" class="btn-gold btn-wide" id="btnBuildHouse">家を建てる</button>
+      <div class="town-map" id="villageMap"><canvas class="map-bg"></canvas><canvas class="map-fg"></canvas></div>
+      <p class="map-hint">マスを押すと、建てる物を選べるにゃ</p>
+      <div class="town-effects" id="villageEffects"></div>
+      <div class="build-sheet paper" id="villageSheet" hidden></div>
     </div>
   </section>
 

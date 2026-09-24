@@ -475,59 +475,64 @@ img { -webkit-user-drag: none; }
 
 .castle-banner { margin: 0; text-align: center; font-weight: 900; color: var(--red); font-size: 16px; }
 .castle-banner[hidden] { display: none; }
-.castle-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 10px; }
-.castle-cell {
-  aspect-ratio: 1 / 1;
-  border-radius: 12px;
-  border: 2px dashed #d6c192;
-  background: #efe1c1;
-  font-size: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: #c2a978;
-  padding: 0;
-}
-.castle-cell.filled {
-  border: 2px solid var(--gold-edge);
-  background: radial-gradient(circle at 50% 35%, #fffaf0, #f1dfb6);
-  box-shadow: 0 3px 0 var(--paper-edge);
-}
-.build-picker { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
-.build-picker[hidden] { display: none; }
-.picker-head { display: flex; align-items: center; justify-content: space-between; font-weight: 800; }
-.build-option {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+
+/* 城と村の地図。高さは幅から JS が決める (斜めのマスの比が決まっているので) */
+.town-map {
+  position: relative;
   width: 100%;
-  text-align: left;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 3px solid var(--gold-edge);
+  box-shadow: 0 0 0 2px var(--gold-2) inset, 0 6px 16px rgba(58,42,28,.18);
+  background: linear-gradient(#cfe9f8, #eaf5fb 45%, #e9f2d8);
+  touch-action: manipulation;
+}
+#castleMap { background: linear-gradient(#bfdcf2, #e3eef6 45%, #efe6d2); }
+.town-map canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.map-hint { margin: -4px 0 0; text-align: center; font-size: 12px; color: var(--ink-2); }
+.town-effects { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.town-effects span {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--gold-2);
+  border: 1.5px solid var(--paper-edge);
+}
+
+.build-sheet { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.build-sheet[hidden] { display: none; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; font-weight: 800; }
+.build-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.build-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px 8px;
+  border-radius: 12px;
   background: var(--paper-2);
   border: 2px solid var(--paper-edge);
-  border-radius: 12px;
-  padding: 8px 10px;
   cursor: pointer;
+  text-align: center;
 }
-.build-option .icon { font-size: 24px; }
-.build-option .name { font-weight: 800; font-size: 14px; }
-.build-option .cost { margin-left: auto; font-size: 12px; color: var(--ink-2); }
-.build-option:disabled { opacity: .45; }
+.build-card img { width: 100%; height: 58px; object-fit: contain; }
+.build-card .name { font-weight: 800; font-size: 13px; }
+.build-card .effect { font-size: 10px; color: var(--ink-2); line-height: 1.35; min-height: 2.7em; }
+.build-card .cost { font-size: 11px; font-weight: 800; color: var(--gold-edge); }
+.build-card:disabled { opacity: .42; cursor: default; }
+.built-info { display: flex; gap: 12px; align-items: center; }
+.built-info img { width: 110px; height: 90px; object-fit: contain; flex: none; }
+.built-info .name { font-weight: 900; font-size: 17px; }
+.built-info .effect { font-size: 13px; color: var(--ink-2); margin: 4px 0 8px; }
+
+.locked-art { margin-top: 20px; padding: 18px; text-align: center; }
+.locked-art[hidden] { display: none; }
+.locked-art img { width: 78%; height: auto; filter: saturate(.75); opacity: .85; }
+.locked-art p { margin: 10px 0 0; color: var(--ink-2); font-size: 14px; line-height: 1.8; }
 
 .pop { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 .pop-label { font-weight: 800; font-size: 14px; }
-.village-cats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  align-content: flex-start;
-  padding: 10px;
-  min-height: 90px;
-  max-height: min(360px, 44vh);
-  overflow-y: auto;
-}
-.village-cats img { width: 34px; height: 44px; object-fit: contain; }
-.village-more { font-size: 13px; color: var(--ink-2); align-self: center; margin-left: 6px; }
 
 /* --------------------------------------------------------- タブ */
 
