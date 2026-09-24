@@ -1847,6 +1847,13 @@
     btn.addEventListener('pointerdown', function (e) { e.preventDefault(); fn(); });
   }
 
+  // 長押しで iOS の虫眼鏡 (ルーペ) が出ないように、指が触れた瞬間 (touchstart) を止める。
+  // pointerdown の preventDefault では止まらない。止めると click も来なくなるので、
+  // pointer だけで受けている物 (猫じゃらし・猫パンチ・戦場) にだけ付ける
+  function blockLoupe(el) {
+    el.addEventListener('touchstart', function (e) { if (e.cancelable) e.preventDefault(); }, { passive: false });
+  }
+
   // ---------------------------------------------------------- 始まり
 
   function startGame() {
@@ -1941,6 +1948,7 @@
       els.btnPunch.addEventListener(type, function () { if (battle && battle.charge.on) doPunchRelease(); else els.btnPunch.classList.remove('charging'); });
     });
     els.btnPunch.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    [els.btnLure, els.btnPunch, els.fieldFg].forEach(blockLoupe);
     els.btnItem.addEventListener('click', toggleItemMenu);
     els.btnFish.addEventListener('click', function () { doItem('fish'); });
     els.btnMatatabi.addEventListener('click', function () { doItem('matatabi'); });

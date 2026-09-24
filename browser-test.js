@@ -337,6 +337,31 @@ async function run() {
     ok(big.cutin, '特大猫パンチでカットインが出る');
     await phone.waitForTimeout(1100);
 
+    // 長押しで iOS の虫眼鏡 (ルーペ) が出ないように: 指が触れた瞬間 (touchstart) を止めている。
+    // chromium では虫眼鏡は出ないので、止めたかどうか (defaultPrevented) と、字を選べないことを見る
+    await phone.evaluate(() => {
+      window.__ts = [];
+      window.addEventListener('touchstart', (e) => { window.__ts.push(e.target.id || e.target.closest('[id]').id, e.defaultPrevented); });
+    });
+    const fieldPt = await phone.evaluate(() => {
+      const r = document.getElementById('fieldFg').getBoundingClientRect();
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      return { x, y, id: document.elementFromPoint(x, y).id };
+    });
+    ok(fieldPt.id === 'fieldFg', `戦場の真ん中を押すと、戦場のキャンバスに当たる (${fieldPt.id})`);
+    for (const pt of [await touchAt('#btnPunch'), await touchAt('#btnLure'), { x: fieldPt.x, y: fieldPt.y }]) {
+      await touch('touchStart', pt);
+      await phone.waitForTimeout(30);
+      await touch('touchEnd');
+      await phone.waitForTimeout(30);
+    }
+    const ts = await phone.evaluate(() => window.__ts);
+    ok(ts.length === 6 && ts[1] && ts[3] && ts[5], `猫パンチ・猫じゃらし・戦場は、触れた瞬間を止めて虫眼鏡を出さない (${JSON.stringify(ts)})`);
+    const sel = await phone.evaluate(() => ['#btnPunch .round-plate', '#btnLure .round-plate', '#fieldFg', '#chargeLabel', '.hud-top']
+      .map((q) => { const el = document.querySelector(q); return el ? getComputedStyle(el).userSelect || getComputedStyle(el).webkitUserSelect : 'なし'; }));
+    ok(sel.every((v) => v === 'none'), `ボタンの字・戦場・ゲージの字は選べない (${sel.join(', ')})`);
+    await phone.waitForTimeout(700);
+
     // アイテム: 魚で体力が戻る
     await phone.evaluate(() => { window.__app.battle().player.hp = 10; });
     await phone.locator('#btnItem').tap();
