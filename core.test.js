@@ -237,6 +237,11 @@ const skilled = {
   press(b) {
     const e = Core.currentEnemy(b); if (!e || b.charge.on) return false;
     if (b.player.hp < b.player.maxHp * 0.35 && b.items.fish > 0) return Core.useItem(b, 'fish');
+    if (e.state === 'rushWarn') {
+      // 突進の予告を見てから (反応の遅れ 0.15〜0.35 秒) 猫じゃらしで樽へ誘導
+      if (e.react === undefined) e.react = 0.15 + b.rng() * 0.2;
+      return (Core.RUSH_WARN - e.timer) >= e.react && !e.lured ? Core.lure(b) : false;
+    }
     if (e.state === 'recover' && e.open) return Core.punch(b);
     if (e.state === 'charmed') return Core.punchPress(b);
     if (e.state === 'idle' && !Core.isAlert(e)) return Core.lure(b);
@@ -247,6 +252,7 @@ const skilled = {
     const e = Core.currentEnemy(b);
     if (!e) return true;
     if (e.state === 'charmed') return Core.chargeLevel(b.charge.t) >= 2 || e.charm < 0.1;
+    if (e.state === 'rushWarn') return true; // 溜めていたら離して、猫じゃらしに持ちかえる
     if (e.state === 'windup') {
       if (e.react === undefined) e.react = 0.15 + b.rng() * 0.2;
       return (Core.WINDUP - e.timer) >= e.react && Core.chargeLevel(b.charge.t) >= 1;
@@ -753,6 +759,84 @@ test('挑み直すと強くなる: 溜めない子でも、負けて修行すれ
   assert.ok(without.filter((n) => n === 99).length >= 10, `修行しないと、10 回挑んでも勝てない子が多い (${without.filter((n) => n === 99).length}/20)`);
 });
 
+// ---------------------------------------------------------- 誘導 (大きなボス猫の突進を、猫じゃらしで樽へ)
+
+/** 大きなボス猫と 1 対 1 で、突進の予告まで進める */
+function untilRushWarn(r) {
+  const { b, e } = duelWith('boss', r);
+  e.hp = e.maxHp = 100000;
+  for (let i = 0; i < 60 * 10 && e.state !== 'rushWarn'; i++) Core.stepBattle(b, 1 / 60);
+  return { b, e };
+}
+
+test('誘導: 侍になるまで、大きなボス猫は突進してこない (樽の山も無い)', () => {
+  const { b, e } = duelWith('boss', Core.YUDO_RANK - 1);
+  e.hp = e.maxHp = 100000;
+  const states = new Set();
+  for (let i = 0; i < 60 * 12; i++) { Core.stepBattle(b, 1 / 60); states.add(e.state); b.player.hp = b.player.maxHp; }
+  assert.ok(!states.has('rushWarn') && !states.has('rush'), [...states].join(','));
+  assert.strictEqual(b.obstacle, null);
+});
+
+test('誘導: 侍からは、ふつうの攻撃と突進をかわりばんこにしてくる。突進の前には長い予告 (赤い「!!」)', () => {
+  const { b, e } = duelWith('boss', Core.YUDO_RANK);
+  e.hp = e.maxHp = 100000;
+  const seq = [];
+  for (let i = 0; i < 60 * 14; i++) {
+    const before = e.state;
+    Core.stepBattle(b, 1 / 60);
+    b.player.hp = b.player.maxHp;
+    if (e.state !== before && (e.state === 'rushWarn' || e.state === 'windup')) seq.push(e.state);
+  }
+  assert.deepStrictEqual(seq.slice(0, 4), ['rushWarn', 'windup', 'rushWarn', 'windup']);
+  assert.ok(b.obstacle && b.obstacle.ok, '樽の山がある');
+});
+
+test('誘導: 予告の間に猫じゃらしを振ると、樽の山へ突っ込んで目を回す (傷を受け、動けない。こちらは無傷)', () => {
+  const { b, e } = untilRushWarn(Core.YUDO_RANK);
+  assert.strictEqual(Core.enemyMood(e), 'rush');
+  const hp0 = b.player.hp, ehp0 = e.hp;
+  Core.lure(b);
+  assert.ok(b.events.some((ev) => ev.type === 'lure' && ev.result === 'yudo'), '誘導できた');
+  step(b, Core.RUSH_WARN + Core.RUSH_TIME + 0.05);
+  assert.ok(b.events.some((ev) => ev.type === 'crash'), 'ドカーン');
+  assert.strictEqual(b.player.hp, hp0, 'こちらは無傷');
+  assert.strictEqual(ehp0 - e.hp, Math.round(e.maxHp * Core.CRASH_DMG), 'ぶつかった傷');
+  assert.strictEqual(e.state, 'charmed', '目を回して動けない (MAX と同じ)');
+  assert.ok(e.dizzy);
+  assert.strictEqual(b.obstacle.ok, false, '樽はこわれる');
+  // 目を回している間の溜めパンチは MAX と同じく大ダメージ
+  const before = e.hp;
+  hold(b, 0.45);
+  assert.strictEqual(before - e.hp, Math.round(b.player.atk * Core.CHARGE_POWER[1] * Core.MAX_MUL));
+  // 樽は少しすると運んでくる
+  step(b, Core.OBSTACLE_RESPAWN + 0.1);
+  assert.strictEqual(b.obstacle.ok, true);
+});
+
+test('誘導: 振らないと突進が当たる (ふつうの攻撃より痛い)。樽がこわれている間は誘導できない', () => {
+  const a = untilRushWarn(Core.YUDO_RANK);
+  const hp0 = a.b.player.hp;
+  step(a.b, Core.RUSH_WARN + Core.RUSH_TIME + 0.05);
+  assert.strictEqual(hp0 - a.b.player.hp, Math.round(a.e.atk * Core.RUSH_MUL));
+  const c = untilRushWarn(Core.YUDO_RANK);
+  c.b.obstacle.ok = false; c.b.obstacle.respawn = 99;
+  Core.lure(c.b);
+  assert.ok(!c.b.events.some((ev) => ev.type === 'lure' && ev.result === 'yudo'));
+  const hp1 = c.b.player.hp;
+  step(c.b, Core.RUSH_WARN + Core.RUSH_TIME + 0.05);
+  assert.ok(c.b.player.hp < hp1, '樽が無ければ突進が当たる');
+});
+
+test('誘導: 突進は、溜めパンチで吹っ飛ばしても止まらない (猫じゃらしで誘導するしかない)', () => {
+  const { b, e } = untilRushWarn(Core.YUDO_RANK);
+  Core.punchPress(b); step(b, 0.85); Core.punchRelease(b);
+  assert.notStrictEqual(e.state, 'knock');
+  const hp0 = b.player.hp;
+  step(b, Core.RUSH_WARN + Core.RUSH_TIME);
+  assert.ok(b.player.hp < hp0);
+});
+
 // 手ごたえの見張り。数字は各段位 30 回ずつ実際に戦わせて測った値をもとに線を引いた
 // (下手: r0 30/30 残67%、r1 以上 0/30。溜めない: r0 30/30、r1・r2 9/30、r3 以上 0/30。
 //  ふつう: 全段位 30/30 残24〜67%。上手: 全段位 30/30)
@@ -769,6 +853,10 @@ test('手ごたえ: パンチ連打は最初の戦だけ。溜めパンチを使
     assert.ok(wins(r, casual) >= 26, `ふつうに遊べば勝てる (段位${r})`);
     assert.ok(wins(r, skilled) >= 29, `上手に遊べば勝てる (段位${r})`);
   }
+  // 誘導に意味があること: 突進の予告で振らない「ふつう」は、大名の戦で勝てない回が出る (測った値 18/30)。
+  // 振る「ふつう」は 30/30
+  const noYudo = { press(b) { const e = Core.currentEnemy(b); return e && e.state === 'rushWarn' ? false : casual.press(b); }, release: casual.release };
+  assert.ok(wins(9, noYudo) <= 25, '突進を誘導しないと、大名の戦で勝てない回が出る');
   // 猫じゃらしを使えば無傷、にならないこと (測った値: どの段位も 30/30 が殴られる)
   for (const r of [1, 4, 8]) {
     let hurt = 0;

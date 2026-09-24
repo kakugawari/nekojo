@@ -694,6 +694,49 @@ async function run() {
       await land.close();
     }
 
+    // ------------------------------------------------ 誘導 (侍から。大きなボス猫の突進を、猫じゃらしで樽へ)
+    section('誘導 (ボス猫の突進を、猫じゃらしで樽へ)');
+    for (const [vw, vh, safe] of [[430, 932, ':root{--safe-t:59px;--safe-b:34px}'], [932, 430, ':root{--safe-l:59px;--safe-r:59px;--safe-b:21px}']]) {
+      const yc = await browser.newContext({ ...device, viewport: { width: vw, height: vh } });
+      const yp = await yc.newPage();
+      yp.on('pageerror', (e) => errors.push('誘導: ' + e.message));
+      await yp.bringToFront();
+      await yp.goto(URL);
+      await yp.waitForFunction(() => window.__app);
+      await yp.addStyleTag({ content: safe });
+      const tag = `${vw}x${vh}`;
+      await yp.evaluate(() => { const a = window.__app; a.start(); a.closeStory(); a.debugAddMerit(window.Core.RANKS[window.Core.YUDO_RANK].threshold); a.closeModals(); a.setTab('battle'); a.sortie(); });
+      // 大将 (大きなボス猫) まで飛ばす
+      await yp.evaluate(() => {
+        const b = window.__app.battle();
+        b.enemies.forEach((e, i) => { if (i < b.enemies.length - 1) { e.alive = false; e.hp = 0; e.state = 'down'; e.timer = 0.01; } });
+        b.current = b.enemies.length - 2;
+      });
+      await yp.waitForFunction(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; return b.current === b.enemies.length - 1 && e.state === 'idle'; }, null, { timeout: 8000 });
+      await yp.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; e.hp = e.maxHp = 99999; e.cd = 0.7; });
+      await yp.waitForFunction(() => { const b = window.__app.battle(); return b.enemies[b.current].state === 'rushWarn'; }, null, { timeout: 4000 });
+      ok(await yp.evaluate(() => window.__app.mood() === 'rush'), `${tag}: ボス猫が突進の予告 (赤い「!!」) をする`);
+      // 頭の上のしるしが、上の札の裏に隠れない (背の高いボス猫で、敵の札の裏に隠れていた)
+      const mt = await yp.evaluate(() => ({ top: window.__app.moodTop(), hud: document.querySelector('.hud-top').getBoundingClientRect().bottom - document.getElementById('field').getBoundingClientRect().top }));
+      ok(mt.top >= mt.hud, `${tag}: 予告のしるしと「じゃらして樽へ!」が、上の札より下に出る (上端 ${Math.round(mt.top)} ≥ 札の下 ${Math.round(mt.hud)})`);
+      // 樽の山は、ボタンと重ならず、画面の中にある
+      const L = await yp.evaluate(() => window.__app.layout());
+      const fr = await yp.evaluate(() => { const r = document.getElementById('field').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+      const btns = await yp.evaluate(() => ['btnLure', 'btnItem', 'btnPunch'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return { id, left: r.left, right: r.right, top: r.top, bottom: r.bottom }; }));
+      const ob = { left: L.obstacle.left + fr.left, right: L.obstacle.right + fr.left, top: L.obstacle.top + fr.top, bottom: L.obstacle.bottom + fr.top };
+      const hit = btns.filter((r) => r.left < ob.right && ob.left < r.right && r.top < ob.bottom && ob.top < r.bottom).map((r) => r.id);
+      ok(hit.length === 0 && ob.left >= fr.left - 1, `${tag}: 樽の山がボタンに重ならず、画面の中にある${hit.length ? ' (' + hit.join(',') + ')' : ''}`);
+      // 指で猫じゃらしを押すと、樽へ突っ込んで目を回す
+      const hp0 = await yp.evaluate(() => window.__app.battle().player.hp);
+      await yp.locator('#btnLure').tap();
+      await yp.waitForFunction(() => { const b = window.__app.battle(); return b.enemies[b.current].state === 'charmed'; }, null, { timeout: 4000 }).catch(() => {});
+      const after = await yp.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; return { st: e.state, dizzy: e.dizzy, ob: b.obstacle.ok, hp: b.player.hp, ready: document.getElementById('btnPunch').classList.contains('ready') }; });
+      ok(after.st === 'charmed' && after.dizzy && !after.ob && after.hp === hp0,
+        `${tag}: 予告の間に猫じゃらしを指で押すと、樽へ突っ込んで目を回す (こちらは無傷・樽はこわれる)`);
+      ok(after.ready, `${tag}: 目を回している間は、猫パンチのボタンが光る (今だ!)`);
+      await yc.close();
+    }
+
     // ------------------------------------------------ 留守の間の進み (保存 → 再読み込み)
     section('留守の間も育つ (保存と再読み込み)');
     await phone.evaluate(() => {

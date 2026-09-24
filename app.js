@@ -279,6 +279,12 @@
       fieldSize.ground = Math.round(h - 150);
       fieldSize.s = Math.min(h * 0.26 / 150, w * 0.42 / 150);
     }
+    // 上の札 (自分と敵の体力) の下端。敵の頭の上のゲージやしるしは、これより下に出す
+    // (大きなボス猫は背が高く、そのまま頭の上に出すと敵の札の裏に隠れた)
+    const lb = els.btnLure.getBoundingClientRect(), fb = els.field.getBoundingClientRect();
+    fieldSize.lureBox = lb.width > 0 ? { right: lb.right - fb.left, top: lb.top - fb.top } : null;
+    const hud = document.querySelector('.hud-top');
+    fieldSize.hudBottom = hud ? Math.max(0, hud.getBoundingClientRect().bottom - els.field.getBoundingClientRect().top) : 0;
     [els.fieldBg, els.fieldFg].forEach(function (c) {
       c.width = Math.round(w * dpr);
       c.height = Math.round(h * dpr);
@@ -458,7 +464,7 @@
   // ---------------------------------------------------------- 効果
 
   let effects = [];
-  const anim = { lure: 0, punch: 0, hurt: 0, shake: 0, flash: 0, knock: 0, punchLevel: 0, charge: 0 };
+  const anim = { lure: 0, punch: 0, hurt: 0, shake: 0, flash: 0, knock: 0, punchLevel: 0, charge: 0, hop: 0, crash: 0, barrelIn: 1 };
   const petals = [];
   for (let i = 0; i < 12; i++) petals.push({ x: Math.random(), y: Math.random(), v: 0.03 + Math.random() * 0.03, p: Math.random() * 6 });
   let cheer = { t: 3, text: '' };
@@ -498,6 +504,49 @@
   }
 
   function heroX() { return fx(C.PLAYER_X); }
+  /** 樽の山の位置 (足もと)。ボタンや家臣と重ならないよう、少し奥 (高い所) に置く */
+  function obstaclePos() {
+    const s = fieldSize.s;
+    const im = imgs['b-barrels'];
+    const half = im && im.naturalHeight ? 78 * s * im.naturalWidth / im.naturalHeight / 2 : 40 * s;
+    // 縦画面では左の端で切れるので、画面の中に収まるところまで寄せる
+    let x = Math.max(fx(C.OBSTACLE_X), half + 4);
+    const y = fieldSize.ground - 34 * s;
+    // 横画面では猫じゃらしのボタンと高さが重なるので、ボタンの右へずらす
+    const lb = fieldSize.lureBox;
+    if (lb && y > lb.top) x = Math.max(x, lb.right + half + 6);
+    return { x: x, y: y };
+  }
+  function drawObstacle(ctx, b, dt) {
+    const ob = b ? b.obstacle : (C.rankIndexOf(state) >= C.YUDO_RANK ? { ok: true } : null);
+    if (!ob) return;
+    const s = fieldSize.s;
+    const o = obstaclePos();
+    anim.barrelIn = Math.min(1, anim.barrelIn + dt / 0.5);
+    const im = imgs['b-barrels'];
+    if (!ready(im)) return;
+    const sc = 78 * s / im.naturalHeight;
+    if (ob.ok) {
+      shadow(ctx, o.x, o.y, 34 * s);
+      drawSprite(ctx, im, o.x, o.y, sc, { alpha: anim.barrelIn });
+    } else if (anim.crash > 0) {
+      // こわれた樽の板が飛び散る
+      const k = 1 - anim.crash;
+      ctx.fillStyle = '#8a5a2a';
+      for (let i = 0; i < 8; i++) {
+        const a = -Math.PI * (0.15 + i / 9 * 0.7);
+        const d = 90 * s * k;
+        ctx.save();
+        ctx.translate(o.x + Math.cos(a) * d, o.y - 30 * s + Math.sin(a) * d + 120 * s * k * k);
+        ctx.rotate(k * 8 + i);
+        ctx.globalAlpha = 1 - k;
+        ctx.fillRect(-10 * s, -3 * s, 20 * s, 6 * s);
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
   /** 出陣の家臣の立ち位置 (自分の左うしろ) */
   function allyPos(i) {
     const s = fieldSize.s;
@@ -519,7 +568,8 @@
   }
 
   const LURE_TEXT = {
-    charm: ['♡', '#ff5f9e', 26], max: ['夢中 MAX!', '#ff5f9e', 24], weak: ['見られてる…', '#7a6650', 16], full: ['もう夢中!', '#ff5f9e', 16]
+    charm: ['♡', '#ff5f9e', 26], max: ['夢中 MAX!', '#ff5f9e', 24], weak: ['見られてる…', '#7a6650', 16], full: ['もう夢中!', '#ff5f9e', 16],
+    yudo: ['こっちだにゃ!', '#ff5f9e', 20]
   };
   const PUNCH_WORD = ['バシッ!', 'ドカッ!', 'ドッカーン!'];
 
@@ -538,6 +588,22 @@
         if (lt) addEffect({ kind: 'text', x: ex, y: top + 40 * s, text: lt[0], color: lt[1], size: lt[2], dur: 0.9 });
         if (ev.result === 'max') setFace('smile', 1.0);
         if (ev.result === 'weak') setFace('shy', 0.7);
+      } else if (ev.type === 'rushWarn') {
+        setFace('surprised', 1.0);
+      } else if (ev.type === 'rush') {
+        if (ev.to === 'obstacle') anim.hop = 1; // ボス猫が羽を追って頭の上を通る。主人公はぴょんと跳ぶ
+      } else if (ev.type === 'crash') {
+        const o = obstaclePos();
+        anim.crash = 1;
+        anim.shake = 1;
+        addEffect({ kind: 'burst', x: o.x, y: o.y - 30 * s, r: 90 * s, dur: 0.45 });
+        addEffect({ kind: 'text', x: o.x + 20 * s, y: o.y - 110 * s, text: 'ドカーン!', color: '#ffd84a', size: 40, rot: -0.1, stroke: '#3a2a1c', dur: 1.0 });
+        addEffect({ kind: 'dust', x: o.x, y: o.y - 10 * s, dur: 0.8 });
+        setFace('smile', 1.6);
+      } else if (ev.type === 'obstacleBack') {
+        anim.barrelIn = 0;
+        const o = obstaclePos();
+        addEffect({ kind: 'text', x: o.x, y: o.y - 90 * s, text: 'よいしょ!', color: '#7a4a1c', size: 16, dur: 0.9 });
       } else if (ev.type === 'chargeStart') {
         anim.charge = 0;
       } else if (ev.type === 'charge') {
@@ -767,7 +833,8 @@
   function drawMood(ctx, e, x, headY, t) {
     const s = fieldSize.s;
     const mood = C.enemyMood(e);
-    const gw = 96 * s, gh = 12 * s, gx = x - gw / 2 + 10 * s, gy = headY - 34 * s;
+    const gw = 96 * s, gh = 12 * s, gx = x - gw / 2 + 10 * s;
+    const gy = Math.max(headY - 34 * s, (fieldSize.hudBottom || 0) + 34 * s);
     // ゲージ
     ctx.fillStyle = 'rgba(30,26,40,.82)';
     ctx.beginPath(); ctx.roundRect(gx - 2, gy - 2, gw + 4, gh + 4, gh / 2 + 2); ctx.fill();
@@ -784,7 +851,16 @@
     ctx.fillRect(gx + gw * C.MUCHU_CHASE / C.MUCHU_MAX - 1, gy + 2, 2, gh - 4);
     // しるし (ゲージの左)
     const ix = gx - 16 * s, iy = gy + gh / 2 + 7 * s;
-    if (mood === 'attack') {
+    if (mood === 'rush') {
+      // 突進の予告: 大きな赤い「!!」。樽があれば、猫じゃらしで誘導できると添える
+      const p = 1 + 0.18 * Math.sin(t * 20);
+      ctx.fillStyle = 'rgba(255,75,58,.4)';
+      ctx.beginPath(); ctx.arc(ix, iy - 10 * s, 28 * s * p, 0, Math.PI * 2); ctx.fill();
+      outlinedText(ctx, '!!', ix, iy, 40 * p, '#ff3b2a', '#fff');
+      if (e.state === 'rushWarn' && battle && battle.obstacle && battle.obstacle.ok && !e.lured) {
+        outlinedText(ctx, '🪶 じゃらして 樽へ!', x, gy - 16 * s, 17 + Math.sin(t * 10) * 1.5, '#c8412f', '#fff');
+      }
+    } else if (mood === 'attack') {
       const p = 1 + 0.15 * Math.sin(t * 24);
       ctx.fillStyle = 'rgba(255,75,58,.35)';
       ctx.beginPath(); ctx.arc(ix, iy - 8 * s, 22 * s * p, 0, Math.PI * 2); ctx.fill();
@@ -825,6 +901,32 @@
     } else if (e.state === 'windup') {
       rot = -0.16;
       x += Math.sin(t * 40) * 2;
+    } else if (e.state === 'rushWarn') {
+      // 突進の予告: 体を低くして、足で地面をかく
+      rot = -0.12;
+      y += 6 * s;
+      x += Math.sin(t * 30) * 3 * s;
+      if (Math.floor(t * 8) % 2 === 0) {
+        ctx.fillStyle = 'rgba(214,190,140,.7)';
+        for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(x + (30 + i * 14) * sc, fieldSize.ground - 6 * s, (8 + i * 3) * s, 0, Math.PI * 2); ctx.fill(); }
+      }
+    } else if (e.state === 'rush') {
+      // 突っ込む: 前のめりで、うしろに風の線
+      rot = -0.22;
+      y -= Math.abs(Math.sin(t * 22)) * 8 * s;
+      ctx.strokeStyle = 'rgba(255,255,255,.8)';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 4; i++) {
+        const ly = y - (30 + i * 28) * sc;
+        ctx.beginPath(); ctx.moveTo(x + 50 * sc, ly); ctx.lineTo(x + (110 + i * 12) * sc, ly); ctx.stroke();
+      }
+      if (e.rushTo === 'obstacle') feather(ctx, x - 70 * s, y - 90 * s, 24 * s, -1.6); // 羽が先を行く
+    } else if (e.state === 'rushBack') {
+      rot = 0.1;
+    } else if (e.state === 'charmed' && e.dizzy) {
+      // 樽にぶつかって目を回している
+      rot = Math.sin(t * 6) * 0.12;
+      y -= 2 * s;
     } else if (e.state === 'charmed') {
       // 夢中 MAX: 羽に見とれて動けない (小さく揺れるだけ)
       rot = -0.1 + Math.sin(t * 3) * 0.03;
@@ -850,11 +952,16 @@
     const flash = anim.knock > 0.6 && e.state !== 'down' ? anim.knock : 0;
     drawSprite(ctx, imgs[e.look], x, y, sc, { rot: rot, alpha: alpha, flash: flash });
 
-    // 夢中: ぶらさがる羽とハート
-    if (e.state === 'charmed' || chasing) {
+    // 夢中: ぶらさがる羽とハート (目を回しているときは星)
+    if ((e.state === 'charmed' && !e.dizzy) || chasing) {
       feather(ctx, x - 40 * s, headY() - 4 * s + Math.sin(t * 8) * 6 * s, 22 * s, -1.2 + Math.sin(t * 6) * 0.4);
     }
-    if (e.state === 'charmed') {
+    if (e.state === 'charmed' && e.dizzy) {
+      for (let i = 0; i < 4; i++) {
+        const a = t * 5 + i * Math.PI / 2;
+        outlinedText(ctx, '★', x + Math.cos(a) * 36 * s, headY() + 26 * s + Math.sin(a) * 9 * s, 16, '#ffe27a');
+      }
+    } else if (e.state === 'charmed') {
       for (let i = 0; i < 3; i++) {
         const a = t * 3 + i * 2.1;
         outlinedText(ctx, '♥', x + Math.cos(a) * 34 * s, headY() + 30 * s + Math.sin(a) * 10 * s, 16, '#ff7fb0', '#fff');
@@ -894,8 +1001,8 @@
     const s = fieldSize.s;
     const r = C.rankIndexOf(state);
     let x = heroX();
-    const y = fieldSize.ground;
-    shadow(ctx, x, y, 38 * s);
+    shadow(ctx, x, fieldSize.ground, 38 * s);
+    const y = fieldSize.ground - Math.sin(anim.hop * Math.PI) * 60 * s; // 突進をよけて跳ぶ
     if (anim.punch > 0) {
       // 飛び込んでパンチ。溜めた段が高いほど深く飛び込む
       const k = Math.sin(anim.punch * Math.PI);
@@ -934,8 +1041,8 @@
     ctx.clearRect(0, 0, w, h);
     const t = now / 1000;
 
-    ['lure', 'punch', 'hurt', 'shake', 'flash', 'knock'].forEach(function (k) {
-      const dur = { lure: 0.35, punch: 0.3, hurt: 0.4, shake: 0.25, flash: 0.35, knock: 0.25 }[k];
+    ['lure', 'punch', 'hurt', 'shake', 'flash', 'knock', 'hop', 'crash'].forEach(function (k) {
+      const dur = { lure: 0.35, punch: 0.3, hurt: 0.4, shake: 0.25, flash: 0.35, knock: 0.25, hop: 0.55, crash: 0.6 }[k];
       anim[k] = Math.max(0, anim[k] - dt / dur);
     });
     if (anim.shake > 0) ctx.translate((Math.random() - 0.5) * 8 * anim.shake, (Math.random() - 0.5) * 5 * anim.shake);
@@ -964,6 +1071,8 @@
     const b = battle || lastBattle;
 
     // 出陣の家臣 (自分の左うしろ)
+    drawObstacle(ctx, b, dt);
+
     const allies = b ? b.allies : state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, C.MAX_BATTLE_VASSALS);
     allies.forEach(function (a, i) {
       a.hop = Math.max(0, (a.hop || 0) - dt / 0.3);
@@ -1079,8 +1188,8 @@
       '猫パンチは ながおしで ためられる!<br>MAX の敵には すぐたまるにゃ',
       '頭に「!」が出ている敵は 猫じゃらしが効きにくい。<br>すばしっこい猫は よそ見のときに振ろう',
       'カウンター: ためて待って、<br>赤い「!」が出たら はなそう!',
+      '大きなボス猫が 赤い「!!」で 突進してきたら、<br>猫じゃらしで 樽へ 誘導!',
       'ねこ侍は、攻撃のあとの「スキ」を<br>パンチで ねらおう',
-      '大きなボス猫は、5回振ると MAX になるにゃ',
       'MAX の敵に 会心まで ためて、<br>特大 猫パンチ!'
     ];
     let html = tips[Math.min(r, tips.length - 1)];
@@ -1190,6 +1299,7 @@
     let text = rank.story;
     if (prev < C.VASSAL_UNLOCK_RANK && idx >= C.VASSAL_UNLOCK_RANK) text += '<br><b>家臣を持てるようになった!</b>';
     if (prev < C.COUNTER_RANK && idx >= C.COUNTER_RANK) text += '<br><b>新しい技「カウンター」を覚えた!</b><br>ためて待って、赤い「!」で はなそう';
+    if (prev < C.YUDO_RANK && idx >= C.YUDO_RANK) text += '<br><b>新しい技「誘導」を覚えた!</b><br>ボス猫が「!!」で突進してきたら、猫じゃらしで 樽へ!';
     if (prev < C.CASTLE_UNLOCK_RANK && idx >= C.CASTLE_UNLOCK_RANK) text += '<br><b>城と村を持てるようになった!</b>';
     if (stageForRank(prev) !== stageForRank(idx)) text += '<br>見た目も りっぱになった!';
     els.rankUpText.innerHTML = text;
@@ -1878,6 +1988,13 @@
       acceptOffer: acceptOffer,
       face: function () { return face.shown; },
       fieldSize: function () { return Object.assign({}, fieldSize); },
+      /** 敵の頭の上のゲージの上端 (画面の見張り用) */
+      moodTop: function () {
+        const b = battle; const e = b && b.enemies[b.current];
+        if (!e) return null;
+        const s = fieldSize.s;
+        return Math.max(fieldSize.ground - 150 * enemyScale(e) - 34 * s, (fieldSize.hudBottom || 0) + 34 * s) - 16 * s - 12;
+      },
       // 立ち位置。enterLeft は、歩き出す瞬間の敵の絵の左端 (種類ごとの最小)。画面の外 (>= w) であるべき
       layout: function () {
         let enterLeft = Infinity;
@@ -1887,6 +2004,12 @@
           enterLeft = Math.min(enterLeft, enemyX(e) - im.naturalWidth * enemyScale(e) / 2);
         });
         return { bg: battleBgReady ? 'image' : 'drawn', bgGroundY: fieldSize.bgGroundY, land: !!fieldSize.land, w: fieldSize.w, h: fieldSize.h, s: fieldSize.s, ground: fieldSize.ground,
+          obstacle: (function () {
+            const im = imgs['b-barrels'];
+            const o = obstaclePos();
+            const hh = 78 * fieldSize.s, ww = hh * im.naturalWidth / im.naturalHeight;
+            return { left: o.x - ww / 2, right: o.x + ww / 2, top: o.y - hh, bottom: o.y };
+          })(),
           heroX: heroX(), enemyX: fx(C.ENEMY_X), heroHalf: imgs.stage1.naturalWidth * fieldSize.s / 2, enterLeft: enterLeft };
       },
       recruit: doRecruit,

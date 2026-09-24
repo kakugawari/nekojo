@@ -312,6 +312,16 @@
   const COUNTER_MUL = 2.5;         // カウンター (攻撃の予告にパンチを当てる)
   const OPEN_MUL = 2.5;            // ねこ侍の攻撃のあとのスキ
   const COUNTER_RANK = 3;          // 足軽になるとカウンターを覚える
+  // 誘導: 大きなボス猫が突進してくる。予告 (赤い「!!」) の間に猫じゃらしを振ると、羽を追って樽の山へ突っ込み、目を回す
+  const YUDO_RANK = 4;             // 侍になると「誘導」を覚える (それまでボス猫は突進してこない)
+  const RUSH_WARN = 1.0;           // 突進の予告の長さ
+  const RUSH_TIME = 0.45;          // 突っ込んでいる長さ
+  const RUSH_BACK = 0.6;           // 主人公に当たったあと、元の位置へ戻る長さ
+  const RUSH_MUL = 1.6;            // 突進が当たったときの痛さ (ふつうの攻撃の何倍か)
+  const CRASH_STUN = 3.0;          // 樽にぶつかって目を回している長さ (夢中 MAX と同じく動けない)
+  const CRASH_DMG = 0.12;          // ぶつかったボス猫が受ける傷 (最大体力の割合)
+  const OBSTACLE_X = 28;           // 樽の山の位置 (主人公の左うしろ)
+  const OBSTACLE_RESPAWN = 8;      // こわれた樽を運んでくるまで
   const KNOCK_TIME = [0.3, 0.55, 0.9];
   const KNOCK_DIST = [10, 45, 90];
 
@@ -319,7 +329,7 @@
     nora: { name: 'のら猫', look: 'cat-chatora', hp: 1.0, atk: 1.0, interval: 2.0, lures: 2, maxTime: 2.6 },
     quick: { name: 'すばしっこい猫', look: 'cat-gray', hp: 0.8, atk: 0.9, interval: 1.5, lures: 3, maxTime: 2.0, glance: true },
     samurai: { name: 'ねこ侍', look: 'cat-kuro', hp: 1.3, atk: 1.3, interval: 1.8, lures: 3, maxTime: 1.8, parry: true, open: 1.0 },
-    boss: { name: '大きなボス猫', look: 'cat-red', hp: 3.0, atk: 1.5, interval: 2.2, lures: 5, maxTime: 2.4, armor: 0.5, boss: true }
+    boss: { name: '大きなボス猫', look: 'cat-red', hp: 3.0, atk: 1.5, interval: 2.2, lures: 5, maxTime: 2.4, armor: 0.5, boss: true, rush: true }
   };
   const ITEM_KINDS = {
     fish: { name: '魚', effect: '体力を 40% 回復' },
@@ -337,6 +347,9 @@
   /** 押していた長さ → 溜めの段 (0 通常 / 1 強 / 2 会心) */
   function chargeLevel(t) { return t >= CHARGE_LEVELS[2] ? 2 : (t >= CHARGE_LEVELS[1] ? 1 : 0); }
   function canCounter(b) { return b.rank >= COUNTER_RANK; }
+  function canYudo(b) { return b.rank >= YUDO_RANK; }
+  /** 突進の途中 (予告・突っ込み・戻り)。吹っ飛ばしても止まらない */
+  function isRushing(e) { return e.state === 'rushWarn' || e.state === 'rush' || e.state === 'rushBack'; }
 
   function enemyPool(rankIndex) {
     if (rankIndex < 1) return ['nora'];
@@ -369,6 +382,7 @@
         hp: hp, maxHp: hp, atk: Math.round(baseAtk * k.atk), interval: k.interval,
         state: 'wait', timer: 0, cd: k.interval, age: 0, x: ENTER_X,
         muchu: 0, muchuIdle: 0, charm: 0, charmTime: 0, wary: 0, knockTime: 0, knockDist: 0, open: false,
+        rushNext: true, lured: false, rushTo: null, dizzy: false,
         alive: true, reward: Math.round(enemyReward(r, leader) * fx.meritMul)
       });
     }
@@ -383,6 +397,8 @@
       cd: { lure: 0, punch: 0 },
       charge: { on: false, t: 0 },
       skills: battleSkills(allies),
+      // 樽の山 (誘導を覚えてから置く)。こわれても少しすると運んでくる
+      obstacle: r >= YUDO_RANK ? { ok: true, respawn: 0 } : null,
       healCd: HEAL_INTERVAL,
       items: { fish: items.fish || 0, matatabi: items.matatabi || 0 },
       used: { fish: 0, matatabi: 0 },
@@ -421,6 +437,7 @@
   function enemyMood(e) {
     if (!e || !e.alive || e.state === 'enter' || e.state === 'wait') return 'none';
     if (e.state === 'charmed') return 'max';
+    if (e.state === 'rushWarn' || e.state === 'rush') return 'rush';
     if (e.state === 'windup') return 'attack';
     if (isAlert(e)) return 'alert';
     if (e.muchu > 0) return 'chase';
@@ -501,9 +518,16 @@
         // 夢中 MAX: 動けない。ゲージは残り時間に合わせて減っていく
         e.charm -= dt;
         e.muchu = MUCHU_MAX * Math.max(0, e.charm / e.charmTime);
+        if (e.x !== ENEMY_X) {
+          // 樽にぶつかったあとは、目を回しながら元の位置まで転がって戻る
+          e.x += (ENEMY_X - e.x) * Math.min(1, dt * 2.5);
+          if (Math.abs(e.x - ENEMY_X) < 1) e.x = ENEMY_X;
+        }
         if (e.charm <= 0) {
           e.charm = 0;
           e.muchu = 0;
+          e.dizzy = false;
+          e.x = ENEMY_X;
           e.state = 'idle';
           e.cd = e.interval;
           e.wary = WARY;
@@ -521,10 +545,54 @@
       } else if (e.state === 'idle') {
         if (!isChasing(e)) e.cd -= dt;
         if (e.cd <= WINDUP) {
-          e.state = 'windup';
-          e.timer = WINDUP;
-          b.events.push({ type: 'windup', id: e.id });
+          if (ENEMY_KINDS[e.kind].rush && canYudo(b) && e.rushNext) {
+            // 大きなボス猫: ふつうの攻撃と突進をかわりばんこに
+            e.state = 'rushWarn';
+            e.timer = RUSH_WARN;
+            e.lured = false;
+            e.rushNext = false;
+            b.events.push({ type: 'rushWarn', id: e.id });
+          } else {
+            e.state = 'windup';
+            e.timer = WINDUP;
+            if (ENEMY_KINDS[e.kind].rush) e.rushNext = true;
+            b.events.push({ type: 'windup', id: e.id });
+          }
         }
+      } else if (e.state === 'rushWarn') {
+        e.timer -= dt;
+        if (e.timer <= 0) {
+          e.state = 'rush';
+          e.timer = RUSH_TIME;
+          e.rushTo = e.lured && b.obstacle && b.obstacle.ok ? 'obstacle' : 'hero';
+          b.events.push({ type: 'rush', id: e.id, to: e.rushTo });
+        }
+      } else if (e.state === 'rush') {
+        e.timer -= dt;
+        const to = e.rushTo === 'obstacle' ? OBSTACLE_X : PLAYER_X + 40;
+        e.x = ENEMY_X + (to - ENEMY_X) * Math.min(1, 1 - e.timer / RUSH_TIME);
+        if (e.timer <= 0) {
+          e.cd = e.interval;
+          if (e.rushTo === 'obstacle') {
+            // ドカーン: 樽がこわれ、ボス猫は目を回して動けない (夢中 MAX と同じく、当てると大ダメージ)
+            b.obstacle.ok = false;
+            b.obstacle.respawn = OBSTACLE_RESPAWN;
+            b.events.push({ type: 'crash', id: e.id });
+            hurtEnemy(b, e, Math.max(1, Math.round(e.maxHp * CRASH_DMG)), 'crash');
+            if (e.alive) {
+              toMax(e, CRASH_STUN);
+              e.dizzy = true;
+            }
+          } else {
+            hurtPlayer(b, Math.round(e.atk * RUSH_MUL), e.id);
+            e.state = 'rushBack';
+            e.timer = RUSH_BACK;
+          }
+        }
+      } else if (e.state === 'rushBack') {
+        e.timer -= dt;
+        e.x += (ENEMY_X - e.x) * Math.min(1, dt / Math.max(0.05, e.timer + dt));
+        if (e.timer <= 0) { e.state = 'idle'; e.x = ENEMY_X; }
       } else if (e.state === 'windup') {
         e.timer -= dt;
         if (e.timer <= 0) {
@@ -536,6 +604,15 @@
           e.open = !!k.open; // ねこ侍は攻撃のあとにスキができる
           if (e.open) b.events.push({ type: 'open', id: e.id });
         }
+      }
+    }
+
+    // こわれた樽は、少しすると運んでくる
+    if (b.obstacle && !b.obstacle.ok) {
+      b.obstacle.respawn -= dt;
+      if (b.obstacle.respawn <= 0) {
+        b.obstacle.ok = true;
+        b.events.push({ type: 'obstacleBack' });
       }
     }
 
@@ -600,6 +677,17 @@
       b.events.push({ type: 'lure', result: 'full', id: e.id, muchu: e.muchu }); // もう MAX。延びない
       return true;
     }
+    if (e.state === 'rushWarn' && b.obstacle && b.obstacle.ok) {
+      // 誘導: 突進の予告の間に振ると、羽を追って樽の山へ突っ込む
+      e.lured = true;
+      b.events.push({ type: 'lure', result: 'yudo', id: e.id });
+      return true;
+    }
+    if (isRushing(e)) {
+      b.cd.lure = LURE_MISS_COOLDOWN; // 突っ込んでいる最中・樽が無いときは効かない
+      b.events.push({ type: 'lure', result: 'weak', id: e.id });
+      return true;
+    }
     const k = ENEMY_KINDS[e.kind];
     const alert = isAlert(e);
     let gain = (MUCHU_MAX / k.lures + 1) * b.skills.lure;
@@ -662,12 +750,15 @@
     if (level >= 1 && b.skills.power > 1) b.events.push({ type: 'skill', skill: 'punch' });
     if (e.state === 'charmed') {
       // 夢中 MAX の敵に当てる: 大ダメージ。溜めていれば吹っ飛ぶ
+      const dizzy = e.dizzy;
       e.charm = 0;
       e.muchu = 0;
+      e.dizzy = false;
+      e.x = ENEMY_X;
       e.wary = WARY;
       e.cd = e.interval;
       knock(e, level);
-      hurtEnemy(b, e, Math.round(pow * MAX_MUL), 'punch', { level: level, max: true, crit: level === 2 });
+      hurtEnemy(b, e, Math.round(pow * MAX_MUL), 'punch', { level: level, max: true, dizzy: dizzy, crit: level === 2 });
     } else if (e.state === 'windup' && canCounter(b) && level >= 1) {
       // カウンター: 溜めておいたパンチを、攻撃の予告 (赤い「!」) に合わせて離す。攻撃を打ち消して会心。
       // すぐ離すパンチでは起きない (連打しているだけで全部の攻撃を打ち消せてしまうので)
@@ -690,7 +781,7 @@
       // ふつうに殴る。溜めていれば吹っ飛ぶ (攻撃の溜めは止まらない)
       e.muchu = 0;
       e.wary = WARY;
-      if (level > 0 && e.state !== 'windup') knock(e, level);
+      if (level > 0 && e.state !== 'windup' && !isRushing(e)) knock(e, level);
       hurtEnemy(b, e, Math.round(pow * (k.armor || 1)), 'punch', { level: level, armor: !!k.armor });
     }
     finish(b);
@@ -1090,6 +1181,16 @@
     MAX_MUL: MAX_MUL,
     COUNTER_MUL: COUNTER_MUL,
     COUNTER_RANK: COUNTER_RANK,
+    YUDO_RANK: YUDO_RANK,
+    RUSH_WARN: RUSH_WARN,
+    RUSH_TIME: RUSH_TIME,
+    RUSH_MUL: RUSH_MUL,
+    CRASH_STUN: CRASH_STUN,
+    CRASH_DMG: CRASH_DMG,
+    OBSTACLE_X: OBSTACLE_X,
+    OBSTACLE_RESPAWN: OBSTACLE_RESPAWN,
+    canYudo: canYudo,
+    isRushing: isRushing,
     ENEMY_KINDS: ENEMY_KINDS,
     ITEM_KINDS: ITEM_KINDS,
     playerMaxHp: playerMaxHp,
