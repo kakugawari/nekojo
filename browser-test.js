@@ -72,6 +72,46 @@ function measureJump(page, selector, act) {
   }, { sel: selector, code: act });
 }
 
+/** タイトルの見張り。題字が切れない・札が安全域より上・重ねたボタンが札の上に乗っている */
+async function checkTitle(page, safeB) {
+  const t = await page.evaluate(() => {
+    const f = document.querySelector('.title-frame').getBoundingClientRect();
+    const s = f.width / 1672;
+    const b = document.getElementById('btnStart').getBoundingClientRect();
+    return {
+      logoL: f.left + 455 * s, logoR: f.left + 1252 * s, logoT: f.top + 50 * s,
+      btnB: b.bottom, btnL: b.left, btnR: b.right,
+      imgW: document.querySelector('.title-art').naturalWidth,
+      vw: innerWidth, vh: innerHeight
+    };
+  });
+  const tag = `${t.vw}x${t.vh}`;
+  ok(t.imgW === 1672, `${tag}: タイトルの絵 (横長) が読み込まれる`);
+  ok(t.logoL >= 0 && t.logoR <= t.vw && t.logoT >= 0,
+    `${tag}: 題字が画面からはみ出さない (左${t.logoL.toFixed(0)} 右${t.logoR.toFixed(0)} 上${t.logoT.toFixed(0)})`);
+  ok(t.btnL >= 0 && t.btnR <= t.vw && t.btnB <= t.vh - safeB, `${tag}: 「はじめる」が画面の中 (安全域より上) にある (下端 ${t.btnB.toFixed(0)})`);
+
+  // 重ねたボタンが、絵に描いた札の上にちゃんと乗っているか。
+  // 光る範囲の上寄り (字の無い所) を元の絵の画素に戻して、札のクリーム色かを見る
+  const plaque = await page.evaluate(() => {
+    const img = document.querySelector('.title-art');
+    const f = img.getBoundingClientRect();
+    const g = document.querySelector('.title-start-glow').getBoundingClientRect();
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+    const s = img.naturalWidth / f.width;
+    return [0.3, 0.5, 0.7].map((fx) => {
+      const px = Math.round((g.left + g.width * fx - f.left) * s);
+      const py = Math.round((g.top + g.height * 0.15 - f.top) * s);
+      const d = x.getImageData(px, py, 1, 1).data;
+      return [d[0], d[1], d[2]];
+    });
+  });
+  const cream = plaque.every(([r, g, b]) => r > 220 && g > 200 && b > 150 && r > b);
+  ok(cream, `${tag}: 重ねたボタンが札の上に乗っている (${plaque.map((c) => 'rgb(' + c.join(',') + ')').join(' ')})`);
+}
+
 function pickPhoneDevice(devices) {
   // 実機は iPhone 16 Plus (430pt 幅) だが、入っている playwright に
   // その名前が無いことがある。同じ幅の控えで代える。
@@ -138,50 +178,17 @@ async function run() {
 
     // ------------------------------------------------ タイトル画面
     section('タイトル画面');
-    // 題字 (元の絵で x165〜915, y40〜) と「はじめる」の札が画面に収まっているか。
-    // Safari で開いた高さ (端末の既定) と、ホーム画面から開いた実寸 (932) の両方で見る
+    // 題字 (元の絵 1672x941 で x455〜1252, y50〜) と「はじめる」の札が画面に収まっているか。
+    // 縦は Safari で開いた高さ (端末の既定) とホーム画面から開いた実寸 (932)、横は 932x430 で見る
     for (const vp of [device.viewport, { width: 430, height: 932 }]) {
       const ctx = await browser.newContext({ ...device, viewport: vp });
       const page = await ctx.newPage();
       page.on('pageerror', (e) => errors.push('タイトル: ' + e.message));
       await page.goto(URL);
       await page.waitForFunction(() => window.__app && document.querySelector('.title-art').complete);
-      const t = await page.evaluate(() => {
-        const f = document.querySelector('.title-frame').getBoundingClientRect();
-        const s = f.width / 1086;
-        const b = document.getElementById('btnStart').getBoundingClientRect();
-        return {
-          logoL: f.left + 165 * s, logoR: f.left + 915 * s, logoT: f.top + 40 * s,
-          btnB: b.bottom, btnL: b.left, btnR: b.right,
-          imgW: document.querySelector('.title-art').naturalWidth,
-          vw: innerWidth, vh: innerHeight
-        };
-      });
-      const tag = `${t.vw}x${t.vh}`;
-      ok(t.imgW === 1086, `${tag}: タイトルの絵が読み込まれる`);
-      ok(t.logoL >= 0 && t.logoR <= t.vw && t.logoT >= 0,
-        `${tag}: 題字が画面からはみ出さない (左${t.logoL.toFixed(0)} 右${t.logoR.toFixed(0)} 上${t.logoT.toFixed(0)})`);
-      ok(t.btnL >= 0 && t.btnR <= t.vw && t.btnB <= t.vh, `${tag}: 「はじめる」が画面の中にある`);
-
-      // 重ねたボタンが、絵に描いた札の上にちゃんと乗っているか。
-      // 光る範囲の上寄り (字の無い所) を元の絵の画素に戻して、札のクリーム色かを見る
-      const plaque = await page.evaluate(() => {
-        const img = document.querySelector('.title-art');
-        const f = img.getBoundingClientRect();
-        const g = document.querySelector('.title-start-glow').getBoundingClientRect();
-        const c = document.createElement('canvas');
-        c.width = img.naturalWidth; c.height = img.naturalHeight;
-        const x = c.getContext('2d'); x.drawImage(img, 0, 0);
-        const s = img.naturalWidth / f.width;
-        return [0.3, 0.5, 0.7].map((fx) => {
-          const px = Math.round((g.left + g.width * fx - f.left) * s);
-          const py = Math.round((g.top + g.height * 0.15 - f.top) * s);
-          const d = x.getImageData(px, py, 1, 1).data;
-          return [d[0], d[1], d[2]];
-        });
-      });
-      const cream = plaque.every(([r, g, b]) => r > 220 && g > 200 && b > 150 && r > b);
-      ok(cream, `${tag}: 重ねたボタンが札の上に乗っている (${plaque.map((c) => 'rgb(' + c.join(',') + ')').join(' ')})`);
+      await checkTitle(page, 0);
+      ok(await page.evaluate(() => getComputedStyle(document.querySelector('.title-hint')).display !== 'none'),
+        `${vp.width}x${vp.height}: 縦では「よこにすると大きく遊べる」と添える`);
       await ctx.close();
     }
 
@@ -466,9 +473,9 @@ async function run() {
       const inside = (r) => r.left >= -1 && r.top >= -1 && r.right <= LW + 1 && r.bottom <= LH + 1;
       const rectOf = (sel) => lp.evaluate((q) => { const r = document.querySelector(q).getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; }, sel);
 
-      await lp.waitForTimeout(300);
-      const tArt = await rectOf('.title-art');
-      ok(inside(tArt), `タイトルの絵が題字まで丸ごと画面に収まる (上 ${Math.round(tArt.top)} / 下 ${Math.round(tArt.bottom)})`);
+      await lp.waitForFunction(() => document.querySelector('.title-art').complete);
+      await checkTitle(lp, SAFE.b);
+      ok(await lp.evaluate(() => getComputedStyle(document.querySelector('.title-hint')).display === 'none'), '横では「よこにすると」の添え書きを出さない');
       await lp.locator('#btnStart').tap();
       await lp.waitForTimeout(200);
       const card = await rectOf('#storyModal .modal-card');

@@ -1,4 +1,4 @@
-/* にゃん将の見た目。設定資料に合わせた和紙の色 (クリームの紙・茶の墨・金の札・紺)。
+/* ねこ将軍の見た目。設定資料に合わせた和紙の色 (クリームの紙・茶の墨・金の札・紺)。
    対象は iPhone 16 Plus (430pt 幅) だけ。他の幅は見ない。寸法は決め打ちでよい。
    ゲームとして絵づくりを決めているので、暗い画面用の配色は持たない。 */
 
@@ -58,59 +58,86 @@ img { -webkit-user-drag: none; }
 
 /* --------------------------------------------------------- タイトル画面 */
 
-/* 絵 (1086x1448) は画面より縦横比が太いので、幅 --tw で下端に合わせて置く。
-   左右は画面からはみ出すが、題字 (元の絵で x165〜915) は切れない。
-   上に余る分は、絵の上端と同じ空の色 (#4ea6f1) で埋めて、境目はマスクでぼかす。 */
+/* 絵 (1672x941・横長) の大事な所: 題字 x455〜1252・y50〜、「はじめる」の札 x640〜1046・y722〜828。
+   縦: 幅 135vw で真ん中に置く (左右の端の旗などは切れるが、題字・主人公・札は入る)。
+   横: 札の下端を安全域のすぐ上に合わせ、題字の上端が切れない高さまで大きくする。
+   どちらも、余った所は同じ絵をぼかして敷く。 */
 .title-screen {
   position: absolute;
   inset: 0;
   z-index: 50;
   overflow: hidden;
-  --tw: clamp(500px, calc(100vh * 0.6), 560px);
-  background: linear-gradient(to bottom, #3a8fe0 0px, #4ea6f1 calc(100% - var(--tw) * 1448 / 1086));
+  /* 縦: 上は空、下は草の色でつなぐ (ぼかした絵を敷くと、題字の黒い墨がにじんで暗い塊になった) */
+  background: linear-gradient(to bottom, #3f93e0 0%, #8cc8f4 calc(46% - var(--th) / 2), #7fae4e calc(46% + var(--th) / 2), #4f7d33 100%);
+  --tw: 135vw;
+  --th: calc(var(--tw) * 941 / 1672);
+}
+.title-screen::before {
+  display: none;
+  content: "";
+  position: absolute;
+  inset: -40px;
+  background: url(./title.jpg) center / cover;
+  filter: blur(18px) brightness(.92);
 }
 .title-screen[hidden] { display: none; }
 
-/* 背が高い画面 (ホーム画面から開いたとき 932pt) では空が間延びするので少し大きくする。
-   上限 560px = 左右に 65px ずつはみ出す (元の絵で 126px。題字は x165〜915 なので切れない) */
 .title-frame {
   position: absolute;
-  bottom: 0;
-  left: calc(50% - var(--tw) / 2);
+  left: calc(50% - var(--tw) * 0.51);
+  top: calc(46% - var(--th) / 2);
   width: var(--tw);
-  aspect-ratio: 1086 / 1448;
+  height: var(--th);
 }
 
 .title-art {
   display: block;
   width: 100%;
   height: 100%;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 56px);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 56px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
   pointer-events: none;
   -webkit-user-drag: none;
 }
 
-/* 絵に描いてある「はじめる」の札 (元の絵で x268〜818, y1230〜1370。左右の飾り帯を含む) */
+/* 縦のときだけ、絵の下に「横にすると大きい」と添える */
+.title-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(46% + var(--th) / 2 + 18px);
+  margin: 0 auto;
+  width: max-content;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(251,246,236,.92);
+  border: 2px solid var(--gold-edge);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+/* 絵に描いてある「はじめる」の札 (元の絵で x640〜1046, y722〜828。まわりの茶の枠を含む) */
 .title-start {
   position: absolute;
-  left: 24.68%;
-  top: 84.94%;
-  width: 50.64%;
-  height: 9.67%;
+  left: 38.28%;
+  top: 76.73%;
+  width: 24.28%;
+  height: 11.26%;
   padding: 0;
   border: 0;
   background: transparent;
   cursor: pointer;
 }
-/* 札そのもの (x328〜758, y1238〜1362) だけを押したときに光らせる */
+/* 札のクリームの地 (x660〜1028, y734〜816) だけを押したときに光らせる */
 .title-start-glow {
   position: absolute;
-  left: 10.9%;
-  top: 5.7%;
-  width: 78.2%;
-  height: 88.6%;
-  border-radius: 22px;
+  left: 4.93%;
+  top: 11.3%;
+  width: 90.6%;
+  height: 77.4%;
+  border-radius: 10px;
   pointer-events: none;
 }
 .title-start:active .title-start-glow { background: rgba(255, 255, 255, .3); }
@@ -743,16 +770,16 @@ img { -webkit-user-drag: none; }
    合戦を横いっぱいに広げる。タブは左の縦帯へ、ボタンは左右の下の角へ。
    戦場は安全域の下まで敷き、ボタンや札だけを安全域の内側に置く。 */
 @media (orientation: landscape) {
-  /* タイトル: 絵を高さに合わせて丸ごと見せ、左右はぼかした同じ絵で埋める */
-  .title-screen { --tw: calc(100vh * 1086 / 1448); background: #4ea6f1; }
-  .title-screen::before {
-    content: "";
-    position: absolute;
-    inset: -40px;
-    background: url(./title.jpg) center / cover;
-    filter: blur(18px) brightness(.95);
+  /* タイトル: 札の下端を安全域のすぐ上 (6px) に置き、題字の上端 (y50 = 5.3%) が切れない高さにする。
+     見せる範囲は 札の下端 88% − 題字の上 4.5% = 83.5%。幅が足りない画面では幅で決める */
+  .title-screen {
+    --th: min(calc((100vh - var(--safe-b) - 8px) / 0.835), calc(100vw * 941 / 1672));
+    --tw: calc(var(--th) * 1672 / 941);
   }
+  .title-screen::before { display: block; }
+  .title-frame { left: calc(50% - var(--tw) / 2); top: auto; bottom: calc(var(--safe-b) + 6px - var(--th) * 0.12); }
   .title-art { -webkit-mask-image: none; mask-image: none; }
+  .title-hint { display: none; }
 
   #app { flex-direction: row; padding: 0; }
   #tabbar {
