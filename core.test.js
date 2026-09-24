@@ -178,20 +178,31 @@ function stateAtRank(r, extra) {
   return stateAt(t, extra);
 }
 
-/** 敵が前線に着くまで進める */
-function untilEngaged(b) {
-  for (let i = 0; i < 60 * 20; i++) {
-    const f = Core.frontEnemy(b);
-    if (f && Core.inReach(b, f)) return f;
+/** 今の敵が入ってきて戦える状態になるまで進める */
+function untilReady(b) {
+  for (let i = 0; i < 60 * 10; i++) {
+    const e = Core.currentEnemy(b);
+    if (e && e.state === 'idle') return e;
     Core.stepBattle(b, 1 / 60);
   }
   throw new Error('敵が来ない');
 }
 
+/** 特定のタイプの敵と 1 対 1 にする (テストで種類を決め打ちしたいとき) */
+function duelWith(kind, r) {
+  const b = Core.createBattle(stateAtRank(r || 3), Core.mulberry32(1));
+  const k = Core.ENEMY_KINDS[kind];
+  const e = b.enemies[0];
+  Object.assign(e, { kind: kind, name: k.name, look: k.look, boss: !!k.boss, interval: k.interval, cd: k.interval });
+  return { b, e: untilReady(b) };
+}
+
 function runBattle(state, bot, seed) {
   const b = Core.createBattle(state, Core.mulberry32(seed));
-  for (let i = 0; i < 60 * 240 && b.phase === 'fight'; i++) {
-    bot(b);
+  let next = 0;
+  for (let i = 0; i < 60 * 300 && b.phase === 'fight'; i++) {
+    // 人と同じくらいの間隔 (0.2〜0.3秒) でしか押さない
+    if (b.t >= next && bot(b)) next = b.t + 0.2 + b.rng() * 0.1;
     Core.stepBattle(b, 1 / 60);
     b.events.length = 0;
   }
@@ -199,148 +210,210 @@ function runBattle(state, bot, seed) {
 }
 
 // 下手: パンチだけを押し続ける
-const masher = (b) => { Core.punch(b); };
-// ふつう: パンチを押しつつ、猫じゃらしも時々。スペシャルは貯まったら使う
+const masher = (b) => Core.punch(b);
+// ふつう: 猫じゃらしで肉球を 3 つためてからパンチ。体力が減ったら魚
 const casual = (b) => {
-  if (b.special >= 100) { Core.special(b); return; }
-  const f = Core.frontEnemy(b);
-  if (f && Core.inReach(b, f) && b.cd.lure === 0 && b.rng() < 0.02) { Core.lure(b); return; }
-  Core.punch(b);
+  const e = Core.currentEnemy(b); if (!e) return false;
+  if (b.player.hp < b.player.maxHp * 0.3 && b.items.fish > 0) return Core.useItem(b, 'fish');
+  if (e.state === 'charmed' && b.paw >= 3) return Core.punch(b);
+  return Core.lure(b);
 };
-// 上手: 振りかぶりを見てから 0.15〜0.35 秒で猫じゃらし (人の反応の遅れを入れる)
+// 上手: 振りかぶりに見切り、肉球を満タンにして飛びつきの高いところでパンチ、ねこ侍はスキを狙う
 const skilled = (b) => {
-  if (b.special >= 100) { Core.special(b); return; }
-  const f = Core.frontEnemy(b);
-  if (f && f.windup) {
-    const key = f.id + ':' + Math.floor(b.t / 0.6);
-    if (b._seen !== key) { b._seen = key; b._react = b.t + 0.15 + b.rng() * 0.2; }
-    if (b.t >= b._react && b.cd.lure === 0) { Core.lure(b); return; }
+  const e = Core.currentEnemy(b); if (!e) return false;
+  const k = Core.ENEMY_KINDS[e.kind];
+  if (b.player.hp < b.player.maxHp * 0.35 && b.items.fish > 0) return Core.useItem(b, 'fish');
+  if (e.state === 'windup' && b.cd.lure === 0) return Core.lure(b);
+  if (e.state === 'recover' && e.open) return Core.punch(b);
+  if (e.state === 'charmed') {
+    if (b.paw >= Core.PAW_MAX || e.charm < 0.5) return (Core.atJumpPeak(e) || e.charm < 0.35) ? Core.punch(b) : false;
+    return Core.lure(b);
   }
-  if (f && Core.inReach(b, f)) Core.punch(b);
+  if ((e.state === 'idle' || e.state === 'recover') && e.wary <= 0 && (!k.needLook || Core.isLooking(e))) return Core.lure(b);
+  return false;
 };
 
-test('合戦: 敵は段位に応じた数で、最後は大将', () => {
+test('合戦: 敵は1匹ずつ。数は段位で増え、最後は大将 (最初の戦はのら猫の親分、あとは大きなボス猫)', () => {
   for (const r of [0, 3, 9]) {
     const b = Core.createBattle(stateAtRank(r), Core.mulberry32(1));
-    assert.strictEqual(b.enemies.length, Math.min(7, 3 + Math.floor(r / 2)));
-    assert.strictEqual(b.enemies[b.enemies.length - 1].kind, 'boss');
-    assert.ok(b.enemies.every((e) => !e.spawned), 'はじめはまだ誰も出てきていない');
+    assert.strictEqual(b.enemies.length, Core.battleSize(r));
+    const last = b.enemies[b.enemies.length - 1];
+    assert.strictEqual(last.boss, true);
+    assert.strictEqual(last.kind === 'boss', r > 0);
+    assert.strictEqual(last.reward, Core.enemyReward(r, true));
+    assert.strictEqual(b.enemies[0].state, 'enter');
+    assert.ok(b.enemies.slice(1).every((e) => e.state === 'wait'), 'ほかの敵はまだ出てこない');
   }
 });
 
-test('合戦: 敵は近い順に並んで止まり、殴れるのは先頭だけ', () => {
-  const b = Core.createBattle(stateAtRank(3), Core.mulberry32(2));
-  for (let i = 0; i < 60 * 12; i++) Core.stepBattle(b, 1 / 60); // 4匹とも出てきて並ぶまで
-  const line = b.enemies.filter((e) => e.spawned && e.alive).sort((a, c) => a.x - c.x);
-  assert.ok(line.length >= 2);
-  assert.ok(Core.inReach(b, line[0]), '先頭は届く');
-  assert.ok(!Core.inReach(b, line[1]), '2番目は届かない');
-  assert.ok(line[1].x - line[0].x >= Core.GAP - 1, '重ならずに並ぶ');
-});
-
-test('合戦: 届かないパンチは空振りで、コンボが切れる', () => {
-  const b = Core.createBattle(stateAtRank(0), Core.mulberry32(3));
-  b.combo = 3;
-  assert.strictEqual(Core.punch(b), true);
+test('合戦: 入ってくる途中の敵には、じゃらしもパンチも当たらない', () => {
+  const b = Core.createBattle(stateAtRank(0), Core.mulberry32(2));
+  Core.lure(b); Core.punch(b);
   assert.ok(b.events.some((e) => e.type === 'miss'));
-  assert.strictEqual(b.combo, 0);
+  assert.ok(b.events.some((e) => e.type === 'lure' && e.result === 'miss'));
+  assert.strictEqual(b.enemies[0].hp, b.enemies[0].maxHp);
 });
 
-test('合戦: パンチは続けて押せない (待ち時間)', () => {
-  const b = Core.createBattle(stateAtRank(0), Core.mulberry32(3));
-  untilEngaged(b);
-  assert.strictEqual(Core.punch(b), true);
-  assert.strictEqual(Core.punch(b), false);
-});
-
-test('合戦: パンチは届く敵を減らし、夢中の敵には2倍', () => {
-  const b = Core.createBattle(stateAtRank(2), Core.mulberry32(4));
-  const f = untilEngaged(b);
-  const hp0 = f.hp;
-  Core.punch(b);
-  const normal = hp0 - f.hp;
-  assert.strictEqual(normal, b.player.atk);
-
-  b.cd.punch = 0; b.combo = 0; b.comboTimer = 0;
+test('合戦: のら猫は猫じゃらしですぐ夢中になり、当たるたびに肉球がたまる', () => {
+  const { b, e } = duelWith('nora');
   Core.lure(b);
-  assert.ok(f.charm > 0, '猫じゃらしで夢中になる');
-  const hp1 = f.hp;
-  Core.punch(b);
-  assert.strictEqual(hp1 - f.hp, b.player.atk * 2);
+  assert.strictEqual(e.state, 'charmed');
+  assert.strictEqual(b.paw, 1);
+  for (let i = 0; i < 6; i++) { b.cd.lure = 0; Core.lure(b); }
+  assert.strictEqual(b.paw, Core.PAW_MAX, '5 で満タン');
 });
 
-test('合戦: 続けて当てるとコンボで上乗せされる', () => {
-  const b = Core.createBattle(stateAtRank(2), Core.mulberry32(5));
-  const f = untilEngaged(b);
-  const hits = [];
-  for (let i = 0; i < 4; i++) {
-    b.cd.punch = 0;
-    f.x = Core.PLAYER_X + Core.STOP; // のけぞりを戻して必ず届くように
-    const h = f.hp; Core.punch(b); hits.push(h - f.hp);
-  }
-  assert.ok(hits[3] > hits[0], `コンボで強くなる (${hits.join(',')})`);
+test('合戦: 肉球が満タンになると、それ以上振っても夢中は延びない (振り続けて安全、にならない)', () => {
+  const { b, e } = duelWith('nora');
+  for (let i = 0; i < 5; i++) { b.cd.lure = 0; Core.lure(b); }
+  const left = e.charm;
+  b.cd.lure = 0; Core.lure(b);
+  assert.strictEqual(e.charm, left);
+  assert.ok(b.events.some((ev) => ev.result === 'full'));
 });
 
-test('合戦: 敵は振りかぶってから攻撃してくる。夢中の間は攻撃しない', () => {
-  const b = Core.createBattle(stateAtRank(0), Core.mulberry32(6));
-  const f = untilEngaged(b);
-  let sawWindup = false;
-  for (let i = 0; i < 60 * 3 && b.player.hp === b.player.maxHp; i++) {
-    Core.stepBattle(b, 1 / 60);
-    if (f.windup) sawWindup = true;
-  }
-  assert.ok(sawWindup, '攻撃の前に振りかぶる');
-  assert.ok(b.player.hp < b.player.maxHp, '攻撃されると体力が減る');
+test('合戦: 夢中が切れると飽きて、肉球ゲージは消える', () => {
+  const { b, e } = duelWith('nora');
+  Core.lure(b);
+  for (let i = 0; i < 60 * 3; i++) Core.stepBattle(b, 1 / 60);
+  assert.notStrictEqual(e.state, 'charmed');
+  assert.strictEqual(b.paw, 0);
+  assert.ok(b.events.some((ev) => ev.type === 'bored'));
+});
 
+test('合戦: 夢中の間は攻撃してこない。夢中でなければ振りかぶってから攻撃する', () => {
+  const { b, e } = duelWith('nora');
+  Core.lure(b);
   const hp = b.player.hp;
+  for (let i = 0; i < Math.floor(e.charm * 60) - 1; i++) Core.stepBattle(b, 1 / 60);
+  assert.strictEqual(b.player.hp, hp, '夢中の間は無事');
+  let sawWindup = false;
+  for (let i = 0; i < 60 * 4 && b.player.hp === hp; i++) { Core.stepBattle(b, 1 / 60); if (e.state === 'windup') sawWindup = true; }
+  assert.ok(sawWindup && b.player.hp < hp, '夢中が切れると、振りかぶってから攻撃してくる');
+});
+
+test('合戦: 夢中の敵へのパンチは、肉球の数だけ大きく効く。満タンなら「猫じゃらしコンボ」', () => {
+  for (const paw of [1, 3, 5]) {
+    const { b, e } = duelWith('nora');
+    for (let i = 0; i < paw; i++) { b.cd.lure = 0; Core.lure(b); }
+    e.age = 0; // 飛びつきの低いところ (会心にしない)
+    const hp = e.hp;
+    Core.punch(b);
+    assert.strictEqual(hp - e.hp, Math.min(hp, Math.round(b.player.atk * Core.comboMul(paw))), `肉球${paw}`);
+    const ev = b.events.find((x) => x.type === 'hit');
+    assert.strictEqual(ev.combo, paw === Core.PAW_MAX);
+    assert.strictEqual(b.paw, 0, 'パンチで肉球は使い切る');
+  }
+  assert.ok(Core.comboMul(5) > Core.comboMul(4) * 1.4, '満タンは特大');
+});
+
+test('合戦: 飛びつきの高いところでパンチすると「会心の猫パンチ」(1.5倍)', () => {
+  const { b, e } = duelWith('nora', 0);
+  Core.lure(b);
+  e.age = Core.JUMP_PERIOD * 0.45;
+  assert.strictEqual(Core.atJumpPeak(e), true);
+  e.hp = e.maxHp = 10000;
+  Core.punch(b);
+  const ev = b.events.find((x) => x.type === 'hit');
+  assert.strictEqual(ev.crit, true);
+  assert.strictEqual(ev.amount, Math.round(b.player.atk * Core.comboMul(1) * 1.5));
+});
+
+test('合戦: 殴られた敵はしばらく警戒して羽に引っかからない。外すと次に振れるまで長い', () => {
+  const { b, e } = duelWith('nora');
+  e.hp = e.maxHp = 10000;
+  Core.lure(b); Core.punch(b);
+  for (let i = 0; i < 60 * 0.7; i++) Core.stepBattle(b, 1 / 60); // 殴られてのけぞる間を過ぎる
   b.cd.lure = 0;
   Core.lure(b);
-  const charm = f.charm;
-  for (let i = 0; i < Math.floor(charm * 60) - 1; i++) Core.stepBattle(b, 1 / 60);
-  assert.strictEqual(b.player.hp, hp, '夢中の間は攻撃されない');
+  assert.ok(b.events.some((ev) => ev.result === 'wary'));
+  assert.ok(b.cd.lure > Core.LURE_COOLDOWN, '外した猫じゃらしは待ち時間が長い');
+  assert.notStrictEqual(e.state, 'charmed');
 });
 
-test('合戦: 振りかぶった瞬間の猫じゃらしは「見切り」で、長く夢中になりスペシャルも多くたまる', () => {
-  const b = Core.createBattle(stateAtRank(0), Core.mulberry32(7));
-  const f = untilEngaged(b);
-  while (!f.windup) Core.stepBattle(b, 1 / 60);
+test('合戦: 振りかぶった瞬間の猫じゃらしは「見切り」。攻撃を止め、肉球が2たまる (警戒中でも効く)', () => {
+  const { b, e } = duelWith('nora');
+  e.wary = 5;
+  while (e.state !== 'windup') Core.stepBattle(b, 1 / 60);
+  const hp = b.player.hp;
   Core.lure(b);
-  const ev = b.events.find((e) => e.type === 'lure');
-  assert.strictEqual(ev.perfect, true);
-  const perfectCharm = f.charm;
-  const perfectSpecial = b.special;
-
-  const b2 = Core.createBattle(stateAtRank(0), Core.mulberry32(7));
-  const f2 = untilEngaged(b2);
-  Core.lure(b2);
-  assert.ok(perfectCharm > f2.charm, `見切りの方が長い (${perfectCharm} > ${f2.charm})`);
-  assert.ok(perfectSpecial > b2.special);
+  assert.strictEqual(e.state, 'charmed');
+  assert.strictEqual(b.paw, 2);
+  assert.ok(b.events.some((ev) => ev.result === 'perfect'));
+  for (let i = 0; i < 30; i++) Core.stepBattle(b, 1 / 60);
+  assert.strictEqual(b.player.hp, hp, '攻撃は来ない');
 });
 
-test('合戦: 猫じゃらしは遠くの敵を引き寄せる', () => {
-  const b = Core.createBattle(stateAtRank(0), Core.mulberry32(8));
-  while (!b.enemies[0].spawned) Core.stepBattle(b, 1 / 60);
-  const f = b.enemies[0];
-  const x0 = f.x;
+test('合戦: すばしっこい猫は、羽を見ているときに振らないとかわす', () => {
+  const { b, e } = duelWith('quick');
+  e.age = Core.JUMP_PERIOD * 0 + 1.0; // 見ていない所 (0.75〜1.8秒)
+  assert.strictEqual(Core.isLooking(e), false);
   Core.lure(b);
-  assert.ok(f.x < x0, '近づく');
-  assert.ok(f.x >= Core.PLAYER_X + Core.STOP, '自分より前には来ない');
+  assert.ok(b.events.some((ev) => ev.result === 'dodge'));
+  assert.notStrictEqual(e.state, 'charmed');
+  b.cd.lure = 0;
+  e.age = 1.8 + 0.2; // 見ている所
+  Core.lure(b);
+  assert.strictEqual(e.state, 'charmed');
 });
 
-test('合戦: スペシャルはゲージが満タンのときだけ、出ている敵ぜんぶに当たる', () => {
-  const b = Core.createBattle(stateAtRank(3), Core.mulberry32(9));
-  for (let i = 0; i < 60 * 6; i++) Core.stepBattle(b, 1 / 60);
-  assert.strictEqual(Core.special(b), false, 'たまっていないと出ない');
-  b.special = 100;
-  const out = b.enemies.filter((e) => e.spawned && e.alive);
-  const before = out.map((e) => e.hp);
-  assert.strictEqual(Core.special(b), true);
-  assert.strictEqual(b.special, 0);
-  out.forEach((e, i) => assert.ok(e.hp < before[i], '出ている敵はみな減る'));
-  assert.ok(b.enemies.filter((e) => !e.spawned).every((e) => e.hp === e.maxHp), 'まだ出ていない敵には当たらない');
+test('合戦: ねこ侍は夢中でないときに殴ると受け流して反撃。攻撃のあとのスキに殴ると会心', () => {
+  const { b, e } = duelWith('samurai');
+  const hp = b.player.hp;
+  const ehp = e.hp;
+  Core.punch(b);
+  assert.ok(b.events.some((ev) => ev.type === 'parry'));
+  assert.ok(b.player.hp < hp, '反撃される');
+  assert.strictEqual(e.hp, ehp, '受け流されて効かない');
+  while (!(e.state === 'recover' && e.open)) Core.stepBattle(b, 1 / 60);
+  b.cd.punch = 0;
+  const before = e.hp;
+  Core.punch(b);
+  assert.strictEqual(before - e.hp, Math.min(before, Math.round(b.player.atk * 2.5)));
+  assert.ok(b.events.some((ev) => ev.type === 'hit' && ev.open && ev.crit));
 });
 
-test('合戦: 全部倒すと勝ち、手柄と資材が入る。出世もする', () => {
+test('合戦: 大きなボス猫は3回振ってやっと夢中。夢中でないとパンチは半分', () => {
+  const { b, e } = duelWith('boss');
+  e.hp = e.maxHp = 10000;
+  const results = [];
+  for (let i = 0; i < 3; i++) { b.cd.lure = 0; Core.lure(b); results.push(b.events.filter((ev) => ev.type === 'lure').pop().result); }
+  assert.deepStrictEqual(results, ['resist', 'resist', 'charm']);
+  const { b: b2, e: e2 } = duelWith('boss');
+  e2.hp = e2.maxHp = 10000;
+  Core.punch(b2);
+  assert.strictEqual(10000 - e2.hp, Math.round(b2.player.atk * 0.5));
+});
+
+test('合戦: 魚で体力が戻り、またたびで敵が夢中になる。持っている数だけ使える', () => {
+  const { b, e } = duelWith('boss');
+  assert.strictEqual(Core.useItem(b, 'fish'), false, '体力が満タンなら魚は使わない');
+  b.player.hp = 10;
+  assert.strictEqual(Core.useItem(b, 'fish'), true);
+  assert.strictEqual(b.player.hp, 10 + Math.round(b.player.maxHp * 0.4));
+  assert.strictEqual(Core.useItem(b, 'matatabi'), true);
+  assert.strictEqual(e.state, 'charmed', 'ボス猫でも、またたびなら一発で夢中');
+  assert.strictEqual(b.paw, 2);
+  assert.strictEqual(Core.useItem(b, 'matatabi'), false, '1つしか持っていない');
+});
+
+test('合戦: 倒すと少し間をおいて次の敵が出てくる。最後の1匹が倒れたら勝ち', () => {
+  const b = Core.createBattle(stateAtRank(0), Core.mulberry32(3));
+  for (let n = 0; n < b.enemies.length; n++) {
+    const e = untilReady(b);
+    assert.strictEqual(b.current, n, `${n + 1}匹目が出てくる`);
+    e.hp = 1;
+    b.cd.lure = 0; b.cd.punch = 0;
+    Core.useItem(b, 'matatabi') || Core.lure(b);
+    Core.punch(b);
+    assert.strictEqual(e.state, 'down');
+    if (n === b.enemies.length - 1) assert.strictEqual(b.phase, 'fight', '倒れる様子を見せてから終わる');
+    for (let i = 0; i < 60 * 1.5; i++) Core.stepBattle(b, 1 / 60);
+  }
+  assert.strictEqual(b.phase, 'won');
+});
+
+test('合戦: 勝つと手柄・資材・拾い物が入り、使ったアイテムは減る。出世もする', () => {
   const s = stateAtRank(0);
   const b = runBattle(s, casual, 1);
   assert.strictEqual(b.phase, 'won');
@@ -348,48 +421,50 @@ test('合戦: 全部倒すと勝ち、手柄と資材が入る。出世もする
   const r = Core.applyBattleResult(s, b);
   assert.strictEqual(r.state.totalMerit, s.totalMerit + b.merit + b.bonus);
   assert.strictEqual(r.state.materials, s.materials + b.materials);
+  assert.strictEqual(r.state.items.fish, s.items.fish - b.used.fish + b.loot.fish);
   assert.strictEqual(r.state.battlesWon, 1);
   assert.strictEqual(r.rankedUp, true, '村の子猫は1勝で出世する');
 });
 
-test('合戦: 体力が0になると負け。負けても何も減らない', () => {
+test('合戦: 体力が0になると負け。使ったアイテム以外は何も減らない', () => {
   const s = stateAtRank(5);
   const b = Core.createBattle(s, Core.mulberry32(10));
+  b.player.hp = 5;
+  Core.useItem(b, 'fish');
   for (let i = 0; i < 60 * 120 && b.phase === 'fight'; i++) Core.stepBattle(b, 1 / 60); // 何もしない
   assert.strictEqual(b.phase, 'lost');
   const r = Core.applyBattleResult(s, b);
-  assert.deepStrictEqual(r.state, s);
+  assert.strictEqual(r.state.items.fish, s.items.fish - 1);
+  assert.deepStrictEqual(Object.assign({}, r.state, { items: s.items }), s);
 });
 
-test('合戦: dt が 0 以下なら何もしない。大きな dt でも敵が瞬間移動しない', () => {
+test('合戦: dt が 0 以下なら何もしない。大きな dt でも一気に進まない', () => {
   const b = Core.createBattle(stateAtRank(0), Core.mulberry32(11));
   const snap = JSON.stringify(b.enemies);
   Core.stepBattle(b, 0);
   Core.stepBattle(b, -3);
   assert.strictEqual(JSON.stringify(b.enemies), snap);
-  b.t = 5; b.enemies[0].spawnAt = 0;
   Core.stepBattle(b, 1000);
-  assert.ok(b.enemies[0].x > Core.PLAYER_X + Core.STOP + 20, `1コマで前線まで来ない (x=${b.enemies[0].x})`);
+  assert.strictEqual(b.enemies[0].state, 'enter', '1コマで入場が終わらない');
 });
 
-test('合戦: 出陣の家臣がいっしょに戦う (2人まで)', () => {
+test('合戦: 出陣の家臣がいっしょに戦う (2人まで)。夢中は解けない', () => {
   let s = stateAtRank(3);
-  for (let i = 0; i < 2; i++) s = Core.recruitVassal(s, Core.mulberry32(i)).state;
   s = Object.assign({}, s, { merit: 10000, totalMerit: 10000 });
   for (let i = 0; i < 3; i++) s = Core.recruitVassal(s, Core.mulberry32(10 + i)).state;
   const ids = s.vassals.map((v) => v.id);
-  assert.strictEqual(Core.assignVassalJob(s, ids[0], 'battle').ok, true);
   s = Core.assignVassalJob(s, ids[0], 'battle').state;
   s = Core.assignVassalJob(s, ids[1], 'battle').state;
   assert.strictEqual(Core.assignVassalJob(s, ids[2], 'battle').ok, false, '3人目は出陣できない');
-
   const b = Core.createBattle(s, Core.mulberry32(12));
   assert.strictEqual(b.allies.length, 2);
-  const f = untilEngaged(b);
-  const hp = f.hp;
+  const e = untilReady(b);
+  e.hp = e.maxHp = 10000;
+  Core.useItem(b, 'matatabi'); // どの種類の敵でも 4 秒夢中
   for (let i = 0; i < 60 * 3; i++) Core.stepBattle(b, 1 / 60);
-  assert.ok(b.events.some((e) => e.type === 'allyAttack'));
-  assert.ok(f.hp < hp || !f.alive, '家臣の攻撃で敵が減る');
+  assert.ok(b.events.some((ev) => ev.type === 'allyAttack'));
+  assert.ok(e.hp < 10000);
+  assert.strictEqual(e.state, 'charmed');
 });
 
 test('合戦のあと: 枠が空いていれば、倒した相手が仲間になりたがることがある', () => {
@@ -403,7 +478,6 @@ test('合戦のあと: 枠が空いていれば、倒した相手が仲間にな
       assert.ok(Core.VASSAL_LOOKS.includes(offer.look));
       const r = Core.acceptRecruitOffer(s, offer);
       assert.strictEqual(r.ok, true);
-      assert.strictEqual(r.state.vassals.length, 1);
       assert.strictEqual(r.state.merit, s.merit, '仲間入りはただ');
     }
   }
@@ -412,18 +486,28 @@ test('合戦のあと: 枠が空いていれば、倒した相手が仲間にな
 });
 
 // 手ごたえの見張り。数字は各段位 30 回ずつ実際に戦わせて測った値をもとに線を引いた
-// (下手: r0 30/30 残HP43%、r4 2/30、r6以上 0/30。ふつう: 全段位 29〜30/30。上手: 全段位 30/30)
-test('手ごたえ: 下手でも最初は勝てる。上の段位は猫じゃらしを使わないと勝てない', () => {
+// (下手: r0 30/30 残75%、r1 以上 0/30。ふつう: 全段位 30/30 残18〜64%。上手: 全段位 30/30)
+test('手ごたえ: パンチだけでは最初の戦しか勝てない。猫じゃらしを使えば全段位で勝てる', () => {
   const wins = (r, bot) => {
     let w = 0;
     for (let seed = 1; seed <= 30; seed++) if (runBattle(stateAtRank(r), bot, seed).phase === 'won') w++;
     return w;
   };
   assert.strictEqual(wins(0, masher), 30, '村の子猫はパンチ連打で勝てる');
-  assert.ok(wins(7, masher) <= 3, 'パンチ連打だけでは城代の戦に勝てない');
+  assert.ok(wins(3, masher) <= 3, 'パンチ連打だけでは足軽の戦に勝てない');
   for (let r = 0; r < Core.RANKS.length; r++) {
     assert.ok(wins(r, casual) >= 26, `ふつうに遊べば勝てる (段位${r})`);
     assert.ok(wins(r, skilled) >= 29, `上手に遊べば勝てる (段位${r})`);
+  }
+  // 猫じゃらしを使えば無傷、にならないこと。測った値: 30/30 が殴られる。
+  // 外したときの待ち時間を普通に戻すと 0/30、パンチのあとの警戒を無くすと 21〜27/30 になる
+  for (const r of [1, 4, 8]) {
+    let hurt = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const b = runBattle(stateAtRank(r), casual, seed);
+      if (b.player.hp < b.player.maxHp) hurt++;
+    }
+    assert.ok(hurt >= 28, `ふつうに遊んでも、たいていは殴られる (段位${r}: ${hurt}/30)`);
   }
 });
 

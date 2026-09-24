@@ -166,111 +166,135 @@ img { -webkit-user-drag: none; }
   color: var(--ink);
 }
 
-/* --------------------------------------------------------- 合戦: 上の顔と体力 */
+/* --------------------------------------------------------- 合戦 (いただいたプレイ画面を縦に組み直したもの)
+   戦場は画面いっぱい。上の顔と体力、下のボタンは、その上に重ねる。 */
 
-.hud {
-  flex: none;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin: 8px 10px 8px;
-  padding: 8px 12px 8px 8px;
+.battle-view { position: relative; }
+.scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #9fd6f7;
 }
+.scene canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
-.portrait {
+/* 上の段: 自分 / 敵 / 一時停止 */
+.hud-top {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  pointer-events: none;
+}
+.hud-top > * { pointer-events: auto; }
+.unit { display: flex; align-items: center; min-width: 0; }
+.unit-player { flex: 1 1 56%; }
+.unit-enemy { flex: 1 1 44%; justify-content: flex-end; }
+.unit[hidden] { display: none; }
+.unit-face {
   flex: none;
-  width: 68px;
-  height: 68px;
+  position: relative;
+  z-index: 1;
+  width: 62px;
+  height: 62px;
   border-radius: 50%;
   border: 3px solid var(--gold);
-  box-shadow: 0 0 0 2px var(--gold-edge), 0 3px 8px rgba(58,42,28,.25);
-  background: radial-gradient(circle at 50% 35%, #fff8e6, #f1dfb6);
+  box-shadow: 0 0 0 2px #3a2a1c, 0 4px 10px rgba(0,0,0,.35);
+  background: radial-gradient(circle at 50% 35%, #fff8e6, #e9d3a3);
   overflow: hidden;
-  position: relative;
 }
-.portrait img {
-  position: absolute;
-  left: -8%;
-  top: 2%;
-  width: 116%;
-  height: auto;
-}
-
-.hud-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.hud-row { display: flex; align-items: center; gap: 8px; }
-.hud-name { margin: 0; font-weight: 800; font-size: 16px; }
-.rank-tag {
-  font-size: 12px;
-  font-weight: 800;
+.unit-face img { position: absolute; left: -8%; top: 2%; width: 116%; height: auto; }
+.enemy-face { width: 50px; height: 50px; }
+.enemy-face img { left: -22%; top: 0; width: 144%; }
+.unit-plate {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: -14px;
+  padding: 5px 10px 5px 20px;
+  border-radius: 0 12px 12px 0;
+  background: linear-gradient(rgba(30,26,40,.86), rgba(20,18,30,.86));
+  border: 1.5px solid rgba(233,196,106,.7);
   color: #fff;
-  background: var(--navy);
-  border-radius: 999px;
-  padding: 3px 10px;
-  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
-.merit { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 15px; white-space: nowrap; }
-.merit b { font-variant-numeric: tabular-nums; }
-.coin {
-  display: inline-block;
-  width: 16px;
-  height: 11px;
+.unit-enemy .unit-plate { margin-left: 0; margin-right: -12px; padding: 5px 18px 6px 10px; border-radius: 12px 0 0 12px; }
+.unit-name { margin: 0; font-size: 14px; font-weight: 900; letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar { height: 9px; border-radius: 99px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.25); overflow: hidden; }
+.bar-fill { height: 100%; width: 100%; border-radius: 99px; }
+.bar-hp .bar-fill { background: linear-gradient(#b8f07a, #5fbf3a); }
+.bar-hp .bar-fill.low { background: linear-gradient(#ff9a80, #e0553f); }
+.bar-exp { height: 5px; }
+.bar-exp .bar-fill { background: linear-gradient(#8fd0ff, #3a8fe0); width: 0%; }
+.bar-enemy { height: 10px; }
+.bar-enemy .bar-fill { background: linear-gradient(#ff7a6a, #d9342a); }
+.unit-sub { font-size: 10px; color: #f6e2a8; white-space: nowrap; overflow: hidden; }
+.unit-sub .lv { color: #ffe27a; font-size: 12px; }
+.unit-sub .hp-text { color: #fff; float: right; font-variant-numeric: tabular-nums; }
+
+.pause-btn {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 2px solid var(--gold);
+  background: linear-gradient(rgba(30,26,40,.9), rgba(20,18,30,.9));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 0;
+}
+.pause-btn span { width: 6px; height: 18px; border-radius: 2px; background: #fff; }
+
+.mission {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 84px;
+  margin: 0 auto;
+  width: max-content;
+  max-width: calc(100% - 40px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 16px 5px 6px;
+  border-radius: 999px;
+  background: linear-gradient(rgba(30,26,40,.82), rgba(20,18,30,.82));
+  border: 1.5px solid rgba(233,196,106,.8);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  pointer-events: none;
+}
+.paw-dot {
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: linear-gradient(#ffe89a, #d9a52a);
-  border: 1.5px solid var(--gold-edge);
-}
-
-.hp { display: flex; align-items: center; gap: 6px; }
-.hp-icon { color: var(--hp-low); font-size: 14px; line-height: 1; }
-.hp-bar, .next-bar {
-  flex: 1 1 auto;
-  height: 11px;
-  border-radius: 999px;
-  background: #e8d9bb;
-  border: 1.5px solid #d6c192;
-  overflow: hidden;
-}
-.hp-fill {
-  height: 100%;
-  width: 100%;
-  border-radius: 999px;
-  background: linear-gradient(#9be07f, var(--hp));
-}
-.hp-fill.low { background: linear-gradient(#ff937c, var(--hp-low)); }
-.hp-text { font-size: 12px; font-weight: 800; min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
-
-.next-rank { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-2); }
-.next-rank span { white-space: nowrap; }
-.next-bar { height: 7px; }
-.next-fill { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, var(--gold), #f5b83a); }
-
-/* --------------------------------------------------------- 合戦: 戦場 */
-
-.field {
+  background: radial-gradient(circle, #ffe9a8, #d9a52a);
+  border: 1.5px solid #fff4c8;
   position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
-  margin: 0 10px;
-  border-radius: 18px;
-  border: 3px solid var(--gold-edge);
-  box-shadow: 0 0 0 2px var(--gold-2) inset, 0 6px 16px rgba(58,42,28,.2);
-  overflow: hidden;
-  background: #cfe9f8;
 }
-.field canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.paw-dot::after { content: "🐾"; position: absolute; inset: 0; font-size: 12px; line-height: 22px; text-align: center; font-style: normal; }
 
 .field-banner {
   position: absolute;
   left: 0;
   right: 0;
-  top: 30%;
+  top: 36%;
   text-align: center;
-  font-size: 44px;
+  font-size: 46px;
   font-weight: 900;
-  color: #fff;
-  letter-spacing: .08em;
-  -webkit-text-stroke: 3px var(--ink);
+  color: #ffe27a;
+  letter-spacing: .06em;
+  -webkit-text-stroke: 6px #3a2a1c;
   paint-order: stroke fill;
-  text-shadow: 0 4px 0 rgba(58,42,28,.35);
+  text-shadow: 0 5px 0 rgba(58,42,28,.35);
   pointer-events: none;
 }
 .field-banner[hidden] { display: none; }
@@ -285,14 +309,15 @@ img { -webkit-user-drag: none; }
   height: fit-content;
   padding: 16px 18px 18px;
   border-radius: 18px;
-  background: rgba(251,246,236,.96);
+  background: rgba(251,246,236,.97);
   border: 3px solid var(--gold-edge);
-  box-shadow: 0 0 0 3px var(--gold-2) inset, 0 10px 24px rgba(58,42,28,.3);
+  box-shadow: 0 0 0 3px var(--gold-2) inset, 0 10px 24px rgba(58,42,28,.35);
   text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
+  z-index: 5;
 }
 .field-panel[hidden] { display: none; }
 .panel-title {
@@ -305,11 +330,9 @@ img { -webkit-user-drag: none; }
   paint-order: stroke fill;
 }
 .panel-text { margin: 0; font-size: 14px; color: var(--ink-2); line-height: 1.6; }
-
 .result-rows { display: flex; flex-direction: column; gap: 4px; font-size: 15px; min-width: 220px; }
 .result-row { display: flex; justify-content: space-between; gap: 16px; }
 .result-row b { font-variant-numeric: tabular-nums; }
-
 .offer {
   display: flex;
   align-items: center;
@@ -327,104 +350,165 @@ img { -webkit-user-drag: none; }
 .offer-actions { display: flex; gap: 6px; }
 .offer-actions button { padding: 6px 12px; font-size: 13px; }
 
-/* --------------------------------------------------------- 合戦: スペシャルとボタン */
-
-.special-row {
-  flex: none;
+/* 下の段: 猫じゃらし / アイテム / 肉球ゲージ / 猫パンチ */
+.controls {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 10px;
+  display: grid;
+  grid-template-columns: 108px 62px 1fr 108px;
+  align-items: end;
+  gap: 6px;
+  pointer-events: none;
+}
+.controls > * { pointer-events: auto; }
+.round-btn {
+  position: relative;
+  width: 108px;
+  height: 128px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.round-face {
+  position: absolute;
+  left: 4px;
+  top: 0;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  border: 4px solid var(--gold);
+  box-shadow: 0 0 0 3px #3a2a1c, 0 0 0 5px var(--gold-edge), 0 6px 14px rgba(0,0,0,.4);
+  background: radial-gradient(circle at 50% 38%, #4a4038, #1c1712 75%);
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 8px 14px 6px;
-  font-size: 12px;
-  font-weight: 800;
+  justify-content: center;
 }
-.special-label { color: var(--ink-2); white-space: nowrap; }
-.special-bar {
-  flex: 1 1 auto;
-  height: 10px;
-  border-radius: 999px;
-  background: #e8d9bb;
-  border: 1.5px solid #d6c192;
-  overflow: hidden;
-}
-.special-fill {
-  height: 100%;
-  width: 0%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #f7a8c4, #ffe27a, #9ee3a0, #8fd0ff, #c9a6ff);
-}
-.combo { min-width: 5.5em; text-align: right; color: var(--red); white-space: nowrap; }
-
-.skills {
-  flex: none;
-  display: grid;
-  grid-template-columns: 1fr 96px 1fr;
-  align-items: center;
-  gap: 12px;
-  margin: 0 12px;
-  padding-bottom: 8px;
-}
-
-.skill {
-  position: relative;
-  height: 96px;
-  border-radius: 20px;
-  border: 3px solid var(--gold);
-  background: linear-gradient(#34457a, var(--navy-2));
-  box-shadow: 0 0 0 2px var(--gold-edge), 0 5px 0 #121931, 0 8px 14px rgba(0,0,0,.25);
+.punch-btn .round-face { background: radial-gradient(circle at 50% 38%, #fff3c4, #e9b93c 60%, #a8741a); }
+.round-face svg { width: 64px; height: 64px; }
+.round-plate {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 5px 0;
+  border-radius: 10px;
+  background: linear-gradient(rgba(30,26,40,.95), rgba(20,18,30,.95));
+  border: 2px solid var(--gold);
   color: #fff;
-  cursor: pointer;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: .04em;
+}
+.round-btn.pressed .round-face { transform: scale(.94); }
+/* 待ち時間。--cd は 0 (使える) 〜 1 (使ったばかり) */
+.round-cd {
+  position: absolute;
+  left: 4px;
+  top: 0;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: conic-gradient(rgba(10,10,20,.6) calc(var(--cd, 0) * 360deg), transparent 0);
+  contain: strict;
+  will-change: transform;
+}
+.item-btn {
+  position: relative;
+  width: 62px;
+  height: 66px;
+  margin-bottom: 30px;
+  border-radius: 14px;
+  border: 2.5px solid var(--gold);
+  background: linear-gradient(#3a3040, #1c1712);
+  box-shadow: 0 0 0 2px #3a2a1c, 0 5px 10px rgba(0,0,0,.35);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  overflow: hidden;
-  padding: 0;
-}
-.skill svg { width: 50px; height: 50px; }
-.skill-name { font-size: 13px; font-weight: 800; letter-spacing: .05em; }
-.skill.pressed { transform: translateY(3px); box-shadow: 0 0 0 2px var(--gold-edge), 0 2px 0 #121931; }
-/* 待ち時間。--cd は 0 (使える) 〜 1 (使ったばかり) */
-.skill-cd {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: conic-gradient(rgba(10,14,30,.62) calc(var(--cd, 0) * 360deg), transparent 0);
-}
-
-.skill-special {
-  position: relative;
-  width: 92px;
-  height: 92px;
-  border-radius: 50%;
-  border: 3px solid var(--gold-edge);
-  background: radial-gradient(circle at 50% 40%, #fffaf0, #f3e2bd);
-  color: var(--ink-2);
-  font-weight: 900;
-  font-size: 14px;
-  line-height: 1.2;
+  gap: 1px;
   cursor: pointer;
   padding: 0;
-  overflow: hidden;
 }
-.special-ring {
+.item-btn svg { width: 32px; height: 32px; }
+.item-badge {
   position: absolute;
-  inset: 4px;
-  border-radius: 50%;
-  background: conic-gradient(#f7a8c4, #ffe27a, #9ee3a0, #8fd0ff, #c9a6ff, #f7a8c4);
-  opacity: .25;
+  right: -6px;
+  top: -6px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 99px;
+  background: var(--red);
+  border: 2px solid #fff;
+  font-size: 11px;
+  line-height: 16px;
 }
-.special-text { position: relative; }
-.skill-special:disabled { cursor: default; }
-.skill-special.ready { color: var(--ink); box-shadow: 0 0 0 3px #fff, 0 0 18px 6px rgba(255,226,122,.9); }
-.skill-special.ready .special-ring { opacity: 1; animation: spin 1.6s linear infinite; }
-.skill-special.ready .special-text {
-  background: rgba(255,255,255,.85);
-  border-radius: 12px;
-  padding: 4px 6px;
+.paw-gauge {
+  align-self: end;
+  margin-bottom: 42px;
+  height: 30px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: linear-gradient(rgba(30,26,40,.88), rgba(20,18,30,.88));
+  border: 2px solid var(--gold);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
+.paw-gauge i {
+  flex: 1 1 0;
+  height: 20px;
+  font-style: normal;
+  font-size: 14px;
+  line-height: 20px;
+  text-align: center;
+  opacity: .28;
+  filter: grayscale(1);
+}
+.paw-gauge i::after { content: "🐾"; }
+.paw-gauge i.on { opacity: 1; filter: none; }
+.paw-gauge.full { box-shadow: 0 0 0 2px #fff, 0 0 16px 5px rgba(255,226,122,.9); }
+
+.item-menu {
+  position: absolute;
+  left: 10px;
+  bottom: 142px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 14px;
+  background: rgba(251,246,236,.97);
+  border: 2.5px solid var(--gold-edge);
+  box-shadow: 0 8px 18px rgba(0,0,0,.3);
+}
+.item-menu[hidden] { display: none; }
+.item-choice {
+  display: grid;
+  grid-template-columns: 34px auto auto;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: center;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--paper-2);
+  border: 2px solid var(--paper-edge);
+  cursor: pointer;
+}
+.item-choice .item-icon { grid-row: 1 / 3; font-size: 26px; }
+.item-choice .item-name { font-weight: 900; font-size: 14px; }
+.item-choice .item-note { grid-column: 2; font-size: 11px; color: var(--ink-2); }
+.item-choice .item-count { grid-column: 3; grid-row: 1 / 3; font-size: 16px; color: var(--gold-edge); }
+.item-choice:disabled { opacity: .45; }
 
 /* --------------------------------------------------------- 家臣・城・村のページ */
 

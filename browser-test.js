@@ -207,10 +207,10 @@ async function run() {
     // ------------------------------------------------ 合戦
     section('合戦');
     const fs0 = await phone.evaluate(() => window.__app.fieldSize());
-    ok(fs0.w > 300 && fs0.h > 250, `戦場の大きさが決まっている (${fs0.w}x${fs0.h})`);
+    ok(fs0.w > 300 && fs0.h > 500, `戦場が画面いっぱいに広がる (${fs0.w}x${fs0.h})`);
     const bgPainted = await phone.evaluate(() => {
       const c = document.getElementById('fieldBg');
-      const d = c.getContext('2d').getImageData(Math.floor(c.width / 2), Math.floor(c.height * 0.1), 1, 1).data;
+      const d = c.getContext('2d').getImageData(Math.floor(c.width / 2), Math.floor(c.height * 0.05), 1, 1).data;
       return d[3] > 0 && d[2] > d[0];
     });
     ok(bgPainted, '背景 (空) が描かれている');
@@ -219,72 +219,99 @@ async function run() {
       const c = document.getElementById('fieldFg');
       return c.width / c.getBoundingClientRect().width;
     });
-    ok(dprUsed <= 1.51, `戦場を描く面の画素の倍率が 1.5 以下 (${dprUsed.toFixed(2)}。端末は ${await phone.evaluate(() => devicePixelRatio)})`);
+    ok(dprUsed <= 1.51, `戦場を描く面の画素の倍率が 1.5 以下 (${dprUsed.toFixed(2)})`);
     ok(await phone.evaluate(() => !document.getElementById('readyPanel').hidden), '出陣の札が出ている');
 
     await phone.locator('#btnSortie').tap();
     await phone.waitForTimeout(100);
     ok(await phone.evaluate(() => !!window.__app.battle() && document.getElementById('readyPanel').hidden), '「出陣!」で戦が始まる');
 
-    // 技のボタンが、札やカットインにふさがれていないか (指の下にボタンがあるか)
-    const under = await phone.evaluate(() => ['btnLure', 'btnPunch', 'btnSpecial'].map((id) => {
+    // 下のボタンと一時停止が、札や重ねた層にふさがれていないか (指の下にボタンがあるか)
+    const under = await phone.evaluate(() => ['btnLure', 'btnPunch', 'btnItem', 'btnPause'].map((id) => {
       const r = document.getElementById(id).getBoundingClientRect();
       const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return el && el.closest('#' + id) ? 'ok' : id + '→' + (el ? el.id || el.className : 'none');
     }));
-    ok(under.every((u) => u === 'ok'), `技のボタンが押せる位置にある (${under.join(', ')})`);
+    ok(under.every((u) => u === 'ok'), `ボタンが押せる位置にある (${under.join(', ')})`);
+    // 上の段 (自分と敵) と下のボタンが画面に収まり、重ならないか
+    const layout = await phone.evaluate(() => {
+      const r = (id) => document.getElementById(id).getBoundingClientRect();
+      const vh = document.getElementById('field').getBoundingClientRect();
+      return { lureBottom: r('btnLure').bottom, punchRight: r('btnPunch').right, pauseRight: r('btnPause').right, bottom: vh.bottom, right: vh.right, missionBottom: r('mission').bottom, lureTop: r('btnLure').top };
+    });
+    ok(layout.lureBottom <= layout.bottom && layout.punchRight <= layout.right && layout.pauseRight <= layout.right,
+      '上の段と下のボタンが戦場の中に収まる');
 
-    await phone.waitForFunction(() => {
-      const b = window.__app.battle();
-      return b && b.enemies.some((e) => e.spawned && e.alive && e.x - b.player.x <= 84);
-    }, null, { timeout: 15000 });
+    await phone.waitForFunction(() => { const b = window.__app.battle(); const e = b && b.enemies[b.current]; return e && e.state === 'idle'; }, null, { timeout: 8000 });
+    ok(await phone.evaluate(() => !document.getElementById('enemyUnit').hidden && document.getElementById('enemyName').textContent.length > 0),
+      '敵が出てくると、右上に敵の名前と体力が出る');
     ok(await phone.evaluate(() => window.__app.face() === 'serious'), '戦っている間は真剣な顔');
 
     await phone.locator('#btnLure').tap();
     await phone.waitForTimeout(60);
-    const charmed = await phone.evaluate(() => window.__app.battle().enemies.some((e) => e.charm > 0));
-    ok(charmed, '猫じゃらしを指で押すと、敵が夢中になる');
-    const lureCd = await phone.evaluate(() => getComputedStyle(document.getElementById('lureCd')).getPropertyValue('--cd'));
-    ok(Number(lureCd) > 0.5, `使ったあとは待ち時間がボタンに出る (--cd=${lureCd.trim()})`);
+    const charmed = await phone.evaluate(() => { const b = window.__app.battle(); return { st: b.enemies[b.current].state, paw: b.paw }; });
+    ok(charmed.st === 'charmed' && charmed.paw === 1, `猫じゃらしを指で押すと、敵が夢中になり肉球が1つたまる (${charmed.st}, ${charmed.paw})`);
+    ok(await phone.evaluate(() => document.querySelectorAll('#pawGauge i.on').length === 1), '下の肉球ゲージに1つ灯る');
+    const cdOf = () => phone.evaluate(() => parseFloat(document.getElementById('lureCd').style.getPropertyValue('--cd')) || 0);
+    const cd1 = await cdOf();
+    ok(cd1 > 0.5, `振った直後は、猫じゃらしのボタンに待ち時間の影がかかる (${cd1.toFixed(2)})`);
+    await phone.waitForTimeout(460);
+    const cd2 = await cdOf();
+    ok(cd2 === 0, `待ち時間が明けると影が消える (${cd2})`);
+    await phone.locator('#btnLure').tap();
+    await phone.waitForTimeout(60);
+    ok(await phone.evaluate(() => window.__app.battle().paw === 2), '続けて振ると肉球がたまる');
 
-    const hpBefore = await phone.evaluate(() => { const b = window.__app.battle(); return b.enemies.filter((e) => e.spawned && e.alive).sort((x, y) => x.x - y.x)[0].hp; });
+    const hp0 = await phone.evaluate(() => { const b = window.__app.battle(); return b.enemies[b.current].hp; });
     await phone.locator('#btnPunch').tap();
     await phone.waitForTimeout(60);
-    const hpAfter = await phone.evaluate(() => { const b = window.__app.battle(); return b.enemies.filter((e) => e.spawned).sort((x, y) => x.x - y.x)[0].hp; });
-    ok(hpAfter < hpBefore, `猫パンチを指で押すと、敵が減る (${hpBefore} → ${hpAfter})`);
+    const afterPunch = await phone.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; return { hp: e.hp, paw: b.paw, atk: b.player.atk }; });
+    ok(hp0 - afterPunch.hp >= Math.round(afterPunch.atk * 2.9) && afterPunch.paw === 0,
+      `夢中の敵に猫パンチすると大きく効き、肉球を使い切る (${hp0} → ${afterPunch.hp})`);
 
-    // スペシャル: たまると押せるようになり、カットインが出る
-    await phone.evaluate(() => { window.__app.battle().special = 100; });
-    await phone.waitForTimeout(80);
-    ok(await phone.evaluate(() => !document.getElementById('btnSpecial').disabled && document.getElementById('btnSpecial').classList.contains('ready')),
-      'スペシャルがたまると、ボタンが光って押せる');
-    await phone.locator('#btnSpecial').tap();
-    await phone.waitForTimeout(80);
-    ok(await phone.evaluate(() => !document.getElementById('cutin').hidden), '必殺技のカットインが出る');
-    await phone.waitForTimeout(1100);
-    ok(await phone.evaluate(() => document.getElementById('cutin').hidden), 'カットインは1秒ほどで消える');
+    // アイテム: 魚で体力が戻る
+    await phone.evaluate(() => { window.__app.battle().player.hp = 10; });
+    await phone.locator('#btnItem').tap();
+    await phone.waitForTimeout(60);
+    ok(await phone.evaluate(() => !document.getElementById('itemMenu').hidden), 'アイテムを押すと、魚とまたたびが選べる');
+    await phone.locator('#btnFish').tap();
+    await phone.waitForTimeout(60);
+    const fish = await phone.evaluate(() => ({ hp: window.__app.battle().player.hp, left: window.__app.battle().items.fish, menu: document.getElementById('itemMenu').hidden }));
+    ok(fish.hp > 10 && fish.left === 1 && fish.menu, `魚を使うと体力が戻り、1つ減る (体力 ${fish.hp}、残り ${fish.left})`);
+
+    // 一時停止
+    await phone.locator('#btnPause').tap();
+    await phone.waitForTimeout(60);
+    const tp0 = await phone.evaluate(() => window.__app.battle().t);
+    await phone.waitForTimeout(400);
+    const tp1 = await phone.evaluate(() => window.__app.battle().t);
+    ok(tp0 === tp1 && await phone.evaluate(() => !document.getElementById('pausePanel').hidden), '一時停止すると、戦が止まる');
+    await phone.locator('#btnResume').tap();
+    await phone.waitForTimeout(200);
+    ok(await phone.evaluate(() => window.__app.battle().t) > tp1, '「つづける」で再び動く');
 
     // 実際に踏んだ不具合の見張り: 最後の1匹をパンチで倒すと「勝った」の知らせが
     // stepBattle の外で出る。それを読まずにいたため、勝利の札が出ずに止まった
     await phone.evaluate(() => {
       const b = window.__app.battle();
-      const f = b.enemies[0];
-      b.enemies.forEach((e) => { if (e !== f) { e.alive = false; e.spawned = true; e.hp = 0; } });
-      f.spawned = true; f.alive = true; f.hp = 1; f.x = b.player.x + 58; f.charm = 3;
-      f.reward = 30; // 1勝で草履取り (20) に届くように
+      b.enemies.forEach((e, i) => { if (i < b.enemies.length - 1) { e.alive = false; e.hp = 0; e.state = 'down'; e.timer = 0; } });
+      b.current = b.enemies.length - 1;
+      const f = b.enemies[b.current];
+      Object.assign(f, { state: 'charmed', charm: 5, hp: 1, x: 270, reward: 30 }); // 1勝で草履取り (20) に届くように
       b.cd.punch = 0;
     });
     await phone.locator('#btnPunch').tap();
-    await phone.waitForFunction(() => !document.getElementById('resultPanel').hidden, null, { timeout: 4000 }).catch(() => {});
+    await phone.waitForFunction(() => !document.getElementById('resultPanel').hidden, null, { timeout: 5000 }).catch(() => {});
     const won = await phone.evaluate(() => ({
       panel: !document.getElementById('resultPanel').hidden,
       title: document.getElementById('resultTitle').textContent,
-      wins: window.__app.state().battlesWon
+      wins: window.__app.state().battlesWon,
+      rows: document.getElementById('resultRows').textContent
     }));
     ok(won.panel && won.title === '勝利!', `最後の1匹をパンチで倒しても、勝利の札が出る (${won.title})`);
-    ok(won.wins === 1, `勝った数が増える (${won.wins})`);
+    ok(won.wins === 1 && won.rows.includes('小判') && won.rows.includes('経験値'), `勝つと小判と経験値が入る`);
     const rankUp = await phone.evaluate(() => ({ shown: !document.getElementById('rankModal').hidden, name: document.getElementById('rankUpName').textContent }));
-    ok(rankUp.shown && rankUp.name === '草履取り', `勝って手柄がたまると出世の札が出る (${rankUp.name})`);
+    ok(rankUp.shown && rankUp.name === '草履取り', `勝って経験値がたまると出世の札が出る (${rankUp.name})`);
     const rankArt = await phone.evaluate(() => document.getElementById('rankUpArt').src);
     ok(/stage1\.png/.test(rankArt), `出世の札に、成長した姿 (旅立ち) が出る (${rankArt.split('/').pop().slice(0, 20)})`);
     await phone.locator('#btnRankOk').tap();
@@ -373,7 +400,7 @@ async function run() {
     await phone.waitForTimeout(80);
     ok(await phone.evaluate(() => window.__app.state().castle.cells[14] === 'keep' && !document.getElementById('castleBanner').hidden),
       'お城を建てると、お城完成の札が出る');
-    ok(await phone.evaluate(() => [...document.querySelectorAll('#castleEffects span')].some((s) => s.textContent.includes('手柄'))),
+    ok(await phone.evaluate(() => [...document.querySelectorAll('#castleEffects span')].some((s) => s.textContent.includes('小判'))),
       '建てた物の効果が、地図の下に出る');
 
     await tapCell('castle', 14);

@@ -193,116 +193,159 @@
 
   // ---------------------------------------------------------- 合戦
   //
-  // 横一列の戦い。自分は左 (x = PLAYER_X)、敵は右から歩いてくる。
-  // 敵は近い順に STOP, STOP+GAP, ... の位置で止まって並ぶ。いちばん前の 1 匹だけが
-  // 殴れる距離 (MELEE) に入るので、攻撃してくるのは一度に 1 匹 (こども向け)。
+  // 1 対 1 で、敵が 1 匹ずつ出てくる (最後は大きなボス猫)。
   //
-  //   猫じゃらし: いちばん前の敵を引き寄せて夢中にする (その間は攻撃してこない)。
-  //               敵が振りかぶった瞬間 (windup) に当てると「見切り」で長く夢中にできる。
-  //   猫パンチ:   届く敵をたたく。夢中の敵には 2 倍。続けて当てるとコンボで上乗せ。
-  //               届かなければ空振り (おっちょこちょい)。
-  //   スペシャル: ゲージが 100 たまったら、画面の敵ぜんぶに猫じゃらしコンボ。
+  //   猫じゃらし: 敵を夢中にする (夢中の間は攻撃してこない)。当たるたびに肉球ゲージが 1 たまる (5 で満タン)。
+  //               満タンになると、それ以上振っても夢中は延びない (振り続けて安全、にしない)。
+  //               敵が「!」と振りかぶった瞬間に当てると「見切り」(ゲージ +2)。
+  //   猫パンチ:   夢中の敵には肉球ゲージの数だけ大きく効く。満タンなら「猫じゃらしコンボ」。
+  //               夢中の敵が羽に飛びついた高いところで当てると「会心の猫パンチ」。
+  //               殴られた敵はしばらく警戒して羽に引っかからない。次の振りかぶりを見切るのが腕の見せどころ。
+  //   アイテム:   魚 = 体力回復 / またたび = 敵をしばらく夢中にして、ゲージ +2。
   //
-  // 合戦の中身 (battle) は毎コマ書き換える入れ物。ゲームの state とは別に持ち、
-  // 終わったら applyBattleResult で state に反映する。
+  // 敵のタイプ:
+  //   のら猫         すぐ夢中になる。最初の敵
+  //   すばしっこい猫 羽を見ている (👀) ときに振らないと、ひらりとかわす
+  //   ねこ侍         夢中でないときに殴ると受け流して反撃。攻撃のあとの「スキ」に殴ると会心
+  //   大きなボス猫   3 回振ってやっと夢中になる。夢中でないときはパンチが半分しか効かない
+  //
+  // 合戦の中身 (battle) は毎コマ書き換える入れ物。終わったら applyBattleResult で state に反映する。
 
-  const FIELD_W = 400;
-  const PLAYER_X = 70;
-  const STOP = 58;
-  const GAP = 36;
-  const MELEE = 84;
-  const SPAWN_X = FIELD_W + 30;
+  const SCENE_W = 400;
+  const PLAYER_X = 110;
+  const ENEMY_X = 270;
+  const ENTER_X = SCENE_W + 40;
+  const ENTER_TIME = 1.2;
+  const DOWN_TIME = 1.3;
   const WINDUP = 0.6;
-  const PUNCH_COOLDOWN = 0.32;
-  const LURE_COOLDOWN = 4.2;
-  const COMBO_WINDOW = 1.1;
+  const RECOVER = 0.6;
+  const LURE_COOLDOWN = 0.45;
+  const PUNCH_COOLDOWN = 0.4;
+  const PAW_MAX = 5;
+  const JUMP_PERIOD = 0.9;
+  const JUMP_PEAK = [0.3, 0.62];   // 飛びつきの 1 回のうち、高いところ (会心になる所) の割合
+  const LOOK_PERIOD = 1.8;
+  const LOOK_OPEN = 0.75;          // すばしっこい猫が羽を見ている長さ
+  const WARY = 1.8;                // 殴られた敵は、しばらく羽に引っかからない (振りかぶりの見切りだけは効く)
+  const LURE_MISS_COOLDOWN = 1.2;  // 外した猫じゃらしは、次に振れるまで長い (連打で見切りを拾えないように)
 
   const ENEMY_KINDS = {
-    nora: { name: '灰猫', look: 'cat-gray', hp: 1.0, atk: 1.0, speed: 46, interval: 1.9, charm: 1.0 },
-    chatora: { name: '茶トラ侍', look: 'cat-chatora', hp: 1.3, atk: 1.1, speed: 40, interval: 1.8, charm: 1.0 },
-    kuro: { name: '黒猫侍', look: 'cat-kuro', hp: 1.6, atk: 1.3, speed: 34, interval: 1.7, charm: 0.9 },
-    boss: { name: '赤毛の大将', look: 'cat-red', hp: 2.6, atk: 1.5, speed: 28, interval: 1.6, charm: 0.6, boss: true }
+    nora: { name: 'のら猫', look: 'cat-chatora', hp: 1.0, atk: 1.0, interval: 2.0, charm: 2.2 },
+    quick: { name: 'すばしっこい猫', look: 'cat-gray', hp: 0.8, atk: 0.9, interval: 1.5, charm: 1.6, needLook: true },
+    samurai: { name: 'ねこ侍', look: 'cat-kuro', hp: 1.3, atk: 1.3, interval: 1.8, charm: 1.2, parry: true, open: 1.0 },
+    boss: { name: '大きなボス猫', look: 'cat-red', hp: 3.0, atk: 1.5, interval: 2.2, charm: 2.4, lureNeed: 3, armor: 0.5, boss: true }
+  };
+  const ITEM_KINDS = {
+    fish: { name: '魚', effect: '体力を 40% 回復' },
+    matatabi: { name: 'またたび', effect: '敵を 4 秒夢中にして、肉球 +2' }
   };
 
   function playerMaxHp(rankIndex) { return 60 + 12 * rankIndex; }
   function playerAtk(rankIndex) { return 6 + 3 * rankIndex; }
-  function enemyReward(rankIndex, kind) {
-    return Math.round(4 * Math.pow(1.5, rankIndex)) * (ENEMY_KINDS[kind].boss ? 3 : 1);
+  /** 最後に出てくる大将は手柄 3 倍 (最初の戦の大将は、のら猫の親分) */
+  function enemyReward(rankIndex, isLeader) {
+    return Math.round(4 * Math.pow(1.5, rankIndex)) * (isLeader ? 3 : 1);
   }
   function allyDamage(level) { return 2 + 2 * level; }
   function allyInterval(level) { return Math.max(1.2, 2.6 - 0.12 * level); }
-  function specialDamage(rankIndex) { return 22 + 10 * rankIndex; }
+  function comboMul(paw) { return 1.5 + 0.7 * paw + (paw >= PAW_MAX ? 1.5 : 0); }
 
   function enemyPool(rankIndex) {
-    if (rankIndex < 2) return ['nora'];
-    if (rankIndex < 4) return ['nora', 'chatora'];
-    if (rankIndex < 6) return ['nora', 'chatora', 'kuro'];
-    return ['chatora', 'kuro'];
+    if (rankIndex < 1) return ['nora'];
+    if (rankIndex < 3) return ['nora', 'quick'];
+    if (rankIndex < 5) return ['nora', 'quick', 'samurai'];
+    return ['quick', 'samurai'];
+  }
+
+  function battleSize(rankIndex) {
+    return Math.min(5, 3 + Math.floor(rankIndex / 3));
   }
 
   function createBattle(state, rng) {
     const random = rng || Math.random;
     const r = rankIndexOf(state);
-    const count = Math.min(7, 3 + Math.floor(r / 2));
+    const count = battleSize(r);
     const pool = enemyPool(r);
     const fx = townEffects(state);
     const baseHp = 50 + 28 * r;
     const baseAtk = 5 + 1.8 * r;
     const enemies = [];
     for (let i = 0; i < count; i++) {
-      const kind = (i === count - 1) ? 'boss' : pool[Math.floor(random() * pool.length)];
+      // いちばん最初の戦 (村の子猫) だけは大将を出さない。パンチだけでも勝てるように
+      const kind = (i === count - 1 && r > 0) ? 'boss' : pool[Math.floor(random() * pool.length)];
       const k = ENEMY_KINDS[kind];
-      const hp = Math.round(baseHp * k.hp);
+      const leader = i === count - 1;
+      const hp = Math.round(baseHp * k.hp * (leader && !k.boss ? 1.6 : 1));
       enemies.push({
-        id: i + 1, kind: kind, look: k.look, name: k.name, boss: !!k.boss,
-        x: SPAWN_X, hp: hp, maxHp: hp, atk: Math.round(baseAtk * k.atk),
-        speed: k.speed, interval: k.interval, cd: k.interval,
-        windup: false, charm: 0, spawnAt: 0.8 + i * 2.1, spawned: false, alive: true,
-        reward: Math.round(enemyReward(r, kind) * fx.meritMul)
+        id: i + 1, kind: kind, look: k.look, name: leader && !k.boss ? k.name + 'の親分' : k.name, boss: leader,
+        hp: hp, maxHp: hp, atk: Math.round(baseAtk * k.atk), interval: k.interval,
+        state: 'wait', timer: 0, cd: k.interval, charm: 0, lureCount: 0, age: 0, wary: 0, x: ENTER_X,
+        alive: true, reward: Math.round(enemyReward(r, leader) * fx.meritMul)
       });
     }
     const allies = state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, MAX_BATTLE_VASSALS)
       .map(function (v) { return { id: v.id, name: v.name, look: v.look, level: v.level, cd: allyInterval(v.level) }; });
     const maxHp = Math.round(playerMaxHp(r) * fx.hpMul);
-    return {
+    const items = state.items || { fish: 0, matatabi: 0 };
+    const b = {
       rank: r, t: 0, phase: 'fight', rng: random,
       player: { x: PLAYER_X, hp: maxHp, maxHp: maxHp, atk: Math.round(playerAtk(r) * fx.atkMul) },
-      enemies: enemies, allies: allies,
+      enemies: enemies, current: 0, allies: allies,
       cd: { lure: 0, punch: 0 },
-      special: 0, combo: 0, comboTimer: 0,
-      merit: 0, bonus: 0, materials: 0, recruitOffer: null,
+      paw: 0,
+      items: { fish: items.fish || 0, matatabi: items.matatabi || 0 },
+      used: { fish: 0, matatabi: 0 },
+      merit: 0, bonus: 0, materials: 0, loot: { fish: 0, matatabi: 0 },
       events: []
     };
+    enter(b);
+    return b;
   }
 
-  function liveEnemies(b) {
-    return b.enemies.filter(function (e) { return e.alive && e.spawned; }).sort(function (a, c) { return a.x - c.x; });
+  function currentEnemy(b) {
+    const e = b.enemies[b.current];
+    return e && e.alive ? e : null;
   }
 
-  function frontEnemy(b) {
-    return liveEnemies(b)[0] || null;
+  function enter(b) {
+    const e = b.enemies[b.current];
+    if (!e) return;
+    e.state = 'enter';
+    e.timer = ENTER_TIME;
+    e.x = ENTER_X;
+    b.paw = 0;
+    b.events.push({ type: 'enter', id: e.id, boss: e.boss });
   }
 
-  function inReach(b, e) {
-    return e.x - b.player.x <= MELEE;
+  /** 夢中の敵が羽に飛びついて、いちばん高いところにいるか (会心になる所) */
+  function atJumpPeak(e) {
+    if (e.state !== 'charmed') return false;
+    const ph = (e.age % JUMP_PERIOD) / JUMP_PERIOD;
+    return ph >= JUMP_PEAK[0] && ph <= JUMP_PEAK[1];
   }
 
-  function hurt(b, e, amount, source, crit) {
+  /** すばしっこい猫が羽を見ているか */
+  function isLooking(e) {
+    return (e.age % LOOK_PERIOD) < LOOK_OPEN;
+  }
+
+  function hurtEnemy(b, e, amount, source, extra) {
     e.hp = Math.max(0, e.hp - amount);
-    b.events.push({ type: 'hit', id: e.id, amount: amount, source: source, crit: !!crit });
-    if (e.hp <= 0 && e.alive) {
+    b.events.push(Object.assign({ type: 'hit', id: e.id, amount: amount, source: source }, extra || {}));
+    if (e.hp <= 0) {
       e.alive = false;
+      e.state = 'down';
+      e.timer = DOWN_TIME;
       e.charm = 0;
-      e.windup = false;
+      b.paw = 0;
       b.merit += e.reward;
       b.events.push({ type: 'down', id: e.id, reward: e.reward, boss: e.boss });
     }
   }
 
-  function addSpecial(b, n) {
-    const before = b.special;
-    b.special = Math.min(100, b.special + n);
-    if (before < 100 && b.special >= 100) b.events.push({ type: 'specialReady' });
+  function hurtPlayer(b, amount, id) {
+    b.player.hp = Math.max(0, b.player.hp - amount);
+    b.events.push({ type: 'playerHit', id: id, amount: amount });
   }
 
   function finish(b) {
@@ -313,78 +356,81 @@
       return;
     }
     if (b.enemies.every(function (e) { return !e.alive; })) {
+      const last = b.enemies[b.enemies.length - 1];
+      if (last.state === 'down' && last.timer > 0) return; // 倒れる様子を見せてから終わる
       b.phase = 'won';
       b.bonus = Math.round(b.merit * 0.3);
       b.materials = Math.round((b.merit + b.bonus) / 4);
+      const random = b.rng || Math.random;
+      b.loot = { fish: random() < 0.6 ? 1 : 0, matatabi: random() < 0.3 ? 1 : 0 };
       b.events.push({ type: 'won' });
     }
   }
 
   function stepBattle(b, dt) {
     if (!(dt > 0) || b.phase !== 'fight') return b;
-    dt = Math.min(dt, 0.1); // 裏から戻った直後の大きな dt で敵が瞬間移動しないように
+    dt = Math.min(dt, 0.1); // 裏から戻った直後の大きな dt で一気に進まないように
 
     b.t += dt;
     b.cd.lure = Math.max(0, b.cd.lure - dt);
     b.cd.punch = Math.max(0, b.cd.punch - dt);
-    if (b.comboTimer > 0) {
-      b.comboTimer -= dt;
-      if (b.comboTimer <= 0) { b.comboTimer = 0; b.combo = 0; }
-    }
 
-    for (let i = 0; i < b.enemies.length; i++) {
-      const e = b.enemies[i];
-      if (!e.spawned && e.alive && b.t >= e.spawnAt) {
-        e.spawned = true;
-        b.events.push({ type: 'spawn', id: e.id });
-      }
-    }
-
-    const line = liveEnemies(b);
-    for (let k = 0; k < line.length; k++) {
-      const e = line[k];
-      if (e.charm > 0) {
-        e.charm = Math.max(0, e.charm - dt);
-        continue;
-      }
-      const stopX = PLAYER_X + STOP + k * GAP;
-      if (e.x > stopX) e.x = Math.max(stopX, e.x - e.speed * dt);
-
-      // いちばん前の敵は、一度前線に着いたら攻撃の溜めを止めない。
-      // パンチでのけぞって届かなくなっても溜めは続き、戻った瞬間に殴ってくる
-      // (のけぞるたびに溜めを戻すと、連打だけで永遠に攻撃されなくなった)
-      if (k === 0 && (e.engaged || inReach(b, e))) {
-        e.engaged = true;
-        e.cd = Math.max(0, e.cd - dt);
-        if (!e.windup && e.cd <= WINDUP) {
-          e.windup = true;
+    const e = b.enemies[b.current];
+    if (e) {
+      e.age += dt;
+      e.wary = Math.max(0, e.wary - dt);
+      if (e.state === 'down') {
+        e.timer -= dt;
+        if (e.timer <= 0) {
+          if (b.current < b.enemies.length - 1) { b.current++; enter(b); }
+        }
+      } else if (e.state === 'enter') {
+        e.timer -= dt;
+        e.x = ENEMY_X + (ENTER_X - ENEMY_X) * Math.max(0, e.timer / ENTER_TIME);
+        if (e.timer <= 0) { e.state = 'idle'; e.x = ENEMY_X; e.cd = e.interval; }
+      } else if (e.state === 'charmed') {
+        e.charm -= dt;
+        if (e.charm <= 0) {
+          e.charm = 0;
+          e.state = 'idle';
+          e.cd = e.interval;
+          e.lureCount = 0;
+          if (b.paw > 0) b.events.push({ type: 'bored', id: e.id }); // 飽きた。ゲージは消える
+          b.paw = 0;
+        }
+      } else if (e.state === 'recover') {
+        e.timer -= dt;
+        if (e.timer <= 0) { e.state = 'idle'; e.cd = e.interval; }
+      } else if (e.state === 'idle') {
+        e.cd -= dt;
+        if (e.cd <= WINDUP) {
+          e.state = 'windup';
+          e.timer = WINDUP;
           b.events.push({ type: 'windup', id: e.id });
         }
-        if (e.cd <= 0 && inReach(b, e)) {
-          e.windup = false;
-          e.cd = e.interval;
-          b.player.hp = Math.max(0, b.player.hp - e.atk);
-          b.combo = 0;
-          b.comboTimer = 0;
-          b.events.push({ type: 'playerHit', id: e.id, amount: e.atk });
+      } else if (e.state === 'windup') {
+        e.timer -= dt;
+        if (e.timer <= 0) {
+          hurtPlayer(b, e.atk, e.id);
+          const k = ENEMY_KINDS[e.kind];
+          e.state = 'recover';
+          e.timer = k.open || RECOVER;
+          e.open = !!k.open; // ねこ侍は攻撃のあとにスキができる
+          if (e.open) b.events.push({ type: 'open', id: e.id });
         }
-      } else {
-        e.windup = false;
-        e.cd = Math.max(e.cd, WINDUP + 0.4);
       }
     }
 
+    // 出陣の家臣は、戦える敵がいれば少しずつ攻撃する (夢中は解けない)
+    const target = currentEnemy(b);
     for (let i = 0; i < b.allies.length; i++) {
       const a = b.allies[i];
       a.cd -= dt;
       if (a.cd <= 0) {
-        const target = frontEnemy(b);
-        if (target) {
-          a.cd = allyInterval(a.level);
+        a.cd = allyInterval(a.level);
+        if (target && target.state !== 'enter' && target.alive) {
           b.events.push({ type: 'allyAttack', ally: a.id, id: target.id });
-          hurt(b, target, allyDamage(a.level), 'ally', false);
-        } else {
-          a.cd = 0.3;
+          hurtEnemy(b, target, allyDamage(a.level), 'ally');
         }
       }
     }
@@ -393,62 +439,111 @@
     return b;
   }
 
+  function charm(b, e, seconds, pawGain) {
+    e.state = 'charmed';
+    e.charm = Math.max(e.charm, seconds);
+    e.open = false;
+    b.paw = Math.min(PAW_MAX, b.paw + pawGain);
+  }
+
   function lure(b) {
     if (b.phase !== 'fight' || b.cd.lure > 0) return false;
-    const line = liveEnemies(b);
-    const target = line.find(function (e) { return e.charm <= 0; }) || null;
     b.cd.lure = LURE_COOLDOWN;
-    if (!target) {
-      b.events.push({ type: 'lureMiss' });
+    const e = currentEnemy(b);
+    if (!e || e.state === 'enter' || e.state === 'down') {
+      b.events.push({ type: 'lure', result: 'miss' });
       return true;
     }
-    const perfect = target.windup;
-    const charmMul = ENEMY_KINDS[target.kind].charm;
-    target.charm = (perfect ? 3.0 : 1.8) * charmMul;
-    target.windup = false;
-    target.cd = target.interval;
-    target.x = Math.max(PLAYER_X + STOP, target.x - 120);
-    addSpecial(b, perfect ? 20 : 6);
-    b.events.push({ type: 'lure', id: target.id, perfect: perfect });
+    const k = ENEMY_KINDS[e.kind];
+    const perfect = e.state === 'windup';
+    let result;
+    if (e.state === 'charmed') {
+      if (b.paw >= PAW_MAX) {
+        result = 'full'; // もう満タン。夢中は延びない
+      } else {
+        charm(b, e, k.charm, 1);
+        result = 'charm';
+      }
+    } else if (e.wary > 0 && !perfect) {
+      result = 'wary';            // 殴られたばかりで警戒している
+      b.cd.lure = LURE_MISS_COOLDOWN;
+    } else if (k.needLook && !perfect && !isLooking(e)) {
+      result = 'dodge';           // すばしっこい猫が、ひらりとかわす
+      b.cd.lure = LURE_MISS_COOLDOWN;
+      e.cd = Math.max(WINDUP + 0.05, e.cd - 0.5);
+    } else if (k.lureNeed && !perfect && e.lureCount + 1 < k.lureNeed) {
+      e.lureCount++;
+      b.paw = Math.min(PAW_MAX, b.paw + 1);
+      result = 'resist';          // 大きなボス猫は何回か振らないと夢中にならない
+    } else {
+      charm(b, e, k.charm + (perfect ? 1.0 : 0), perfect ? 2 : 1);
+      result = perfect ? 'perfect' : 'charm';
+    }
+    b.events.push({ type: 'lure', result: result, id: e.id, paw: b.paw, lureCount: e.lureCount });
     return true;
   }
 
   function punch(b) {
     if (b.phase !== 'fight' || b.cd.punch > 0) return false;
     b.cd.punch = PUNCH_COOLDOWN;
-    const target = frontEnemy(b);
-    if (!target || !inReach(b, target)) {
-      b.combo = 0;
-      b.comboTimer = 0;
+    const e = currentEnemy(b);
+    if (!e || e.state === 'enter' || e.state === 'down') {
       b.events.push({ type: 'miss' });
       return true;
     }
-    const charmed = target.charm > 0;
-    const amount = Math.round(b.player.atk * (charmed ? 2 : 1) * (1 + 0.1 * Math.min(b.combo, 5)));
-    b.combo += 1;
-    b.comboTimer = COMBO_WINDOW;
-    if (!charmed) target.x += 10; // 軽くのけぞる
-    addSpecial(b, charmed ? 13 : 7);
-    hurt(b, target, amount, 'punch', charmed);
+    const k = ENEMY_KINDS[e.kind];
+    const atk = b.player.atk;
+    if (e.state === 'charmed') {
+      const full = b.paw >= PAW_MAX;
+      const crit = atJumpPeak(e);
+      const amount = Math.round(atk * comboMul(b.paw) * (crit ? 1.5 : 1));
+      const paw = b.paw;
+      b.paw = 0;
+      e.state = 'recover';
+      e.timer = RECOVER;
+      e.charm = 0;
+      e.lureCount = 0;
+      e.open = false;
+      e.wary = WARY;
+      e.cd = e.interval;
+      hurtEnemy(b, e, amount, 'punch', { crit: crit, combo: full, paw: paw });
+    } else if (e.state === 'recover' && e.open) {
+      e.open = false;
+      e.state = 'recover';
+      e.timer = RECOVER;
+      e.wary = WARY;
+      hurtEnemy(b, e, Math.round(atk * 2.5), 'punch', { crit: true, open: true });
+    } else if (k.parry) {
+      // ねこ侍: 受け流して、すぐ反撃
+      b.events.push({ type: 'parry', id: e.id });
+      hurtPlayer(b, Math.round(e.atk * 0.7), e.id);
+      e.state = 'idle';
+      e.cd = e.interval;
+    } else {
+      hurtEnemy(b, e, Math.round(atk * (k.armor || 1)), 'punch', { armor: !!k.armor });
+    }
     finish(b);
     return true;
   }
 
-  function special(b) {
-    if (b.phase !== 'fight' || b.special < 100) return false;
-    b.special = 0;
-    const amount = specialDamage(b.rank);
-    b.events.push({ type: 'special', amount: amount });
-    liveEnemies(b).forEach(function (e) {
-      e.windup = false;
-      e.charm = Math.max(e.charm, 1.2);
-      hurt(b, e, amount, 'special', true);
-    });
-    finish(b);
+  function useItem(b, kind) {
+    if (b.phase !== 'fight' || !ITEM_KINDS[kind] || !(b.items[kind] > 0)) return false;
+    const e = currentEnemy(b);
+    if (kind === 'matatabi' && (!e || e.state === 'enter' || e.state === 'down')) return false;
+    if (kind === 'fish' && b.player.hp >= b.player.maxHp) return false;
+    b.items[kind]--;
+    b.used[kind]++;
+    if (kind === 'fish') {
+      const heal = Math.round(b.player.maxHp * 0.4);
+      b.player.hp = Math.min(b.player.maxHp, b.player.hp + heal);
+      b.events.push({ type: 'item', item: kind, amount: heal });
+    } else {
+      charm(b, e, 4, 2);
+      b.events.push({ type: 'item', item: kind, id: e.id, paw: b.paw });
+    }
     return true;
   }
 
-  /** 勝ったとき、倒した相手が仲間になりたがるか。枠が空いていれば半分の確率で。 */
   function rollRecruitOffer(state, b) {
     if (b.phase !== 'won' || !hasVassalSlot(state)) return null;
     const random = b.rng || Math.random;
@@ -460,16 +555,25 @@
 
   /** 合戦の結果を state に反映する。勝てば手柄・資材、負けても出世は下がらない。 */
   function applyBattleResult(state, b) {
+    // 使ったアイテムは、勝っても負けても減る
+    const items = {
+      fish: Math.max(0, (state.items.fish || 0) - b.used.fish),
+      matatabi: Math.max(0, (state.items.matatabi || 0) - b.used.matatabi)
+    };
     if (b.phase === 'won') {
       const r = addMerit(state, b.merit + b.bonus);
+      items.fish += b.loot.fish;
+      items.matatabi += b.loot.matatabi;
       r.state = Object.assign({}, r.state, {
         materials: r.state.materials + b.materials,
-        battlesWon: (state.battlesWon || 0) + 1
+        battlesWon: (state.battlesWon || 0) + 1,
+        items: items
       });
       return r;
     }
     const idx = rankIndexOf(state);
-    return { state: state, prevRankIndex: idx, rankIndex: idx, rankedUp: false };
+    const changed = b.used.fish || b.used.matatabi;
+    return { state: changed ? Object.assign({}, state, { items: items }) : state, prevRankIndex: idx, rankIndex: idx, rankedUp: false };
   }
 
   // ---------------------------------------------------------- 城と村 (マスに建てる)
@@ -644,6 +748,7 @@
       vassals: [],
       battlesWon: 0,
       storySeen: false,
+      items: { fish: 2, matatabi: 1 },
       village: { population: 0, cells: new Array(MAP_CELLS).fill(null) },
       castle: { cells: new Array(MAP_CELLS).fill(null) }
     };
@@ -662,6 +767,11 @@
     out.nextVassalId = Number.isInteger(raw.nextVassalId) ? raw.nextVassalId : base.nextVassalId;
     out.battlesWon = Number.isInteger(raw.battlesWon) ? Math.max(0, raw.battlesWon) : base.battlesWon;
     out.storySeen = raw.storySeen === true;
+    const it = raw.items || {};
+    out.items = {
+      fish: Number.isInteger(it.fish) ? Math.max(0, it.fish) : base.items.fish,
+      matatabi: Number.isInteger(it.matatabi) ? Math.max(0, it.matatabi) : base.items.matatabi
+    };
     out.vassals = Array.isArray(raw.vassals) ? raw.vassals.filter(function (v) {
       return v && typeof v.id === 'number' && typeof v.name === 'string';
     }).map(function (v) {
@@ -758,26 +868,30 @@
 
     tick: tick,
 
-    FIELD_W: FIELD_W,
+    SCENE_W: SCENE_W,
     PLAYER_X: PLAYER_X,
-    STOP: STOP,
-    GAP: GAP,
-    MELEE: MELEE,
+    ENEMY_X: ENEMY_X,
     WINDUP: WINDUP,
     LURE_COOLDOWN: LURE_COOLDOWN,
     PUNCH_COOLDOWN: PUNCH_COOLDOWN,
+    PAW_MAX: PAW_MAX,
+    WARY: WARY,
+    JUMP_PERIOD: JUMP_PERIOD,
     ENEMY_KINDS: ENEMY_KINDS,
+    ITEM_KINDS: ITEM_KINDS,
     playerMaxHp: playerMaxHp,
     playerAtk: playerAtk,
     enemyReward: enemyReward,
-    specialDamage: specialDamage,
+    comboMul: comboMul,
+    battleSize: battleSize,
     createBattle: createBattle,
     stepBattle: stepBattle,
-    frontEnemy: frontEnemy,
-    inReach: inReach,
+    currentEnemy: currentEnemy,
+    atJumpPeak: atJumpPeak,
+    isLooking: isLooking,
     lure: lure,
     punch: punch,
-    special: special,
+    useItem: useItem,
     rollRecruitOffer: rollRecruitOffer,
     applyBattleResult: applyBattleResult,
 

@@ -15,15 +15,20 @@
   const $ = (id) => document.getElementById(id);
   const els = {
     titleScreen: $('titleScreen'), btnStart: $('btnStart'),
-    portraitImg: $('portraitImg'), rankTag: $('rankTag'), meritValue: $('meritValue'),
-    hpFill: $('hpFill'), hpText: $('hpText'), nextRankLabel: $('nextRankLabel'), nextFill: $('nextFill'),
+    portraitImg: $('portraitImg'), rankTag: $('rankTag'), lvText: $('lvText'),
+    hpFill: $('hpFill'), hpText: $('hpText'), nextFill: $('nextFill'),
+    enemyUnit: $('enemyUnit'), enemyName: $('enemyName'), enemyHpFill: $('enemyHpFill'), enemyFaceImg: $('enemyFaceImg'),
+    missionText: $('missionText'), pawGauge: $('pawGauge'),
+    btnItem: $('btnItem'), itemBadge: $('itemBadge'), itemMenu: $('itemMenu'),
+    btnFish: $('btnFish'), btnMatatabi: $('btnMatatabi'), fishCount: $('fishCount'), matatabiCount: $('matatabiCount'),
+    btnPause: $('btnPause'), pausePanel: $('pausePanel'), btnResume: $('btnResume'), btnRetreat: $('btnRetreat'),
+    coinVassals: $('coinVassals'),
     field: $('field'), fieldBg: $('fieldBg'), fieldFg: $('fieldFg'), fieldBanner: $('fieldBanner'),
     readyPanel: $('readyPanel'), readyTitle: $('readyTitle'), readyText: $('readyText'), btnSortie: $('btnSortie'),
     resultPanel: $('resultPanel'), resultTitle: $('resultTitle'), resultRows: $('resultRows'),
     offer: $('offer'), offerImg: $('offerImg'), offerText: $('offerText'),
     btnOfferYes: $('btnOfferYes'), btnOfferNo: $('btnOfferNo'), btnNext: $('btnNext'),
-    specialFill: $('specialFill'), comboText: $('comboText'),
-    btnLure: $('btnLure'), btnPunch: $('btnPunch'), btnSpecial: $('btnSpecial'),
+    btnLure: $('btnLure'), btnPunch: $('btnPunch'),
     lureCd: $('lureCd'), punchCd: $('punchCd'),
     vassalSlotCount: $('vassalSlotCount'), vassalsLocked: $('vassalsLocked'), vassalsContent: $('vassalsContent'),
     vassalList: $('vassalList'), btnRecruit: $('btnRecruit'),
@@ -42,7 +47,7 @@
   // ---------------------------------------------------------- 絵
 
   const IMG_NAMES = ['stage0', 'stage1', 'stage2', 'stage3', 'cat-normal', 'cat-chatora', 'cat-kuro', 'cat-gray', 'cat-red',
-    'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-special', 'b-villager']
+    'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-special', 'pose-jarashi', 'pose-punch', 'b-villager']
     .concat(Object.keys(C.BUILDINGS).map(function (t) { return C.BUILDINGS[t].img; }));
   const imgs = {};
   IMG_NAMES.forEach(function (n) {
@@ -172,7 +177,10 @@
     else if (currentTab === 'castle' || currentTab === 'village') renderTownView(currentTab);
   }
 
-  // ---------------------------------------------------------- 上の顔と体力
+  // ---------------------------------------------------------- 上の段 (自分と敵の顔・体力)
+
+  const MISSIONS = ['村の平和を守る', '殿の草履を取り返す', 'お使いの荷を守る', '足軽の初陣', '峠の関所を守る',
+    '足軽隊をひきいる', '殿の名代で出陣', '城の守りを固める', 'わが城下を守る', '天下の大合戦'];
 
   const hudCache = {};
   function setText(el, key, text) {
@@ -182,49 +190,57 @@
     const v = Math.round(pct * 10) / 10;
     if (hudCache[key] !== v) { hudCache[key] = v; el.style.width = v + '%'; }
   }
+  function setOnce(key, value, fn) {
+    if (hudCache[key] !== value) { hudCache[key] = value; fn(value); }
+  }
 
   function renderHud(force) {
     if (force) Object.keys(hudCache).forEach(function (k) { delete hudCache[k]; });
     const r = C.rankIndexOf(state);
+    setText(els.lvText, 'lv', 'Lv.' + (r + 1));
     setText(els.rankTag, 'rank', C.RANKS[r].name);
-    setText(els.meritValue, 'merit', String(Math.floor(state.merit)));
+    setText(els.missionText, 'mission', MISSIONS[r] || MISSIONS[0]);
     const next = C.RANKS[r + 1];
-    if (next) {
-      const span = next.threshold - C.RANKS[r].threshold;
-      setText(els.nextRankLabel, 'nextLabel', '「' + next.name + '」まで');
-      setWidth(els.nextFill, 'next', Math.max(0, Math.min(100, (state.totalMerit - C.RANKS[r].threshold) / span * 100)));
-    } else {
-      setText(els.nextRankLabel, 'nextLabel', '出世の最高位!');
-      setWidth(els.nextFill, 'next', 100);
-    }
-    const hp = battle ? battle.player.hp : C.playerMaxHp(r);
-    const maxHp = battle ? battle.player.maxHp : C.playerMaxHp(r);
+    setWidth(els.nextFill, 'exp', next
+      ? Math.max(0, Math.min(100, (state.totalMerit - C.RANKS[r].threshold) / (next.threshold - C.RANKS[r].threshold) * 100))
+      : 100);
+
+    const b = battle;
+    const maxHp = b ? b.player.maxHp : Math.round(C.playerMaxHp(r) * C.townEffects(state).hpMul);
+    const hp = b ? b.player.hp : maxHp;
     setWidth(els.hpFill, 'hp', hp / maxHp * 100);
     setText(els.hpText, 'hpText', Math.ceil(hp) + '/' + maxHp);
-    const low = hp / maxHp < 0.3;
-    if (hudCache.low !== low) { hudCache.low = low; els.hpFill.classList.toggle('low', low); }
+    setOnce('low', hp / maxHp < 0.3, function (v) { els.hpFill.classList.toggle('low', v); });
 
-    const sp = battle ? battle.special : 0;
-    setWidth(els.specialFill, 'sp', sp);
-    const spReady = !!(battle && battle.phase === 'fight' && sp >= 100);
-    if (hudCache.spReady !== spReady) {
-      hudCache.spReady = spReady;
-      els.btnSpecial.disabled = !spReady;
-      els.btnSpecial.classList.toggle('ready', spReady);
+    const e = b ? b.enemies[b.current] : null;
+    const showEnemy = !!(e && (e.alive || e.state === 'down') && e.state !== 'wait');
+    setOnce('enemyShown', showEnemy, function (v) { els.enemyUnit.hidden = !v; });
+    if (showEnemy) {
+      setText(els.enemyName, 'enemyName', e.name);
+      setWidth(els.enemyHpFill, 'enemyHp', e.hp / e.maxHp * 100);
+      setOnce('enemyFace', e.look, function (v) { els.enemyFaceImg.src = imgs[v].src; });
     }
-    const combo = battle && battle.combo >= 2 ? battle.combo + ' コンボ!' : '';
-    setText(els.comboText, 'combo', combo);
 
-    const lureCd = battle ? battle.cd.lure / C.LURE_COOLDOWN : 0;
-    const punchCd = battle ? battle.cd.punch / C.PUNCH_COOLDOWN : 0;
-    const lc = Math.round(lureCd * 50) / 50, pc = Math.round(punchCd * 50) / 50;
-    if (hudCache.lcd !== lc) { hudCache.lcd = lc; els.lureCd.style.setProperty('--cd', lc); }
-    if (hudCache.pcd !== pc) { hudCache.pcd = pc; els.punchCd.style.setProperty('--cd', pc); }
+    const paw = b ? b.paw : 0;
+    setOnce('paw', paw, function (v) {
+      els.pawGauge.querySelectorAll('i').forEach(function (i, k) { i.classList.toggle('on', k < v); });
+      els.pawGauge.classList.toggle('full', v >= C.PAW_MAX);
+    });
+
+    const items = b ? b.items : state.items;
+    setText(els.itemBadge, 'itemBadge', String(items.fish + items.matatabi));
+    setText(els.fishCount, 'fish', '×' + items.fish);
+    setText(els.matatabiCount, 'matatabi', '×' + items.matatabi);
+
+    const lc = b ? Math.round(Math.min(1, b.cd.lure / C.LURE_COOLDOWN) * 12) / 12 : 0;
+    const pc = b ? Math.round(Math.min(1, b.cd.punch / C.PUNCH_COOLDOWN) * 12) / 12 : 0;
+    setOnce('lcd', lc, function (v) { els.lureCd.style.setProperty('--cd', v); });
+    setOnce('pcd', pc, function (v) { els.punchCd.style.setProperty('--cd', v); });
   }
 
   // ---------------------------------------------------------- 戦場の大きさ
 
-  const fieldSize = { w: 0, h: 0, dpr: 1, s: 1, ground: 0, padL: 0, padR: 0, depth: 0 };
+  const fieldSize = { w: 0, h: 0, dpr: 1, s: 1, ground: 0 };
   const bgCtx = els.fieldBg.getContext('2d');
   const fgCtx = els.fieldFg.getContext('2d');
 
@@ -238,14 +254,9 @@
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     if (w === fieldSize.w && h === fieldSize.h && dpr === fieldSize.dpr) return;
     fieldSize.w = w; fieldSize.h = h; fieldSize.dpr = dpr;
-    fieldSize.ground = Math.round(h * 0.9);
-    // 左に家臣が並ぶ場所を空けておく
-    fieldSize.padL = w * 0.17;
-    fieldSize.padR = w * 0.03;
-    // 設定資料の絵は、ねこ 1 匹がだいたい高さ 150px。横に並ぶので幅でも抑える
-    fieldSize.s = Math.min(h * 0.3 / 150, w * 0.26 / 120);
-    // 敵の列は奥へ斜めに並ぶ (奥ほど高く・小さく)。縦長の戦場を広く使うため
-    fieldSize.depth = h * 0.075;
+    // 立つ位置は下のボタンのすぐ上。ねこは戦場の高さの 1/4 ほど
+    fieldSize.ground = Math.round(h - 150);
+    fieldSize.s = Math.min(h * 0.26 / 150, w * 0.42 / 150);
     [els.fieldBg, els.fieldFg].forEach(function (c) {
       c.width = Math.round(w * dpr);
       c.height = Math.round(h * dpr);
@@ -254,190 +265,139 @@
   }
 
   function fx(lx) {
-    return fieldSize.padL + lx / C.FIELD_W * (fieldSize.w - fieldSize.padL - fieldSize.padR);
+    return lx / C.SCENE_W * fieldSize.w;
   }
 
   // ---------------------------------------------------------- 背景 (一度だけ描く)
+  //
+  // 背景だけの絵 (BATTLE_BG_SRC) があればそれを敷く。無いあいだは、施設の絵 (お城・民家・桜・
+  // 柵・のぼり・村人猫) を並べて、いただいたプレイ画面に近い村の景色を組み立てる。
+
+  // 背景だけの絵が届いたら、ここにファイル名を書く (例: './img/battle-bg.jpg')。空なら組み立てた景色
+  const BATTLE_BG_SRC = '';
+  const battleBg = new Image();
+  let battleBgReady = false;
+  battleBg.onload = function () { battleBgReady = battleBg.naturalWidth > 0; drawBackground(); };
+  if (BATTLE_BG_SRC) battleBg.src = BATTLE_BG_SRC;
+  ['b-castle', 'b-sakura', 'b-house', 'b-farm', 'b-woodfence', 'b-nobori', 'b-villager', 'cat-chatora', 'cat-gray'].forEach(function (n) {
+    imgs[n].addEventListener('load', function () { drawBackground(); });
+  });
 
   function drawBackground() {
     const ctx = bgCtx;
     const w = fieldSize.w, h = fieldSize.h, dpr = fieldSize.dpr;
+    if (!w) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const horizon = h * 0.34;
-    const groundTop = h * 0.43;
-    const R = C.mulberry32(20260923);
+    ctx.clearRect(0, 0, w, h);
+
+    if (battleBgReady) {
+      // 画面いっぱいに敷く (はみ出した分は切る)
+      const sc = Math.max(w / battleBg.naturalWidth, h / battleBg.naturalHeight);
+      const dw = battleBg.naturalWidth * sc, dh = battleBg.naturalHeight * sc;
+      ctx.drawImage(battleBg, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      return;
+    }
+
+    const horizon = h * 0.40;
+    const groundTop = h * 0.55;
+    const R = C.mulberry32(20260924);
+    const put = function (name, cx, bottom, width, alpha) {
+      const im = imgs[name];
+      if (!ready(im)) return;
+      const hh = width * im.naturalHeight / im.naturalWidth;
+      ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+      ctx.drawImage(im, cx - width / 2, bottom - hh, width, hh);
+      ctx.globalAlpha = 1;
+    };
 
     // 空
-    let g = ctx.createLinearGradient(0, 0, 0, horizon);
-    g.addColorStop(0, '#7cc4f2');
-    g.addColorStop(1, '#dff2fb');
+    let g = ctx.createLinearGradient(0, 0, 0, groundTop);
+    g.addColorStop(0, '#4fa6ec');
+    g.addColorStop(0.55, '#a9dbfa');
+    g.addColorStop(1, '#fff3d6');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, groundTop + 2);
-    g = ctx.createRadialGradient(w * 0.85, h * 0.05, 0, w * 0.85, h * 0.05, w * 0.5);
-    g.addColorStop(0, 'rgba(255,250,220,.8)');
-    g.addColorStop(1, 'rgba(255,250,220,0)');
+    g = ctx.createRadialGradient(w * 0.8, h * 0.08, 0, w * 0.8, h * 0.08, w * 0.6);
+    g.addColorStop(0, 'rgba(255,250,225,.85)');
+    g.addColorStop(1, 'rgba(255,250,225,0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, horizon);
-
-    // 雲
     function cloud(cx, cy, sc) {
-      ctx.fillStyle = 'rgba(255,255,255,.9)';
-      [[0, 0, 22], [22, -8, 18], [42, 2, 16], [-20, 4, 14], [12, 8, 18]].forEach(function (c) {
+      ctx.fillStyle = 'rgba(255,255,255,.92)';
+      [[0, 0, 26], [26, -10, 22], [50, 2, 18], [-24, 5, 16], [14, 10, 20]].forEach(function (c) {
         ctx.beginPath(); ctx.arc(cx + c[0] * sc, cy + c[1] * sc, c[2] * sc, 0, Math.PI * 2); ctx.fill();
       });
     }
-    cloud(w * 0.12, h * 0.1, w / 430);
-    cloud(w * 0.55, h * 0.06, w / 560);
-    cloud(w * 0.92, h * 0.2, w / 520);
+    cloud(w * 0.12, h * 0.16, w / 430);
+    cloud(w * 0.86, h * 0.2, w / 480);
+    cloud(w * 0.5, h * 0.11, w / 620);
 
-    // 遠くの山 (2 枚)
-    function ridge(y0, amp, color, seed) {
-      const r = C.mulberry32(seed);
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(0, groundTop);
-      ctx.lineTo(0, y0);
-      const n = 6;
-      for (let i = 0; i <= n; i++) {
-        const x = w * i / n;
-        const y = y0 - amp * (0.4 + r() * 0.6);
-        const cx = x - w / n / 2;
-        ctx.quadraticCurveTo(cx, y - amp * 0.3, x, y0 - amp * 0.2 * r());
-      }
-      ctx.lineTo(w, groundTop);
-      ctx.closePath();
-      ctx.fill();
-    }
-    ridge(horizon + h * 0.02, h * 0.14, '#b3cde4', 3);
-    ridge(horizon + h * 0.06, h * 0.1, '#9cbbd8', 7);
+    // 遠くの山
+    ctx.fillStyle = '#9dbfe0';
+    ctx.beginPath();
+    ctx.moveTo(0, horizon + h * 0.06);
+    ctx.quadraticCurveTo(w * 0.15, horizon - h * 0.05, w * 0.32, horizon + h * 0.02);
+    ctx.quadraticCurveTo(w * 0.55, horizon - h * 0.08, w * 0.75, horizon + h * 0.01);
+    ctx.quadraticCurveTo(w * 0.9, horizon - h * 0.04, w, horizon + h * 0.03);
+    ctx.lineTo(w, groundTop); ctx.lineTo(0, groundTop); ctx.closePath(); ctx.fill();
 
     // 丘の上のお城
-    const cx = w * 0.74, cy = horizon + h * 0.03, u = Math.min(w, h * 1.1) / 430;
-    ctx.fillStyle = '#86b867';
-    ctx.beginPath(); ctx.ellipse(cx, cy + 34 * u, 110 * u, 40 * u, 0, Math.PI, 0); ctx.fill();
-    ctx.fillStyle = '#9d9788';
-    ctx.beginPath();
-    ctx.moveTo(cx - 44 * u, cy + 6 * u); ctx.lineTo(cx + 44 * u, cy + 6 * u);
-    ctx.lineTo(cx + 36 * u, cy - 12 * u); ctx.lineTo(cx - 36 * u, cy - 12 * u); ctx.closePath(); ctx.fill();
-    const tiers = [[34, 16], [26, 14], [18, 12]];
-    let ty = cy - 12 * u;
-    tiers.forEach(function (t, i) {
-      const tw = t[0] * u, th = t[1] * u;
-      ctx.fillStyle = '#fbf8f0';
-      ctx.fillRect(cx - tw, ty - th, tw * 2, th);
-      ctx.fillStyle = '#3f4d70';
-      for (let k = -1; k <= 1; k++) ctx.fillRect(cx + k * tw * 0.55 - 2 * u, ty - th * 0.7, 4 * u, 4 * u);
-      // 反った屋根
-      ctx.fillStyle = '#34416a';
-      ctx.beginPath();
-      ctx.moveTo(cx - tw - 10 * u, ty - th + 1 * u);
-      ctx.quadraticCurveTo(cx - tw * 0.4, ty - th - 2 * u, cx, ty - th - 9 * u);
-      ctx.quadraticCurveTo(cx + tw * 0.4, ty - th - 2 * u, cx + tw + 10 * u, ty - th + 1 * u);
-      ctx.lineTo(cx + tw + 2 * u, ty - th + 4 * u);
-      ctx.lineTo(cx - tw - 2 * u, ty - th + 4 * u);
-      ctx.closePath();
-      ctx.fill();
-      ty -= th + 6 * u;
-      if (i === tiers.length - 1) {
-        ctx.fillStyle = '#e9c46a';
-        ctx.beginPath(); ctx.arc(cx - 6 * u, ty + 1 * u, 2.4 * u, 0, Math.PI * 2); ctx.arc(cx + 6 * u, ty + 1 * u, 2.4 * u, 0, Math.PI * 2); ctx.fill();
-      }
-    });
-
-    // 手前の丘と木
-    g = ctx.createLinearGradient(0, horizon, 0, groundTop);
-    g.addColorStop(0, '#a6d27a');
-    g.addColorStop(1, '#7fb95c');
+    ctx.fillStyle = '#7fb85e';
+    ctx.beginPath(); ctx.ellipse(w * 0.52, horizon + h * 0.1, w * 0.46, h * 0.1, 0, Math.PI, 0); ctx.fill();
+    put('b-castle', w * 0.52, horizon + h * 0.09, w * 0.5, 0.97);
+    // うっすら霞
+    g = ctx.createLinearGradient(0, horizon - h * 0.15, 0, groundTop);
+    g.addColorStop(0, 'rgba(220,238,250,0)');
+    g.addColorStop(1, 'rgba(236,244,236,.35)');
     ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.moveTo(0, groundTop);
-    ctx.lineTo(0, horizon + h * 0.07);
-    ctx.quadraticCurveTo(w * 0.25, horizon + h * 0.01, w * 0.5, horizon + h * 0.08);
-    ctx.quadraticCurveTo(w * 0.8, horizon + h * 0.13, w, horizon + h * 0.07);
-    ctx.lineTo(w, groundTop);
-    ctx.closePath();
-    ctx.fill();
-    for (let i = 0; i < 14; i++) {
-      const tx = R() * w, tyy = horizon + h * (0.06 + R() * 0.05), tr = (6 + R() * 8) * u;
-      ctx.fillStyle = i % 2 ? '#5f9a48' : '#6fae52';
-      ctx.beginPath(); ctx.arc(tx, tyy, tr, 0, Math.PI * 2); ctx.arc(tx + tr * 0.8, tyy + tr * 0.2, tr * 0.8, 0, Math.PI * 2); ctx.fill();
-    }
+    ctx.fillRect(0, horizon - h * 0.15, w, groundTop - horizon + h * 0.15);
 
-    // 村の家 (かやぶき)
-    function house(hx, hy, sc) {
-      ctx.fillStyle = '#efe2c4';
-      ctx.fillRect(hx - 14 * sc, hy - 12 * sc, 28 * sc, 12 * sc);
-      ctx.fillStyle = '#6b4f33';
-      ctx.fillRect(hx - 4 * sc, hy - 9 * sc, 8 * sc, 9 * sc);
-      ctx.fillStyle = '#c9a063';
-      ctx.beginPath(); ctx.moveTo(hx - 20 * sc, hy - 11 * sc); ctx.lineTo(hx, hy - 30 * sc); ctx.lineTo(hx + 20 * sc, hy - 11 * sc); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#a98147';
-      ctx.fillRect(hx - 20 * sc, hy - 13 * sc, 40 * sc, 3 * sc);
-    }
-    house(w * 0.1, groundTop - 2, u);
-    house(w * 0.27, groundTop - 6, u * 0.8);
-    house(w * 0.43, groundTop - 3, u * 0.7);
+    // 左に桜、右に村の家
+    put('b-sakura', w * 0.08, groundTop + h * 0.03, w * 0.34);
+    put('b-sakura', w * 0.28, groundTop + h * 0.0, w * 0.24);
+    put('b-farm', w * 0.9, groundTop + h * 0.03, w * 0.42);
+    put('b-house', w * 0.72, groundTop - h * 0.005, w * 0.28);
 
-    // 広場 (土)
+    // 広場
     g = ctx.createLinearGradient(0, groundTop, 0, h);
-    g.addColorStop(0, '#e6d3a8');
-    g.addColorStop(1, '#cfb27a');
+    g.addColorStop(0, '#e9d6a8');
+    g.addColorStop(1, '#caa870');
     ctx.fillStyle = g;
     ctx.fillRect(0, groundTop, w, h - groundTop);
-    ctx.fillStyle = 'rgba(255,248,225,.45)';
-    ctx.beginPath(); ctx.ellipse(w * 0.55, h * 0.74, w * 0.6, h * 0.2, 0, 0, Math.PI * 2); ctx.fill();
-    for (let i = 0; i < 160; i++) {
-      ctx.fillStyle = R() < 0.5 ? 'rgba(120,90,50,.18)' : 'rgba(255,255,255,.25)';
-      const sx = R() * w, sy = groundTop + R() * (h - groundTop);
-      ctx.fillRect(sx, sy, 1.5 + R() * 2, 1 + R());
+    ctx.fillStyle = 'rgba(255,247,222,.5)';
+    ctx.beginPath(); ctx.ellipse(w * 0.5, fieldSize.ground - h * 0.02, w * 0.62, h * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+    for (let i = 0; i < 180; i++) {
+      ctx.fillStyle = R() < 0.5 ? 'rgba(120,90,50,.2)' : 'rgba(255,255,255,.3)';
+      ctx.fillRect(R() * w, groundTop + R() * (h - groundTop), 1.5 + R() * 2.5, 1 + R());
     }
-    // 草のふち
-    ctx.fillStyle = '#8ec766';
-    ctx.beginPath();
-    ctx.moveTo(0, groundTop + 4);
-    for (let x = 0; x <= w; x += 8) ctx.lineTo(x, groundTop + (x / 8 % 2 ? 7 : 1));
-    ctx.lineTo(w, groundTop - 2); ctx.lineTo(0, groundTop - 2); ctx.closePath(); ctx.fill();
 
-    // 柵
-    ctx.strokeStyle = '#8a6a44';
-    ctx.lineWidth = 3 * u;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.52, groundTop - 12 * u); ctx.lineTo(w, groundTop - 12 * u);
-    ctx.moveTo(w * 0.52, groundTop - 4 * u); ctx.lineTo(w, groundTop - 4 * u);
-    ctx.stroke();
-    ctx.fillStyle = '#7a5a36';
-    for (let x = w * 0.54; x < w; x += 26 * u) ctx.fillRect(x - 2.5 * u, groundTop - 20 * u, 5 * u, 22 * u);
+    // 見物の猫と柵、のぼり
+    put('b-villager', w * 0.07, groundTop + h * 0.045, w * 0.12);
+    put('cat-chatora', w * 0.17, groundTop + h * 0.05, w * 0.1);
+    put('b-villager', w * 0.92, groundTop + h * 0.05, w * 0.12);
+    for (let x = -w * 0.04; x < w * 0.34; x += w * 0.16) put('b-woodfence', x + w * 0.08, groundTop + h * 0.07, w * 0.18);
+    for (let x = w * 0.7; x < w * 1.04; x += w * 0.16) put('b-woodfence', x + w * 0.08, groundTop + h * 0.07, w * 0.18);
+    put('b-nobori', w * 0.36, groundTop + h * 0.05, w * 0.07);
+    put('b-nobori', w * 0.64, groundTop + h * 0.05, w * 0.07);
 
-    // 肉球の旗
-    function banner(bx, by, sc) {
-      ctx.fillStyle = '#6b4f33';
-      ctx.fillRect(bx - 1.5 * sc, by - 70 * sc, 3 * sc, 72 * sc);
-      ctx.fillRect(bx - 1.5 * sc, by - 70 * sc, 22 * sc, 3 * sc);
-      ctx.fillStyle = '#2f3f72';
-      ctx.fillRect(bx + 1.5 * sc, by - 67 * sc, 18 * sc, 40 * sc);
-      ctx.fillStyle = '#fff';
-      const px = bx + 10.5 * sc, py = by - 45 * sc;
-      ctx.beginPath(); ctx.ellipse(px, py + 3 * sc, 4.5 * sc, 3.8 * sc, 0, 0, Math.PI * 2); ctx.fill();
-      [[-5, -3], [-2, -7], [2, -7], [5, -3]].forEach(function (d) {
-        ctx.beginPath(); ctx.arc(px + d[0] * sc, py + d[1] * sc, 1.7 * sc, 0, Math.PI * 2); ctx.fill();
-      });
+    // 手前の草花 (ぼかした茂み)
+    function bush(cx, cy, r, col) {
+      const gg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      gg.addColorStop(0, col);
+      gg.addColorStop(1, 'rgba(90,150,60,0)');
+      ctx.fillStyle = gg;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
     }
-    banner(w * 0.035, groundTop + 12 * u, u * 1.1);
-    banner(w * 0.93, groundTop + 6 * u, u);
-
-    // 手前の草花
-    for (let i = 0; i < 26; i++) {
-      const gx = (i < 13 ? R() * w * 0.22 : w - R() * w * 0.22), gy = h - R() * h * 0.08;
-      ctx.fillStyle = i % 3 ? '#77b456' : '#5f9a48';
-      ctx.beginPath(); ctx.ellipse(gx, gy, 3 * u, 9 * u, (R() - 0.5), 0, Math.PI * 2); ctx.fill();
-      if (i % 4 === 0) {
-        ctx.fillStyle = '#f7b6cf';
-        ctx.beginPath(); ctx.arc(gx + 3 * u, gy - 8 * u, 3 * u, 0, Math.PI * 2); ctx.fill();
-      }
+    bush(w * 0.02, h * 0.98, w * 0.22, 'rgba(96,160,70,.9)');
+    bush(w * 1.0, h * 0.97, w * 0.24, 'rgba(96,160,70,.9)');
+    bush(w * 0.2, h * 1.02, w * 0.16, 'rgba(120,180,80,.85)');
+    for (let i = 0; i < 8; i++) {
+      ctx.fillStyle = '#f7b6cf';
+      ctx.beginPath(); ctx.arc(R() * w * 0.25, h * (0.9 + R() * 0.08), 3 + R() * 3, 0, Math.PI * 2); ctx.fill();
     }
 
     // ふちを少し暗く
-    g = ctx.createRadialGradient(w / 2, h * 0.55, h * 0.35, w / 2, h * 0.55, h * 0.9);
+    g = ctx.createRadialGradient(w / 2, h * 0.55, h * 0.3, w / 2, h * 0.55, h * 0.85);
     g.addColorStop(0, 'rgba(58,42,28,0)');
     g.addColorStop(1, 'rgba(58,42,28,.22)');
     ctx.fillStyle = g;
@@ -447,67 +407,85 @@
   // ---------------------------------------------------------- 効果
 
   let effects = [];
-  const disp = {};        // 敵ごとの表示位置 (ゆっくり追いかける) と、ひかり・揺れ
-  const anim = { lunge: 0, swing: 0, hurt: 0, shake: 0, flash: 0 };
+  const anim = { lure: 0, punch: 0, hurt: 0, shake: 0, flash: 0, knock: 0 };
   const petals = [];
-  for (let i = 0; i < 9; i++) petals.push({ x: Math.random(), y: Math.random(), v: 0.03 + Math.random() * 0.03, p: Math.random() * 6 });
+  for (let i = 0; i < 12; i++) petals.push({ x: Math.random(), y: Math.random(), v: 0.03 + Math.random() * 0.03, p: Math.random() * 6 });
+  let cheer = { t: 3, text: '' };
 
   function addEffect(e) {
     e.t = 0;
     effects.push(e);
   }
 
-  function enemyScreen(e) {
-    const d = disp[e.id];
-    const x = fx(d ? d.x : e.x);
-    return { x: x, y: fieldSize.ground - (d ? d.depth : 0) };
+  function heroX() { return fx(C.PLAYER_X); }
+  function enemyX(e) { return fx(e.x); }
+
+  function enemyScale(e) {
+    return fieldSize.s * (e.kind === 'boss' ? 1.45 : (e.boss ? 1.2 : 1));
   }
+
+  const LURE_TEXT = {
+    charm: ['夢中!', '#ff5f9e', 20], perfect: ['見切り!', '#c8412f', 26], dodge: ['ひらり…', '#ff7fb0', 20],
+    resist: ['まだまだ…?', '#7a6650', 16], wary: ['警戒中…', '#7a6650', 16], full: ['もう夢中!', '#ff5f9e', 16]
+  };
 
   function handleEvents(b) {
     const s = fieldSize.s;
+    const e = b.enemies[b.current];
+    const ex = e ? enemyX(e) : fieldSize.w * 0.7;
+    const top = e ? fieldSize.ground - 150 * enemyScale(e) : fieldSize.ground - 150 * s;
     for (let i = 0; i < b.events.length; i++) {
       const ev = b.events[i];
-      const e = ev.id ? b.enemies.find(function (en) { return en.id === ev.id; }) : null;
-      const pos = e ? enemyScreen(e) : null;
-      const top = pos ? pos.y - 150 * s * (e.boss ? 1.25 : 1) : 0;
-      if (ev.type === 'hit') {
-        if (disp[ev.id]) disp[ev.id].flash = 1;
+      if (ev.type === 'lure') {
+        anim.lure = 1;
+        addEffect({ kind: 'swish', dur: 0.45, big: ev.result === 'perfect' });
+        const lt = LURE_TEXT[ev.result];
+        if (lt) addEffect({ kind: 'text', x: ex, y: top - 10 * s, text: lt[0], color: lt[1], size: lt[2], dur: 0.9 });
+        if (ev.result === 'perfect') setFace('smile', 1.0);
+        if (ev.result === 'dodge' || ev.result === 'wary') setFace('shy', 0.7);
+      } else if (ev.type === 'hit') {
         if (ev.source === 'punch') {
-          addEffect({ kind: 'burst', x: pos.x - 18 * s, y: pos.y - 70 * s, r: (ev.crit ? 46 : 34) * s, dur: 0.26 });
+          anim.punch = 1;
+          anim.knock = 1;
+          const big = ev.combo || ev.crit;
+          addEffect({ kind: 'burst', x: ex - 20 * s, y: fieldSize.ground - 80 * s, r: (big ? 70 : 46) * s, dur: 0.3 });
+          addEffect({ kind: 'text', x: ex + 10 * s, y: top - 30 * s, text: ev.armor ? 'カキン!' : 'バシッ!', color: '#ffd84a', size: big ? 40 : 32, rot: -0.12, dur: 0.75, stroke: '#3a2a1c' });
+          if (ev.combo) startCutin();
+          if (ev.crit) addEffect({ kind: 'text', x: ex, y: top - 70 * s, text: ev.open ? 'スキあり!' : '会心の猫パンチ!', color: '#c8412f', size: 20, dur: 1.0 });
+          if (big) setFace('smile', 1.0);
         } else if (ev.source === 'ally') {
-          addEffect({ kind: 'burst', x: pos.x - 10 * s, y: pos.y - 90 * s, r: 20 * s, dur: 0.2 });
-        } else {
-          addEffect({ kind: 'sparkle', x: pos.x, y: pos.y - 70 * s, dur: 0.6 });
+          addEffect({ kind: 'burst', x: ex - 10 * s, y: fieldSize.ground - 100 * s, r: 20 * s, dur: 0.2 });
         }
-        addEffect({ kind: 'num', x: pos.x, y: top, text: String(ev.amount), crit: ev.crit, dur: 0.8 });
-        if (ev.crit && ev.source === 'punch') {
-          addEffect({ kind: 'text', x: pos.x, y: top - 26 * s, text: '会心!', color: '#c8412f', size: 20, dur: 0.8 });
-          setFace('smile', 0.8);
-        }
+        addEffect({ kind: 'num', x: ex + 30 * s, y: top + 10 * s, text: String(ev.amount), crit: ev.crit || ev.combo, dur: 0.8 });
+      } else if (ev.type === 'parry') {
+        anim.punch = 1;
+        addEffect({ kind: 'text', x: ex, y: top - 20 * s, text: '受け流し!', color: '#3f4d70', size: 22, dur: 0.9 });
+      } else if (ev.type === 'open') {
+        addEffect({ kind: 'text', x: ex, y: top - 40 * s, text: 'スキあり!', color: '#ff9a1a', size: 20, dur: 0.9 });
+      } else if (ev.type === 'bored') {
+        addEffect({ kind: 'text', x: ex, y: top - 10 * s, text: 'あきた…', color: '#7a6650', size: 16, dur: 0.9 });
       } else if (ev.type === 'down') {
-        addEffect({ kind: 'dust', x: pos.x, y: pos.y - 30 * s, dur: 0.6 });
-        addEffect({ kind: 'text', x: pos.x, y: top + 10 * s, text: '+' + ev.reward + ' 手柄', color: '#b98b34', size: 16, dur: 1.1 });
-        addEffect({ kind: 'ghost', id: ev.id, x: pos.x, y: pos.y, look: e.look, boss: e.boss, dur: 0.5 });
-        setFace('smile', 0.9);
-      } else if (ev.type === 'lure') {
-        anim.swing = 1;
-        addEffect({ kind: 'swish', x0: fx(b.player.x) + 30 * s, y0: fieldSize.ground - 95 * s, x1: pos.x, y1: pos.y - 90 * s, dur: 0.38 });
-        addEffect({ kind: 'text', x: pos.x, y: top - 4 * s, text: ev.perfect ? '見切り!' : '夢中!', color: ev.perfect ? '#c8412f' : '#e0679b', size: ev.perfect ? 24 : 18, dur: 1.0 });
-        if (ev.perfect) setFace('smile', 1.0);
-      } else if (ev.type === 'lureMiss') {
-        anim.swing = 1;
-      } else if (ev.type === 'miss') {
-        addEffect({ kind: 'text', x: fx(b.player.x) + 50 * s, y: fieldSize.ground - 120 * s, text: 'スカッ', color: '#7a6650', size: 16, dur: 0.7 });
-        setFace('shy', 0.8);
+        addEffect({ kind: 'dust', x: ex, y: fieldSize.ground - 30 * s, dur: 0.7 });
+        addEffect({ kind: 'text', x: ex, y: top + 20 * s, text: '+' + ev.reward + ' 小判', color: '#b98b34', size: 18, dur: 1.2 });
+        setFace('smile', 1.0);
+      } else if (ev.type === 'enter') {
+        const en = b.enemies[b.current];
+        showBanner(en.boss ? '大将 あらわる!' : en.name + ' があらわれた!', en.boss ? 34 : 26);
       } else if (ev.type === 'playerHit') {
         anim.hurt = 1; anim.shake = 1; anim.flash = 1;
-        addEffect({ kind: 'num', x: fx(b.player.x), y: fieldSize.ground - 150 * s, text: '-' + ev.amount, hurt: true, dur: 0.8 });
+        addEffect({ kind: 'num', x: heroX(), y: fieldSize.ground - 170 * s, text: '-' + ev.amount, hurt: true, dur: 0.8 });
         setFace('surprised', 0.7);
-      } else if (ev.type === 'special') {
-        startCutin();
-        addEffect({ kind: 'swirl', dur: 1.2 });
-      } else if (ev.type === 'specialReady') {
-        setFace('smile', 1.0);
+      } else if (ev.type === 'miss') {
+        anim.punch = 1;
+        addEffect({ kind: 'text', x: heroX() + 60 * s, y: fieldSize.ground - 140 * s, text: 'スカッ', color: '#7a6650', size: 16, dur: 0.7 });
+        setFace('shy', 0.8);
+      } else if (ev.type === 'item') {
+        addEffect({ kind: 'text', x: ev.item === 'fish' ? heroX() : ex, y: top - 10 * s,
+          text: ev.item === 'fish' ? '🐟 +' + ev.amount : '🌿 またたび!', color: ev.item === 'fish' ? '#3a8fe0' : '#5fa83a', size: 20, dur: 1.0 });
+        setFace('smile', 0.8);
+      } else if (ev.type === 'allyAttack') {
+        const a = b.allies.find(function (x) { return x.id === ev.ally; });
+        if (a) a.hop = 1;
       } else if (ev.type === 'won' || ev.type === 'lost') {
         onBattleEnd(b);
       }
@@ -533,16 +511,18 @@
     if (!ready(im)) return;
     const w = im.naturalWidth * scale;
     const h = im.naturalHeight * scale;
+    const ax = opts && opts.anchor !== undefined ? opts.anchor : 0.5; // 絵のどこを x に合わせるか
     ctx.save();
     ctx.translate(x, groundY);
     if (opts && opts.rot) ctx.rotate(opts.rot);
+    if (opts && opts.flip) ctx.scale(-1, 1);
     if (opts && opts.alpha !== undefined) ctx.globalAlpha = opts.alpha;
-    ctx.drawImage(im, -w / 2, -h, w, h);
+    ctx.drawImage(im, -w * ax, -h, w, h);
     if (opts && opts.flash > 0) {
       // 当たった瞬間だけ白く光らせる (同じ絵を足し算で重ねる)
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = opts.flash * 0.6;
-      ctx.drawImage(im, -w / 2, -h, w, h);
+      ctx.drawImage(im, -w * ax, -h, w, h);
     }
     ctx.restore();
   }
@@ -554,16 +534,20 @@
     ctx.fill();
   }
 
-  function outlinedText(ctx, text, x, y, size, fill, stroke) {
+  function outlinedText(ctx, text, x, y, size, fill, stroke, rot) {
+    ctx.save();
+    ctx.translate(x, y);
+    if (rot) ctx.rotate(rot);
     ctx.font = '900 ' + size + 'px "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';
     ctx.lineWidth = Math.max(3, size / 5);
     ctx.strokeStyle = stroke || '#3a2a1c';
-    ctx.strokeText(text, x, y);
+    ctx.strokeText(text, 0, 0);
     ctx.fillStyle = fill;
-    ctx.fillText(text, x, y);
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
   }
 
   function burstPath(ctx, x, y, r, spikes) {
@@ -576,6 +560,23 @@
     ctx.closePath();
   }
 
+  /** 猫じゃらしの羽 (桃・白・黄) を x, y に描く */
+  function feather(ctx, x, y, size, rot) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot || 0);
+    const cols = ['#ffe27a', '#fff4f8', '#f7a8c4'];
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = cols[i];
+      ctx.beginPath();
+      ctx.ellipse(size * 0.6, (i - 1) * size * 0.18, size * 0.7, size * 0.22, (i - 1) * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#f0c040';
+    ctx.beginPath(); ctx.arc(0, 0, size * 0.18, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
   function drawEffect(ctx, e) {
     const k = e.t / e.dur;
     const s = fieldSize.s;
@@ -583,185 +584,198 @@
       const r = e.r * (0.6 + k * 0.7);
       ctx.globalAlpha = 1 - k;
       ctx.fillStyle = '#ffd84a';
-      burstPath(ctx, e.x, e.y, r, 9); ctx.fill();
+      burstPath(ctx, e.x, e.y, r, 10); ctx.fill();
       ctx.fillStyle = '#fffbe0';
-      burstPath(ctx, e.x, e.y, r * 0.55, 9); ctx.fill();
+      burstPath(ctx, e.x, e.y, r * 0.55, 10); ctx.fill();
       ctx.globalAlpha = 1;
     } else if (e.kind === 'num') {
-      const y = e.y - 30 * s * k;
       ctx.globalAlpha = k < 0.7 ? 1 : (1 - k) / 0.3;
-      const size = e.crit ? 30 : (e.hurt ? 22 : 24);
-      outlinedText(ctx, e.text, e.x, y, size, e.hurt ? '#ff6a55' : (e.crit ? '#ffd84a' : '#ffffff'));
+      outlinedText(ctx, e.text, e.x, e.y - 30 * s * k, e.crit ? 32 : (e.hurt ? 22 : 24), e.hurt ? '#ff6a55' : (e.crit ? '#ffd84a' : '#ffffff'));
       ctx.globalAlpha = 1;
     } else if (e.kind === 'text') {
-      const y = e.y - 22 * s * k;
       ctx.globalAlpha = k < 0.6 ? 1 : (1 - k) / 0.4;
-      outlinedText(ctx, e.text, e.x, y, e.size, e.color, '#fff');
+      const pop = k < 0.15 ? 0.6 + k / 0.15 * 0.4 : 1;
+      outlinedText(ctx, e.text, e.x, e.y - 20 * s * k, e.size * pop, e.color, e.stroke || '#fff', e.rot);
       ctx.globalAlpha = 1;
     } else if (e.kind === 'swish') {
-      // 猫じゃらしの羽の軌跡 (黄・白・桃)
-      const mx = (e.x0 + e.x1) / 2, my = Math.min(e.y0, e.y1) - 60 * s;
-      const tip = Math.min(1, k * 1.8);
-      const bx = (1 - tip) * (1 - tip) * e.x0 + 2 * (1 - tip) * tip * mx + tip * tip * e.x1;
-      const by = (1 - tip) * (1 - tip) * e.y0 + 2 * (1 - tip) * tip * my + tip * tip * e.y1;
-      ctx.globalAlpha = 1 - Math.max(0, k - 0.5) * 2;
-      const colors = ['#ffe27a', '#ffffff', '#f7a8c4'];
+      // 猫じゃらしの羽の軌跡 (いただいたプレイ画面の、桃と黄の帯)
+      const hx = heroX() + 40 * s, hy = fieldSize.ground - 90 * s;
+      const cx = (hx + fx(C.ENEMY_X)) / 2, cy = hy - 20 * s;
+      const rx = (fx(C.ENEMY_X) - hx) * 0.62, ry = 60 * s;
+      const a0 = Math.PI * 0.9, a1 = a0 + Math.PI * 1.25 * Math.min(1, k * 1.6);
+      ctx.globalAlpha = 1 - Math.max(0, k - 0.55) / 0.45;
       ctx.lineCap = 'round';
-      for (let c = 0; c < 3; c++) {
-        ctx.strokeStyle = colors[c];
-        ctx.lineWidth = (12 - c * 3) * s;
+      const cols = e.big ? ['#ffe27a', '#fff', '#f7a8c4', '#c9a6ff'] : ['#ffe27a', '#fff', '#f7a8c4'];
+      cols.forEach(function (c, i) {
+        ctx.strokeStyle = c;
+        ctx.lineWidth = (14 - i * 3) * s;
         ctx.beginPath();
-        ctx.moveTo(e.x0, e.y0 + c * 4 * s);
-        ctx.quadraticCurveTo(mx, my + c * 4 * s, bx, by + c * 4 * s);
+        ctx.ellipse(cx, cy + i * 5 * s, rx, ry, -0.12, a0, a1);
         ctx.stroke();
-      }
-      ctx.fillStyle = '#f0c040';
-      ctx.beginPath(); ctx.arc(bx, by, 6 * s, 0, Math.PI * 2); ctx.fill();
+      });
+      feather(ctx, cx + Math.cos(a1) * rx, cy + Math.sin(a1) * ry, 26 * s, a1 + Math.PI / 2);
       ctx.globalAlpha = 1;
     } else if (e.kind === 'dust') {
       ctx.fillStyle = 'rgba(255,248,230,' + (0.8 * (1 - k)) + ')';
-      for (let i = 0; i < 6; i++) {
-        const a = i / 6 * Math.PI * 2;
-        const d = 34 * s * k;
-        ctx.beginPath(); ctx.arc(e.x + Math.cos(a) * d, e.y + Math.sin(a) * d * 0.6, (10 + 8 * k) * s, 0, Math.PI * 2); ctx.fill();
+      for (let i = 0; i < 7; i++) {
+        const a = i / 7 * Math.PI * 2;
+        const d = 40 * s * k;
+        ctx.beginPath(); ctx.arc(e.x + Math.cos(a) * d, e.y + Math.sin(a) * d * 0.5, (12 + 8 * k) * s, 0, Math.PI * 2); ctx.fill();
       }
-      ctx.fillStyle = 'rgba(255,216,74,' + (1 - k) + ')';
-      for (let i = 0; i < 4; i++) {
-        const a = i / 4 * Math.PI * 2 + 0.4;
-        burstPath(ctx, e.x + Math.cos(a) * 46 * s * k, e.y - 20 * s + Math.sin(a) * 30 * s * k, 7 * s, 5);
-        ctx.fill();
+    }
+  }
+
+  function drawEnemy(ctx, b, e, t) {
+    const s = fieldSize.s;
+    const sc = enemyScale(e);
+    let x = enemyX(e);
+    let y = fieldSize.ground;
+    let rot = 0;
+    let alpha = 1;
+    const headY = function () { return y - 150 * sc; };
+
+    if (e.state === 'enter') {
+      y -= Math.abs(Math.sin(t * 10)) * 6 * s;
+    } else if (e.state === 'idle') {
+      y -= Math.abs(Math.sin(t * 3 + e.id)) * 3 * s;
+    } else if (e.state === 'windup') {
+      rot = -0.16;
+      x += Math.sin(t * 40) * 2;
+    } else if (e.state === 'charmed') {
+      // 羽に飛びつく
+      const ph = (e.age % C.JUMP_PERIOD) / C.JUMP_PERIOD;
+      y -= Math.sin(ph * Math.PI) * 46 * s;
+      rot = Math.sin(ph * Math.PI * 2) * 0.12;
+      x -= 18 * s;
+    } else if (e.state === 'recover') {
+      rot = 0.22 * Math.max(0, e.timer / 0.6);
+      x += 16 * s * Math.max(0, e.timer / 0.6);
+    } else if (e.state === 'down') {
+      const k = 1 - Math.max(0, e.timer) / 1.3;
+      rot = Math.min(1, k * 3) * (Math.PI / 2);
+      x += Math.min(1, k * 3) * 30 * s;
+      y -= Math.sin(Math.min(1, k * 3) * Math.PI) * 30 * s;
+      alpha = k > 0.75 ? (1 - k) / 0.25 : 1;
+    }
+
+    shadow(ctx, enemyX(e), fieldSize.ground, 40 * sc);
+    const flash = anim.knock > 0.6 && e.state !== 'down' ? anim.knock : 0;
+    drawSprite(ctx, imgs[e.look], x, y, sc, { rot: rot, alpha: alpha, flash: flash });
+
+    // 夢中: ぶらさがる羽とハート。飛びつきの高いところ (会心になる所) で星が光る
+    if (e.state === 'charmed') {
+      feather(ctx, x - 40 * s, headY() - 24 * s + Math.sin(t * 8) * 6 * s, 22 * s, -1.2 + Math.sin(t * 6) * 0.4);
+      for (let i = 0; i < 3; i++) {
+        const a = t * 3 + i * 2.1;
+        outlinedText(ctx, '♥', x + Math.cos(a) * 34 * s, headY() + 18 * s + Math.sin(a) * 10 * s, 16, '#ff7fb0', '#fff');
       }
-    } else if (e.kind === 'ghost') {
-      drawSprite(ctx, imgs[e.look], e.x, e.y - 20 * s * k, s * (e.boss ? 1.25 : 1), { alpha: 1 - k, rot: -0.3 * k });
-    } else if (e.kind === 'sparkle') {
-      ctx.fillStyle = 'rgba(255,255,255,' + (1 - k) + ')';
-      for (let i = 0; i < 5; i++) {
-        const a = i / 5 * Math.PI * 2 + k * 3;
-        burstPath(ctx, e.x + Math.cos(a) * 30 * s * k, e.y + Math.sin(a) * 30 * s * k, 6 * s, 4);
-        ctx.fill();
+      if (C.atJumpPeak(e)) {
+        ctx.strokeStyle = 'rgba(255,226,122,.95)';
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(x, headY() + 60 * sc, 70 * sc, 0, Math.PI * 2); ctx.stroke();
+        outlinedText(ctx, '★', x + 50 * sc, headY() + 10 * sc, 26, '#ffe27a');
       }
-    } else if (e.kind === 'swirl') {
-      // 必殺技: 虹の渦が広場を回る
-      const cx = fieldSize.w * 0.62, cy = fieldSize.ground - 70 * s;
-      const colors = ['#f7a8c4', '#ffe27a', '#9ee3a0', '#8fd0ff', '#c9a6ff'];
-      ctx.globalAlpha = k < 0.8 ? 0.85 : (1 - k) * 4 * 0.85;
-      ctx.lineCap = 'round';
-      for (let i = 0; i < colors.length; i++) {
-        ctx.strokeStyle = colors[i];
-        ctx.lineWidth = 12 * s;
-        const r = (40 + i * 22) * s * (0.4 + k);
-        const a0 = k * 9 + i * 1.3;
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, r * 1.4, r * 0.7, 0, a0, a0 + 3.6);
-        ctx.stroke();
+    }
+    if (e.state === 'windup') outlinedText(ctx, '!', x - 34 * s, headY() + 8 * s, 34 + Math.sin(t * 20) * 3, '#ff4b3a', '#fff');
+    if (e.state === 'recover' && e.open) outlinedText(ctx, 'スキ!', x, headY() - 6 * s, 18 + Math.sin(t * 12) * 2, '#ff9a1a', '#fff');
+    if (e.kind === 'quick' && (e.state === 'idle' || e.state === 'recover') && C.isLooking(e)) {
+      outlinedText(ctx, '👀', x + 26 * s, headY() + 6 * s, 20, '#fff', '#fff');
+    }
+    if (e.kind === 'boss' && e.state !== 'charmed' && e.lureCount > 0 && e.state !== 'down') {
+      outlinedText(ctx, '?'.repeat(e.lureCount), x + 30 * s, headY() + 4 * s, 20, '#ff7fb0', '#fff');
+    }
+    if (e.state === 'down') {
+      // 目を回す
+      for (let i = 0; i < 3; i++) {
+        const a = t * 5 + i * 2.1;
+        outlinedText(ctx, '★', x + Math.cos(a) * 30 * s, headY() + 20 * s + Math.sin(a) * 8 * s, 14, '#ffe27a');
+      }
+    }
+    // 肉球ゲージ (頭の上)
+    if (b.paw > 0 && e.state !== 'down') {
+      for (let i = 0; i < C.PAW_MAX; i++) {
+        ctx.globalAlpha = i < b.paw ? 1 : 0.3;
+        outlinedText(ctx, '🐾', x - 44 * s + i * 22 * s, headY() - 30 * s, 15, '#fff', '#fff');
       }
       ctx.globalAlpha = 1;
     }
   }
 
-  function allyInterval(level) {
-    return Math.max(1.2, 2.6 - 0.12 * level);
+  function drawHero(ctx, b, t, dt) {
+    const s = fieldSize.s;
+    const r = C.rankIndexOf(state);
+    let x = heroX();
+    const y = fieldSize.ground;
+    shadow(ctx, x, y, 38 * s);
+    if (anim.punch > 0) {
+      // 飛び込んでパンチ
+      const k = Math.sin(anim.punch * Math.PI);
+      const dash = (b && b.enemies[b.current] ? enemyX(b.enemies[b.current]) - x - 120 * s : 60 * s) * k;
+      drawSprite(ctx, imgs['pose-punch'], x + dash, y - k * 24 * s, s * 0.95, { anchor: 0.4 });
+      return;
+    }
+    if (anim.lure > 0) {
+      drawSprite(ctx, imgs['pose-jarashi'], x, y, s * 0.95, { anchor: 0.32 });
+      return;
+    }
+    const bob = Math.abs(Math.sin(t * 3.2)) * 3 * s;
+    x -= anim.hurt * 10 * s;
+    drawSprite(ctx, imgs[stageForRank(r)], x, y - bob, s, { flash: anim.hurt > 0.6 ? 0.8 : 0 });
   }
 
   function draw(now, dt) {
     const ctx = fgCtx;
-    const w = fieldSize.w, h = fieldSize.h, s = fieldSize.s, ground = fieldSize.ground;
+    const w = fieldSize.w, h = fieldSize.h, s = fieldSize.s;
     if (!w) return;
     ctx.setTransform(fieldSize.dpr, 0, 0, fieldSize.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const t = now / 1000;
 
-    if (anim.shake > 0) {
-      ctx.translate((Math.random() - 0.5) * 8 * anim.shake, (Math.random() - 0.5) * 5 * anim.shake);
-    }
+    ['lure', 'punch', 'hurt', 'shake', 'flash', 'knock'].forEach(function (k) {
+      const dur = { lure: 0.35, punch: 0.3, hurt: 0.4, shake: 0.25, flash: 0.35, knock: 0.25 }[k];
+      anim[k] = Math.max(0, anim[k] - dt / dur);
+    });
+    if (anim.shake > 0) ctx.translate((Math.random() - 0.5) * 8 * anim.shake, (Math.random() - 0.5) * 5 * anim.shake);
 
     // 花びら
-    ctx.fillStyle = 'rgba(247,168,196,.85)';
-    for (let i = 0; i < petals.length; i++) {
-      const p = petals[i];
+    ctx.fillStyle = 'rgba(247,168,196,.9)';
+    petals.forEach(function (p) {
       p.y += p.v * dt; p.x += p.v * 0.5 * dt;
       if (p.y > 1.05) { p.y = -0.05; p.x = Math.random(); }
       if (p.x > 1.05) p.x = -0.05;
       ctx.beginPath();
-      ctx.ellipse(p.x * w, p.y * h, 4, 2.4, Math.sin(t * 2 + p.p), 0, Math.PI * 2);
+      ctx.ellipse(p.x * w, p.y * h, 5, 3, Math.sin(t * 2 + p.p), 0, Math.PI * 2);
       ctx.fill();
+    });
+
+    // 見物の猫の声援
+    cheer.t -= dt;
+    if (cheer.t <= 0) {
+      cheer = { t: 6 + Math.random() * 4, show: 1.6, text: ['がんばれにゃ!', 'いけー!', 'そこだにゃ!'][Math.floor(Math.random() * 3)], left: Math.random() < 0.5 };
+    }
+    if (cheer.show > 0 && battle) {
+      cheer.show -= dt;
+      outlinedText(ctx, cheer.text, cheer.left ? w * 0.16 : w * 0.84, h * 0.5, 13, '#3a8fe0', '#fff', cheer.left ? -0.1 : 0.1);
     }
 
     const b = battle || lastBattle;
-    const r = C.rankIndexOf(state);
 
-    // 敵 (奥から描く)
-    if (b) {
-      const line = b.enemies.filter(function (e) { return e.spawned && e.alive; }).sort(function (a2, c2) { return a2.x - c2.x; });
-      line.forEach(function (e, k) {
-        let d = disp[e.id];
-        if (!d) d = disp[e.id] = { x: e.x, flash: 0, depth: 0 };
-        d.moving = Math.abs(d.x - e.x) > 0.5 || (b.phase === 'fight' && e.x > C.PLAYER_X + C.STOP + k * C.GAP + 0.5 && e.charm <= 0);
-        d.x += (e.x - d.x) * Math.min(1, dt * 18);
-        d.depth += (Math.min(k, 4) * fieldSize.depth - d.depth) * Math.min(1, dt * 8);
-        d.flash = Math.max(0, d.flash - dt / 0.18);
-      });
-      for (let k = line.length - 1; k >= 0; k--) {
-        const e = line[k];
-        const d = disp[e.id];
-        const scale = s * (e.boss ? 1.25 : 1) * (1 - Math.min(k, 4) * 0.07);
-        const ex = fx(d.x);
-        const ey = ground - d.depth;
-        const hop = d.moving ? Math.abs(Math.sin(t * 9 + e.id)) * 5 * s : 0;
-        let rot = d.moving ? Math.sin(t * 9 + e.id) * 0.05 : 0;
-        if (e.charm > 0) rot = Math.sin(t * 6) * 0.12;
-        if (e.windup) rot = 0.12;
-        shadow(ctx, ex, ey, 32 * scale);
-        drawSprite(ctx, imgs[e.look], ex, ey - hop, scale, { rot: rot, flash: d.flash });
-        const headY = ey - 150 * scale;
-        // 体力
-        const bw = 52 * s, bh = 7 * s;
-        ctx.fillStyle = '#3a2a1c';
-        ctx.fillRect(ex - bw / 2 - 1.5, headY - 8 * s - 1.5, bw + 3, bh + 3);
-        ctx.fillStyle = '#6b1d15';
-        ctx.fillRect(ex - bw / 2, headY - 8 * s, bw, bh);
-        ctx.fillStyle = e.boss ? '#ff8a3d' : '#e5463a';
-        ctx.fillRect(ex - bw / 2, headY - 8 * s, bw * e.hp / e.maxHp, bh);
-        if (e.boss) outlinedText(ctx, '大将', ex, headY - 20 * s, 13, '#ffd84a');
-        // 振りかぶり / 夢中
-        if (e.windup) {
-          const pulse = 1 + Math.sin(t * 20) * 0.1;
-          outlinedText(ctx, '!', ex - 24 * s, headY + 10 * s, 30 * pulse, '#ff4b3a', '#fff');
-        } else if (e.charm > 0) {
-          for (let i = 0; i < 3; i++) {
-            const a = t * 3 + i * 2.1;
-            outlinedText(ctx, '♥', ex + Math.cos(a) * 26 * s, headY + 16 * s + Math.sin(a) * 8 * s, 16, '#ff7fb0', '#fff');
-          }
-        }
-      }
-    }
-
-    // 出陣の家臣と自分は、敵より手前に描く (重なっても主人公が隠れないように)
+    // 出陣の家臣 (自分の左うしろ)
     const allies = b ? b.allies : state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, C.MAX_BATTLE_VASSALS);
     allies.forEach(function (a, i) {
-      // 主人公の左うしろに、一段奥に並ぶ
-      const ax = fx(C.PLAYER_X) - (58 + i * 30) * s;
-      const ay = ground - fieldSize.depth * (0.8 + i * 0.7);
-      const since = a.cd !== undefined ? allyInterval(a.level) - a.cd : 1;
-      const hop = since >= 0 && since < 0.25 ? Math.sin(since / 0.25 * Math.PI) * 10 * s : 0;
-      shadow(ctx, ax, ay, 18 * s);
-      drawSprite(ctx, imgs[a.look] || imgs['cat-chatora'], ax, ay - hop, s * 0.7, {});
+      a.hop = Math.max(0, (a.hop || 0) - dt / 0.3);
+      const ax = heroX() - (70 + i * 38) * s;
+      const ay = fieldSize.ground - (18 + i * 10) * s;
+      shadow(ctx, ax, ay, 20 * s);
+      drawSprite(ctx, imgs[a.look] || imgs['cat-chatora'], ax, ay - Math.sin(a.hop * Math.PI) * 14 * s, s * 0.62, {});
     });
 
-    // 自分
-    anim.lunge = Math.max(0, anim.lunge - dt / 0.2);
-    anim.swing = Math.max(0, anim.swing - dt / 0.35);
-    anim.hurt = Math.max(0, anim.hurt - dt / 0.4);
-    anim.shake = Math.max(0, anim.shake - dt / 0.25);
-    anim.flash = Math.max(0, anim.flash - dt / 0.35);
-    const px = fx(C.PLAYER_X) + Math.sin(anim.lunge * Math.PI) * 26 * s - anim.hurt * 8 * s;
-    const bob = Math.abs(Math.sin(t * 3.2)) * 3 * s;
-    const lean = anim.swing > 0 ? -Math.sin(anim.swing * Math.PI) * 0.18 : (anim.lunge > 0 ? 0.12 * Math.sin(anim.lunge * Math.PI) : 0);
-    shadow(ctx, px, ground, 34 * s);
-    drawSprite(ctx, imgs[stageForRank(r)], px, ground - bob, s, { rot: lean, flash: anim.hurt > 0.6 ? 0.8 : 0 });
+    if (b) {
+      const e = b.enemies[b.current];
+      if (e && e.state !== 'wait') drawEnemy(ctx, b, e, t);
+    }
+    drawHero(ctx, b, t, dt);
 
-
-    // 効果
     effects = effects.filter(function (e) {
       e.t += dt;
       if (e.t >= e.dur) return false;
@@ -773,7 +787,7 @@
       ctx.setTransform(fieldSize.dpr, 0, 0, fieldSize.dpr, 0, 0);
       const g = ctx.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, h * 0.8);
       g.addColorStop(0, 'rgba(255,60,40,0)');
-      g.addColorStop(1, 'rgba(255,60,40,' + (0.45 * anim.flash) + ')');
+      g.addColorStop(1, 'rgba(255,60,40,' + (0.4 * anim.flash) + ')');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
     }
@@ -781,18 +795,29 @@
 
   // ---------------------------------------------------------- 合戦の流れ
 
+  let paused = false;
+
   function showReady() {
     battle = null;
     lastBattle = null;
+    paused = false;
     effects = [];
-    Object.keys(disp).forEach(function (k) { delete disp[k]; });
     els.resultPanel.hidden = true;
+    els.pausePanel.hidden = true;
+    els.itemMenu.hidden = true;
     els.readyPanel.hidden = false;
     els.readyTitle.textContent = '第' + kanjiNum((state.battlesWon || 0) + 1) + '戦';
     const r = C.rankIndexOf(state);
-    els.readyText.innerHTML = r < 2
-      ? '猫じゃらしで ひきつけて、<br>猫パンチで たたこう!'
-      : (r < 5 ? '敵が「!」と振りかぶったら、<br>猫じゃらしで「見切り」だ!' : '最後に出てくる大将は手ごわいにゃ。<br>スペシャルをためておこう!');
+    const tips = [
+      '猫じゃらしで すきを作って、<br>猫パンチ!',
+      '肉球ゲージを ためてから パンチすると<br>大ダメージ!',
+      'すばしっこい猫は、👀 のときに<br>猫じゃらしを振ろう',
+      '敵が「!」と振りかぶったら、<br>猫じゃらしで「見切り」!',
+      'ねこ侍は、攻撃のあとの「スキ」を<br>パンチで ねらおう',
+      '大きなボス猫は、3回振ると夢中になるにゃ',
+      '羽に飛びついた ★ のときにパンチすると<br>会心の猫パンチ!'
+    ];
+    els.readyText.innerHTML = tips[Math.min(r, tips.length - 1)];
     renderHud(true);
   }
 
@@ -800,16 +825,16 @@
     if (battle && battle.phase === 'fight') return;
     battle = C.createBattle(state, rng);
     lastBattle = null;
+    paused = false;
     effects = [];
-    Object.keys(disp).forEach(function (k) { delete disp[k]; });
     els.readyPanel.hidden = true;
     els.resultPanel.hidden = true;
-    showBanner('いざ、出陣!');
     renderHud(true);
   }
 
-  function showBanner(text) {
+  function showBanner(text, size) {
     els.fieldBanner.textContent = text;
+    els.fieldBanner.style.fontSize = (size || 46) + 'px';
     els.fieldBanner.hidden = false;
     const a = els.fieldBanner.animate([
       { opacity: 0, transform: 'scale(1.8)' },
@@ -827,19 +852,20 @@
   function onBattleEnd(b) {
     lastBattle = b;
     battle = null;
+    els.itemMenu.hidden = true;
+    const res = C.applyBattleResult(state, b);
+    state = res.state;
+    saveSoon();
     if (b.phase === 'won') {
-      const res = C.applyBattleResult(state, b);
-      state = res.state;
       pendingOffer = C.rollRecruitOffer(state, b);
-      saveSoon();
       setFace('smile', 2.5);
       showBanner('勝利!');
+      const gain = b.merit + b.bonus;
+      let rows = row('倒した敵', b.enemies.length + ' 匹') + row('小判', '+' + gain) + row('経験値', '+' + gain) + row('資材', '+' + b.materials);
+      if (b.loot.fish) rows += row('🐟 魚', '+' + b.loot.fish);
+      if (b.loot.matatabi) rows += row('🌿 またたび', '+' + b.loot.matatabi);
       els.resultTitle.textContent = '勝利!';
-      els.resultRows.innerHTML =
-        row('倒した敵', b.enemies.length + ' 匹') +
-        row('手柄', '+' + b.merit) +
-        row('勝ちいくさの褒美', '+' + b.bonus) +
-        row('資材', '+' + b.materials);
+      els.resultRows.innerHTML = rows;
       els.btnNext.textContent = 'つぎの戦へ';
       if (pendingOffer) {
         els.offer.hidden = false;
@@ -855,7 +881,7 @@
     } else {
       setFace('shy', 3);
       els.resultTitle.textContent = 'ひと休み…';
-      els.resultRows.innerHTML = '<p class="panel-text">猫じゃらしで ひきつけると、<br>攻撃されずに たたけるにゃ。</p>';
+      els.resultRows.innerHTML = '<p class="panel-text">猫じゃらしで 夢中にすれば、<br>攻撃されずに たたけるにゃ。</p>';
       els.offer.hidden = true;
       els.btnNext.textContent = 'もう一度';
       setTimeout(function () { els.resultPanel.hidden = false; }, 600);
@@ -889,6 +915,27 @@
     els.rankModal.querySelector('.modal-card').animate([{ opacity: 0, transform: 'scale(.8)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 260, easing: 'ease-out' });
     renderTabs();
     setFace('smile', 3);
+  }
+
+  function pauseBattle() {
+    if (!battle || battle.phase !== 'fight') return;
+    paused = true;
+    els.itemMenu.hidden = true;
+    els.pausePanel.hidden = false;
+  }
+
+  function resumeBattle() {
+    paused = false;
+    els.pausePanel.hidden = true;
+  }
+
+  /** 退却: 使ったアイテムだけ減る。ほかは何も減らない */
+  function retreat() {
+    if (battle) {
+      state = C.applyBattleResult(state, battle).state;
+      saveSoon();
+    }
+    showReady();
   }
 
   // ---------------------------------------------------------- 家臣
@@ -949,7 +996,8 @@
 
   function updateRecruitButton() {
     if (!isUnlocked('vassals')) return;
-    els.btnRecruit.textContent = '村で仲間を募る (手柄 ' + C.recruitCost(state) + ')';
+    els.btnRecruit.textContent = '村で仲間を募る (小判 ' + C.recruitCost(state) + ')';
+    els.coinVassals.textContent = String(Math.floor(state.merit));
     els.btnRecruit.disabled = !C.canRecruitVassal(state);
   }
 
@@ -1200,7 +1248,7 @@
       if (fx.laborMul > 1) chips.push('普請 +' + pct(fx.laborMul) + '%');
       if (fx.atkMul > 1) chips.push('猫パンチ +' + pct(fx.atkMul) + '%');
       if (fx.hpMul > 1) chips.push('体力 +' + pct(fx.hpMul) + '%');
-      if (fx.meritMul > 1) chips.push('手柄 +' + pct(fx.meritMul) + '%');
+      if (fx.meritMul > 1) chips.push('小判と経験値 +' + pct(fx.meritMul) + '%');
     } else {
       chips.push('村人猫の上限 ' + C.villageCapacity(state) + '匹');
       if (fx.matMul > 1) chips.push('資材 +' + pct(fx.matMul) + '%');
@@ -1345,9 +1393,21 @@
     setTimeout(function () { btn.classList.remove('pressed'); }, 90);
   }
 
-  function doLure() { if (!battle) return false; const ok = C.lure(battle); if (ok) press(els.btnLure); return ok; }
-  function doPunch() { if (!battle) return false; const ok = C.punch(battle); if (ok) { press(els.btnPunch); anim.lunge = 1; } return ok; }
-  function doSpecial() { if (!battle) return false; return C.special(battle); }
+  function doLure() { if (!battle || paused) return false; const ok = C.lure(battle); if (ok) press(els.btnLure); return ok; }
+  function doPunch() { if (!battle || paused) return false; const ok = C.punch(battle); if (ok) press(els.btnPunch); return ok; }
+  function doItem(kind) {
+    if (!battle || paused) return false;
+    const ok = C.useItem(battle, kind);
+    if (ok) els.itemMenu.hidden = true;
+    return ok;
+  }
+  function toggleItemMenu() {
+    if (!battle || paused) return;
+    els.itemMenu.hidden = !els.itemMenu.hidden;
+    const e = C.currentEnemy(battle);
+    els.btnFish.disabled = !(battle.items.fish > 0) || battle.player.hp >= battle.player.maxHp;
+    els.btnMatatabi.disabled = !(battle.items.matatabi > 0) || !e || e.state === 'enter';
+  }
 
   // 連打するので click (指を離したとき) ではなく pointerdown (触れた瞬間) で受ける
   function onDown(btn, fn) {
@@ -1395,12 +1455,12 @@
 
     if (currentTab === 'battle' && !titleShown) {
       if (battle) {
-        if (battle.phase === 'fight') C.stepBattle(battle, dt);
+        if (battle.phase === 'fight' && !paused) C.stepBattle(battle, dt);
         // 知らせは戦の最中でなくても読む。最後の1匹をパンチで倒すと、
         // 勝ちの知らせは stepBattle の外で出る (読まないと勝利の札が出ずに止まる)
         handleEvents(battle);
       }
-      draw(now, Math.min(dt, 0.1));
+      draw(now, paused ? 0 : Math.min(dt, 0.1));
       updateFace(now);
       renderHud(false);
     }
@@ -1439,7 +1499,12 @@
     els.btnOfferNo.addEventListener('click', function () { pendingOffer = null; els.offer.hidden = true; });
     onDown(els.btnLure, doLure);
     onDown(els.btnPunch, doPunch);
-    onDown(els.btnSpecial, doSpecial);
+    els.btnItem.addEventListener('click', toggleItemMenu);
+    els.btnFish.addEventListener('click', function () { doItem('fish'); });
+    els.btnMatatabi.addEventListener('click', function () { doItem('matatabi'); });
+    els.btnPause.addEventListener('click', pauseBattle);
+    els.btnResume.addEventListener('click', resumeBattle);
+    els.btnRetreat.addEventListener('click', retreat);
     els.btnRecruit.addEventListener('click', doRecruit);
     Object.keys(tabEls).forEach(function (tab) {
       tabEls[tab].addEventListener('click', function () { switchTab(tab); });
@@ -1471,7 +1536,8 @@
       sortie: sortie,
       lure: doLure,
       punch: doPunch,
-      special: doSpecial,
+      item: doItem,
+      paused: function () { return paused; },
       offer: function () { return pendingOffer; },
       acceptOffer: acceptOffer,
       face: function () { return face.shown; },
