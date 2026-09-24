@@ -441,6 +441,139 @@ async function run() {
     });
     ok(wideAll <= 1, 'どのタブでも横スクロールが出ない');
 
+    // ------------------------------------------------ 横画面
+    section('横画面 (端末を横にすると、合戦を大きく見る)');
+    const portraitLayout = await phone.evaluate(() => window.__app.layout());
+    {
+      const LW = 932, LH = 430, SAFE = { l: 59, r: 59, b: 21 };
+      const land = await browser.newContext({ ...device, viewport: { width: LW, height: LH }, screen: { width: LW, height: LH } });
+      // 実機の横画面は、左右に 59pt・下に 21pt の安全域がある。chromium では env() が 0 なので、変数でまねる
+      await land.addInitScript((sf) => {
+        const put = () => {
+          const st = document.createElement('style');
+          st.id = 'fake-safe';
+          st.textContent = `:root{--safe-l:${sf.l}px;--safe-r:${sf.r}px;--safe-b:${sf.b}px}`;
+          (document.head || document.documentElement).appendChild(st);
+        };
+        if (document.documentElement) put(); else document.addEventListener('readystatechange', put, { once: true });
+      }, SAFE);
+      const lp = await land.newPage();
+      lp.on('pageerror', (e) => errors.push('横: ' + e.message));
+      lp.on('console', (m) => { if (m.type() === 'error') errors.push('横: ' + m.text()); });
+      await lp.bringToFront();
+      await lp.goto(URL);
+      await lp.waitForFunction(() => window.__app);
+      const inside = (r) => r.left >= -1 && r.top >= -1 && r.right <= LW + 1 && r.bottom <= LH + 1;
+      const rectOf = (sel) => lp.evaluate((q) => { const r = document.querySelector(q).getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; }, sel);
+
+      await lp.waitForTimeout(300);
+      const tArt = await rectOf('.title-art');
+      ok(inside(tArt), `タイトルの絵が題字まで丸ごと画面に収まる (上 ${Math.round(tArt.top)} / 下 ${Math.round(tArt.bottom)})`);
+      await lp.locator('#btnStart').tap();
+      await lp.waitForTimeout(200);
+      const card = await rectOf('#storyModal .modal-card');
+      ok(inside(card), `物語の札が画面に収まる (${Math.round(card.width)}x${Math.round(card.height)})`);
+      await lp.locator('#btnStory').tap();
+      await lp.waitForTimeout(200);
+      ok(await lp.evaluate(() => document.getElementById('storyModal').hidden), '物語の「旅立つ!」を指で押せる');
+
+      const tab = await rectOf('#tabbar');
+      ok(tab.right < 140 && tab.height > LH - 2, `タブは左の縦帯になる (幅 ${Math.round(tab.width)})`);
+      const scene = await rectOf('#field');
+      ok(scene.left >= tab.right - 1 && scene.right >= LW - 1 && scene.height >= LH - 1, `戦場はタブの右から、画面の右端・下端まで広がる (${Math.round(scene.width)}x${Math.round(scene.height)})`);
+
+      await lp.evaluate(() => window.__app.sortie());
+      await lp.waitForFunction(() => { const b = window.__app.battle(); const e = b && b.enemies[b.current]; return e && e.state === 'idle'; }, null, { timeout: 8000 });
+      await lp.waitForTimeout(100);
+      const R = {};
+      for (const [k, q] of Object.entries({ player: '.unit-player', enemy: '#enemyUnit', pause: '#btnPause', mission: '#mission', paw: '#pawGauge', item: '#btnItem', lure: '#btnLure', punch: '#btnPunch' })) R[k] = await rectOf(q);
+      ok(R.lure.left >= tab.right && R.lure.bottom <= LH - SAFE.b && R.punch.right <= LW - SAFE.r && R.punch.bottom <= LH - SAFE.b && R.pause.right <= LW - SAFE.r,
+        '猫じゃらし・猫パンチ・一時停止は安全域の内側 (角の丸みや指の帯にかからない)');
+      const names = Object.keys(R);
+      const hits = [];
+      for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
+        const a = R[names[i]], b = R[names[j]];
+        if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) hits.push(names[i] + '×' + names[j]);
+      }
+      ok(hits.length === 0, `上の札と下のボタンが重ならない${hits.length ? ' (' + hits.join(', ') + ')' : ''}`);
+
+      const L = await lp.evaluate(() => window.__app.layout());
+      const fl = scene.left;
+      ok(L.land && L.s > portraitLayout.s * 1.05, `横では、ねこが縦より大きく描かれる (倍率 縦 ${portraitLayout.s.toFixed(2)} → 横 ${L.s.toFixed(2)})`);
+      ok(L.heroX - L.heroHalf > R.lure.right - fl && L.enemyX < R.punch.left - fl, `自分と敵は、左右のボタンの間に立つ (自分 ${Math.round(L.heroX)} / 敵 ${Math.round(L.enemyX)})`);
+      ok(L.ground <= R.lure.bottom - fl * 0 && L.ground > LH * 0.75, `足もとは画面の下の方、ボタンの下端より上 (${L.ground})`);
+      // 敵の頭の上には「会心の猫パンチ!」「バシッ!」が出る。上に重ねた札がそこを隠さないこと
+      // (肉球ゲージを右上に置いたら、会心の字がゲージの下に隠れた)
+      {
+        const top = L.ground - 150 * L.s - 70 * L.s - 24;
+        const pop = { left: fl + L.enemyX - 100, right: fl + L.enemyX + 100, top: top, bottom: L.ground };
+        const cover = ['paw', 'mission', 'item', 'player'].filter((k) => { const a = R[k]; return a.left < pop.right && pop.left < a.right && a.top < pop.bottom && pop.top < a.bottom; });
+        ok(cover.length === 0, `敵の頭の上 (当たったときの字が出る所) を、札が隠さない${cover.length ? ' (' + cover.join(',') + ')' : ''}`);
+      }
+      ok(L.enterLeft >= L.w, `敵は画面の右の外から歩いてくる (出だしの左端 ${Math.round(L.enterLeft)} ≥ 幅 ${L.w})`);
+      ok(await lp.evaluate(() => { const c = document.getElementById('fieldBg'); const d = c.getContext('2d').getImageData(c.width - 4, Math.floor(c.height * 0.3), 1, 1).data; return d[3] > 0; }),
+        '背景が戦場の右端まで描かれている');
+
+      // 猫じゃらしとパンチを指で押す
+      await lp.locator('#btnLure').tap();
+      await lp.waitForTimeout(60);
+      ok(await lp.evaluate(() => window.__app.battle().paw === 1), '横でも猫じゃらしを指で押せる (肉球が1つたまる)');
+      const hp0 = await lp.evaluate(() => { const b = window.__app.battle(); return b.enemies[b.current].hp; });
+      await lp.locator('#btnPunch').tap();
+      await lp.waitForTimeout(60);
+      ok(await lp.evaluate((h) => { const b = window.__app.battle(); return b.enemies[b.current].hp < h; }, hp0), '横でも猫パンチを指で押せる');
+      await lp.locator('#btnItem').tap();
+      const menu = await rectOf('#itemMenu');
+      ok(inside(menu), 'アイテムの一覧が画面に収まる');
+      await lp.locator('#btnItem').tap();
+
+      // 回す: 横 → 縦 → 横。そのたびに戦場を組み直す
+      // 回すと安全域も変わる (縦: 上 59pt・下 34pt、左右は無し)
+      const setSafe = (css) => lp.evaluate((c) => { document.getElementById('fake-safe').textContent = ':root{' + c + '}'; }, css);
+      await setSafe('--safe-t:59px;--safe-b:34px;--safe-l:0px;--safe-r:0px');
+      await lp.setViewportSize({ width: 430, height: 932 });
+      await lp.waitForTimeout(250);
+      const P = await lp.evaluate(() => window.__app.layout());
+      ok(!P.land && P.w === 430 && P.ground === P.h - 150, `縦に戻すと、縦の並びに組み直す (幅 ${P.w}・足もと ${P.ground}/${P.h})`);
+      await setSafe(`--safe-t:0px;--safe-b:${SAFE.b}px;--safe-l:${SAFE.l}px;--safe-r:${SAFE.r}px`);
+      await lp.setViewportSize({ width: LW, height: LH });
+      await lp.waitForTimeout(250);
+      const L2 = await lp.evaluate(() => window.__app.layout());
+      ok(L2.land && L2.w === L.w && L2.ground === L.ground, `また横にすると、同じ並びに戻る (幅 ${L2.w}・足もと ${L2.ground})`);
+
+      // 勝利の札・出世の札
+      await lp.evaluate(() => { const b = window.__app.battle(); b.enemies.forEach((e) => { e.hp = 0.1; }); });
+      for (let i = 0; i < 40; i++) {
+        if (await lp.evaluate(() => { const b = window.__app.battle(); return !b || b.phase !== 'fight'; })) break;
+        await lp.evaluate(() => { const a = window.__app, b = a.battle(), e = b.enemies[b.current]; if (e && !['down', 'enter', 'wait'].includes(e.state)) { e.state = 'charmed'; e.charm = 3; a.punch(); } });
+        await lp.waitForTimeout(250);
+      }
+      await lp.waitForFunction(() => !document.getElementById('resultPanel').hidden, null, { timeout: 8000 });
+      const rp = await rectOf('#resultPanel');
+      ok(inside(rp) && rp.left > L.heroX + fl, `勝利の札は画面に収まり、自分の姿を隠さないよう右に寄る (左端 ${Math.round(rp.left)})`);
+      ok(await lp.evaluate(() => getComputedStyle(document.getElementById('pawGauge')).visibility === 'hidden'), '敵がいない間は肉球ゲージを隠す');
+      const pz = await rectOf('#btnPause');
+      ok(Math.abs(pz.right - (LW - SAFE.r - 8)) <= 1, `敵の札が消えても、一時停止は右上に残る (右端 ${Math.round(pz.right)})`);
+      if (await lp.evaluate(() => !document.getElementById('rankModal').hidden)) {
+        const rc = await rectOf('#rankModal .modal-card');
+        ok(inside(rc), '出世の札が画面に収まる');
+      }
+
+      // ほかのタブも横で崩れない
+      await lp.evaluate(() => { const a = window.__app; a.closeModals(); a.debugAddMerit(6000); a.closeModals(); });
+      const wideTabs = [];
+      for (const t of ['vassals', 'castle', 'village']) {
+        await lp.evaluate((tt) => window.__app.setTab(tt), t);
+        await lp.waitForTimeout(150);
+        const wv = await lp.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        if (wv > 1) wideTabs.push(t);
+      }
+      ok(wideTabs.length === 0, '家臣・城・村のタブも、横で横スクロールが出ない' + (wideTabs.length ? ' (' + wideTabs.join(',') + ')' : ''));
+      const vm = await rectOf('#villageMap');
+      ok(vm.width <= 470 && vm.left >= tab.right, `村の地図は読みやすい幅に収まる (${Math.round(vm.width)}px)`);
+      await land.close();
+    }
+
     // ------------------------------------------------ 留守の間の進み (保存 → 再読み込み)
     section('留守の間も育つ (保存と再読み込み)');
     await phone.evaluate(() => {

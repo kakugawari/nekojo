@@ -18,6 +18,11 @@
   --pink: #f7a8c4;
   --hp: #6cc05a;
   --hp-low: #e0553f;
+  /* 安全域。テストでは値を入れて、実機 (横で左右 59pt・下 21pt) の余白をまねる */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
   color-scheme: light;
 }
 
@@ -115,7 +120,7 @@ img { -webkit-user-drag: none; }
   inset: 0;
   display: flex;
   flex-direction: column;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  padding: var(--safe-t) var(--safe-r) 0 var(--safe-l);
 }
 
 .view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
@@ -319,6 +324,7 @@ img { -webkit-user-drag: none; }
   gap: 10px;
   z-index: 5;
 }
+.field-panel { max-height: calc(100% - 16px); overflow-y: auto; }
 .field-panel[hidden] { display: none; }
 .panel-title {
   font-size: 30px;
@@ -625,7 +631,7 @@ img { -webkit-user-drag: none; }
   display: flex;
   background: var(--paper);
   border-top: 2px solid var(--paper-edge);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--safe-b);
 }
 .tab {
   flex: 1 1 0;
@@ -659,7 +665,7 @@ img { -webkit-user-drag: none; }
 .toast {
   position: absolute;
   left: 50%;
-  top: calc(env(safe-area-inset-top) + 96px);
+  top: calc(var(--safe-t) + 96px);
   transform: translateX(-50%);
   width: max-content;
   max-width: calc(100% - 32px);
@@ -732,6 +738,79 @@ img { -webkit-user-drag: none; }
 .modal-text { margin: 0; font-size: 14px; line-height: 1.8; color: var(--ink); }
 .rank-up-label { font-size: 16px; font-weight: 900; color: var(--ink-2); letter-spacing: .3em; }
 .rank-up-name { font-size: 40px; font-weight: 900; color: var(--red); -webkit-text-stroke: 6px #fff; paint-order: stroke fill; }
+
+/* ========================================================= 横画面 (932x430)
+   合戦を横いっぱいに広げる。タブは左の縦帯へ、ボタンは左右の下の角へ。
+   戦場は安全域の下まで敷き、ボタンや札だけを安全域の内側に置く。 */
+@media (orientation: landscape) {
+  /* タイトル: 絵を高さに合わせて丸ごと見せ、左右はぼかした同じ絵で埋める */
+  .title-screen { --tw: calc(100vh * 1086 / 1448); background: #4ea6f1; }
+  .title-screen::before {
+    content: "";
+    position: absolute;
+    inset: -40px;
+    background: url(./title.jpg) center / cover;
+    filter: blur(18px) brightness(.95);
+  }
+  .title-art { -webkit-mask-image: none; mask-image: none; }
+
+  #app { flex-direction: row; padding: 0; }
+  #tabbar {
+    order: -1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    width: calc(var(--safe-l) + 64px);
+    padding: var(--safe-t) 0 var(--safe-b) var(--safe-l);
+    border-top: 0;
+    border-right: 2px solid var(--paper-edge);
+  }
+  .tab { flex: 0 0 auto; padding: 8px 0 9px; }
+  .view { min-width: 0; }
+
+  /* 合戦 */
+  .hud-top { top: calc(6px + var(--safe-t)); right: calc(8px + var(--safe-r)); gap: 10px; }
+  /* 余りは自分の札の右に寄せる (敵の札が隠れていても、一時停止は右上に残る) */
+  .unit-player { flex: 0 1 330px; margin-right: auto; }
+  .unit-enemy { flex: 0 1 280px; }
+  .mission { top: calc(78px + var(--safe-t)); left: 14px; right: auto; margin: 0; max-width: 320px; }
+  .controls { inset: 0; display: block; }
+  .controls > * { position: absolute; }
+  .lure-btn { left: 8px; bottom: calc(4px + var(--safe-b)); }
+  .punch-btn { right: calc(8px + var(--safe-r)); bottom: calc(4px + var(--safe-b)); }
+  .item-btn { left: 31px; bottom: calc(140px + var(--safe-b)); margin: 0; }
+  /* 肉球ゲージは左上、お題の下。右上に置くと、敵の上に出る「会心の猫パンチ!」の字を隠した。
+     戦っていない間 (敵が出ていない間) は隠す */
+  .paw-gauge { left: 14px; top: calc(122px + var(--safe-t)); width: 190px; margin: 0; }
+  .paw-gauge.idle { visibility: hidden; }
+  .item-menu { left: 102px; bottom: calc(96px + var(--safe-b)); }
+  .field-banner { top: 30%; }
+  /* 札は右寄せ (真ん中だと、左に立つ自分の姿に重なる) */
+  .field-panel { left: 42%; right: calc(8px + var(--safe-r)); max-width: calc(58% - 16px - var(--safe-r)); }
+
+  /* 家臣・城・村: 真ん中に寄せて、読みやすい幅に */
+  .view-page { align-items: center; padding: calc(10px + var(--safe-t)) calc(14px + var(--safe-r)) calc(16px + var(--safe-b)) 14px; }
+  .view-page > * { width: 100%; max-width: 640px; flex: none; }
+  .town-map { max-width: 460px; margin: 0 auto; }
+
+  /* 物語・出世の札: 絵を左、文を右に並べて、低い画面に収める */
+  .modal-card {
+    max-width: 620px;
+    max-height: calc(100% - 20px);
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    column-gap: 18px;
+    row-gap: 8px;
+    align-items: center;
+  }
+  .modal-card > * { grid-column: 2; }
+  .modal-card > .modal-art { grid-column: 1; grid-row: 1 / span 5; width: 150px; }
+
+  .cutin-band { top: 24%; height: 52%; }
+  .cutin-art { left: 10%; top: 6%; width: auto; height: 88%; }
+  .cutin-text { right: 12%; top: 40%; font-size: 44px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: .01ms !important; animation: none !important; }

@@ -214,7 +214,10 @@
 
     const e = b ? b.enemies[b.current] : null;
     const showEnemy = !!(e && (e.alive || e.state === 'down') && e.state !== 'wait');
-    setOnce('enemyShown', showEnemy, function (v) { els.enemyUnit.hidden = !v; });
+    setOnce('enemyShown', showEnemy, function (v) {
+      els.enemyUnit.hidden = !v;
+      els.pawGauge.classList.toggle('idle', !v); // 横画面では、敵がいない間ゲージを隠す (縦は常に出す)
+    });
     if (showEnemy) {
       setText(els.enemyName, 'enemyName', e.name);
       setWidth(els.enemyHpFill, 'enemyHp', e.hp / e.maxHp * 100);
@@ -254,9 +257,19 @@
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     if (w === fieldSize.w && h === fieldSize.h && dpr === fieldSize.dpr) return;
     fieldSize.w = w; fieldSize.h = h; fieldSize.dpr = dpr;
-    // 立つ位置は下のボタンのすぐ上。ねこは戦場の高さの 1/4 ほど
-    fieldSize.ground = Math.round(h - 150);
-    fieldSize.s = Math.min(h * 0.26 / 150, w * 0.42 / 150);
+    fieldSize.land = w > h;
+    if (fieldSize.land) {
+      // 横: ボタンは左右の角にあるので、ねこはその間の下の方に立つ。背丈は戦場の高さの半分ほど。
+      // 足もとは猫じゃらしのボタンの下端に合わせる (安全域の分だけ上がる)
+      const fr = els.field.getBoundingClientRect(), lr = els.btnLure.getBoundingClientRect();
+      const btnBottom = lr.height > 0 ? lr.bottom - fr.top : h;
+      fieldSize.ground = Math.round(btnBottom - 22);
+      fieldSize.s = Math.min(h * 0.46 / 150, w * 0.3 / 150);
+    } else {
+      // 縦: 立つ位置は下のボタンのすぐ上。ねこは戦場の高さの 1/4 ほど
+      fieldSize.ground = Math.round(h - 150);
+      fieldSize.s = Math.min(h * 0.26 / 150, w * 0.42 / 150);
+    }
     [els.fieldBg, els.fieldFg].forEach(function (c) {
       c.width = Math.round(w * dpr);
       c.height = Math.round(h * dpr);
@@ -264,8 +277,12 @@
     drawBackground();
   }
 
+  // 戦場の横の位置 (0〜SCENE_W) → 画面の位置。
+  // 横画面では幅が倍あるので、自分を 36%・敵を 68% に置く (左の角の猫じゃらしボタンに家臣が重ならない)
   function fx(lx) {
-    return lx / C.SCENE_W * fieldSize.w;
+    const w = fieldSize.w;
+    if (!fieldSize.land) return lx / C.SCENE_W * w;
+    return w * 0.14 + lx / C.SCENE_W * w * 0.8;
   }
 
   // ---------------------------------------------------------- 背景 (一度だけ描く)
@@ -298,8 +315,11 @@
       return;
     }
 
-    const horizon = h * 0.40;
-    const groundTop = h * 0.55;
+    // 置く物の大きさの物差し。縦は幅、横は高さから決める (横で幅に合わせると、お城が画面より高くなる)。
+    // 置く場所は縦横とも幅の割合のまま
+    const u = fieldSize.land ? h * 0.85 : w;
+    const horizon = h * (fieldSize.land ? 0.42 : 0.40);
+    const groundTop = h * (fieldSize.land ? 0.58 : 0.55);
     const R = C.mulberry32(20260924);
     const put = function (name, cx, bottom, width, alpha) {
       const im = imgs[name];
@@ -328,9 +348,9 @@
         ctx.beginPath(); ctx.arc(cx + c[0] * sc, cy + c[1] * sc, c[2] * sc, 0, Math.PI * 2); ctx.fill();
       });
     }
-    cloud(w * 0.12, h * 0.16, w / 430);
-    cloud(w * 0.86, h * 0.2, w / 480);
-    cloud(w * 0.5, h * 0.11, w / 620);
+    cloud(w * 0.12, h * 0.16, u / 430);
+    cloud(w * 0.86, h * 0.2, u / 480);
+    cloud(w * 0.5, h * 0.11, u / 620);
 
     // 遠くの山
     ctx.fillStyle = '#9dbfe0';
@@ -344,7 +364,7 @@
     // 丘の上のお城
     ctx.fillStyle = '#7fb85e';
     ctx.beginPath(); ctx.ellipse(w * 0.52, horizon + h * 0.1, w * 0.46, h * 0.1, 0, Math.PI, 0); ctx.fill();
-    put('b-castle', w * 0.52, horizon + h * 0.09, w * 0.5, 0.97);
+    put('b-castle', w * 0.52, horizon + h * 0.09, u * 0.5, 0.97);
     // うっすら霞
     g = ctx.createLinearGradient(0, horizon - h * 0.15, 0, groundTop);
     g.addColorStop(0, 'rgba(220,238,250,0)');
@@ -353,10 +373,15 @@
     ctx.fillRect(0, horizon - h * 0.15, w, groundTop - horizon + h * 0.15);
 
     // 左に桜、右に村の家
-    put('b-sakura', w * 0.08, groundTop + h * 0.03, w * 0.34);
-    put('b-sakura', w * 0.28, groundTop + h * 0.0, w * 0.24);
-    put('b-farm', w * 0.9, groundTop + h * 0.03, w * 0.42);
-    put('b-house', w * 0.72, groundTop - h * 0.005, w * 0.28);
+    if (fieldSize.land) {
+      // 横は幅が余るので、奥にもう少し並べる
+      put('b-sakura', w * 0.34, groundTop - h * 0.01, u * 0.2);
+      put('b-house', w * 0.64, groundTop - h * 0.015, u * 0.22);
+    }
+    put('b-sakura', w * 0.08, groundTop + h * 0.03, u * 0.34);
+    put('b-sakura', w * 0.28, groundTop + h * 0.0, u * 0.24);
+    put('b-farm', w * 0.9, groundTop + h * 0.03, u * 0.42);
+    put('b-house', w * 0.72, groundTop - h * 0.005, u * 0.28);
 
     // 広場
     g = ctx.createLinearGradient(0, groundTop, 0, h);
@@ -372,13 +397,14 @@
     }
 
     // 見物の猫と柵、のぼり
-    put('b-villager', w * 0.07, groundTop + h * 0.045, w * 0.12);
-    put('cat-chatora', w * 0.17, groundTop + h * 0.05, w * 0.1);
-    put('b-villager', w * 0.92, groundTop + h * 0.05, w * 0.12);
-    for (let x = -w * 0.04; x < w * 0.34; x += w * 0.16) put('b-woodfence', x + w * 0.08, groundTop + h * 0.07, w * 0.18);
-    for (let x = w * 0.7; x < w * 1.04; x += w * 0.16) put('b-woodfence', x + w * 0.08, groundTop + h * 0.07, w * 0.18);
-    put('b-nobori', w * 0.36, groundTop + h * 0.05, w * 0.07);
-    put('b-nobori', w * 0.64, groundTop + h * 0.05, w * 0.07);
+    put('b-villager', w * 0.07, groundTop + h * 0.045, u * 0.12);
+    put('cat-chatora', w * 0.17, groundTop + h * 0.05, u * 0.1);
+    put('b-villager', w * 0.92, groundTop + h * 0.05, u * 0.12);
+    if (fieldSize.land) put('cat-gray', w * 0.82, groundTop + h * 0.05, u * 0.1);
+    for (let x = -w * 0.04; x < w * 0.34; x += u * 0.16) put('b-woodfence', x + u * 0.08, groundTop + h * 0.07, u * 0.18);
+    for (let x = w * 0.7; x < w * 1.04; x += u * 0.16) put('b-woodfence', x + u * 0.08, groundTop + h * 0.07, u * 0.18);
+    put('b-nobori', w * 0.36, groundTop + h * 0.05, u * 0.07);
+    put('b-nobori', w * 0.64, groundTop + h * 0.05, u * 0.07);
 
     // 手前の草花 (ぼかした茂み)
     function bush(cx, cy, r, col) {
@@ -388,9 +414,9 @@
       ctx.fillStyle = gg;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
     }
-    bush(w * 0.02, h * 0.98, w * 0.22, 'rgba(96,160,70,.9)');
-    bush(w * 1.0, h * 0.97, w * 0.24, 'rgba(96,160,70,.9)');
-    bush(w * 0.2, h * 1.02, w * 0.16, 'rgba(120,180,80,.85)');
+    bush(w * 0.02, h * 0.98, u * 0.22, 'rgba(96,160,70,.9)');
+    bush(w * 1.0, h * 0.97, u * 0.24, 'rgba(96,160,70,.9)');
+    bush(w * 0.2, h * 1.02, u * 0.16, 'rgba(120,180,80,.85)');
     for (let i = 0; i < 8; i++) {
       ctx.fillStyle = '#f7b6cf';
       ctx.beginPath(); ctx.arc(R() * w * 0.25, h * (0.9 + R() * 0.08), 3 + R() * 3, 0, Math.PI * 2); ctx.fill();
@@ -418,7 +444,16 @@
   }
 
   function heroX() { return fx(C.PLAYER_X); }
-  function enemyX(e) { return fx(e.x); }
+  function enemyX(e) {
+    // 歩いてくる間は、画面の右の外から出てくるように引き伸ばす (横画面ではそのままだと半身が見えた所から出る)
+    if (fieldSize.land && e.state === 'enter' && e.x > C.ENEMY_X) {
+      const im = imgs[e.look];
+      const half = (im && im.naturalWidth ? im.naturalWidth : 130) * enemyScale(e) / 2;
+      const from = fx(C.ENEMY_X), to = fieldSize.w + half + 10;
+      return from + (e.x - C.ENEMY_X) / (C.ENTER_X - C.ENEMY_X) * (to - from);
+    }
+    return fx(e.x);
+  }
 
   function enemyScale(e) {
     return fieldSize.s * (e.kind === 'boss' ? 1.45 : (e.boss ? 1.2 : 1));
@@ -764,7 +799,7 @@
     const allies = b ? b.allies : state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, C.MAX_BATTLE_VASSALS);
     allies.forEach(function (a, i) {
       a.hop = Math.max(0, (a.hop || 0) - dt / 0.3);
-      const ax = heroX() - (70 + i * 38) * s;
+      const ax = heroX() - (fieldSize.land ? 62 + i * 34 : 70 + i * 38) * s;
       const ay = fieldSize.ground - (18 + i * 10) * s;
       shadow(ctx, ax, ay, 20 * s);
       drawSprite(ctx, imgs[a.look] || imgs['cat-chatora'], ax, ay - Math.sin(a.hop * Math.PI) * 14 * s, s * 0.62, {});
@@ -1542,6 +1577,17 @@
       acceptOffer: acceptOffer,
       face: function () { return face.shown; },
       fieldSize: function () { return Object.assign({}, fieldSize); },
+      // 立ち位置。enterLeft は、歩き出す瞬間の敵の絵の左端 (種類ごとの最小)。画面の外 (>= w) であるべき
+      layout: function () {
+        let enterLeft = Infinity;
+        Object.keys(C.ENEMY_KINDS).forEach(function (k) {
+          const e = { x: C.ENTER_X, state: 'enter', kind: k, look: C.ENEMY_KINDS[k].look, boss: k === 'boss' };
+          const im = imgs[e.look];
+          enterLeft = Math.min(enterLeft, enemyX(e) - im.naturalWidth * enemyScale(e) / 2);
+        });
+        return { land: !!fieldSize.land, w: fieldSize.w, h: fieldSize.h, s: fieldSize.s, ground: fieldSize.ground,
+          heroX: heroX(), enemyX: fx(C.ENEMY_X), heroHalf: imgs.stage1.naturalWidth * fieldSize.s / 2, enterLeft: enterLeft };
+      },
       recruit: doRecruit,
       trainVassal: doTrainVassal,
       assignJob: doAssignJob,
