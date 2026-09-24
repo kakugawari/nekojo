@@ -100,6 +100,42 @@
   const VASSAL_JOBS = ['training', 'labor', 'battle'];
   const MAX_BATTLE_VASSALS = 2;
 
+  // 家臣の得意技。出陣しているときだけ効き、レベルが上がるほど強くなる (2 人とも出陣なら足し合わせ)
+  const VASSAL_SKILLS = {
+    jarashi: { name: 'じゃらし名人', icon: '🪶', text: '猫じゃらしで 夢中ゲージが たまりやすい' },
+    punch: { name: 'パンチ名人', icon: '💥', text: '溜めパンチが 強くなる' },
+    quick: { name: 'すばやい猫', icon: '💨', text: '溜めが 早くたまる (カウンターが得意)' },
+    heal: { name: '癒やし猫', icon: '💚', text: '戦いの最中に 体力を回復してくれる' }
+  };
+  const SKILL_KEYS = ['jarashi', 'punch', 'quick', 'heal'];
+  const HEAL_INTERVAL = 7;         // 癒やし猫が回復する間隔 (秒)
+  /** 得意技の強さ。jarashi: ゲージのたまり方 / punch: 溜めパンチの威力 / quick: 溜めの速さ (倍) / heal: 1 回に戻す体力 (最大の割合) */
+  function skillPower(key, level) {
+    const L = Math.max(1, Math.min(VASSAL_MAX_LEVEL, level || 1));
+    if (key === 'jarashi') return 1.2 + 0.04 * L;
+    if (key === 'punch' || key === 'quick') return 1.15 + 0.035 * L;
+    if (key === 'heal') return 0.02 + 0.004 * L;
+    return 0;
+  }
+  /** 出陣している家臣の得意技を足し合わせる */
+  function battleSkills(allies) {
+    const out = { lure: 1, power: 1, speed: 1, heal: 0 };
+    (allies || []).forEach(function (a) {
+      const p = skillPower(a.skill, a.level);
+      if (a.skill === 'jarashi') out.lure += p - 1;
+      else if (a.skill === 'punch') out.power += p - 1;
+      else if (a.skill === 'quick') out.speed += p - 1;
+      else if (a.skill === 'heal') out.heal += p;
+    });
+    return out;
+  }
+  /** 倒した相手の種類から、仲間になったときの得意技を決める */
+  function skillFromEnemy(kind, random) {
+    if (kind === 'quick') return 'quick';
+    if (kind === 'samurai') return 'punch';
+    return random() < 0.5 ? 'jarashi' : 'heal';
+  }
+
   function vassalSlotBase(rankIndex) {
     if (rankIndex < VASSAL_UNLOCK_RANK) return 0;
     if (rankIndex < 5) return 2;
@@ -133,8 +169,9 @@
     return hasVassalSlot(state) && state.merit >= recruitCost(state);
   }
 
-  function addVassal(state, name, look) {
-    const vassal = { id: state.nextVassalId, name: name, level: 1, job: 'training', look: look };
+  function addVassal(state, name, look, skill) {
+    const vassal = { id: state.nextVassalId, name: name, level: 1, job: 'training', look: look,
+      skill: VASSAL_SKILLS[skill] ? skill : SKILL_KEYS[state.nextVassalId % SKILL_KEYS.length] };
     return {
       state: Object.assign({}, state, {
         nextVassalId: state.nextVassalId + 1,
@@ -150,14 +187,15 @@
     const random = rng || Math.random;
     const name = pickVassalName(state, random);
     const look = VASSAL_LOOKS[Math.floor(random() * VASSAL_LOOKS.length)];
-    const r = addVassal(Object.assign({}, state, { merit: state.merit - recruitCost(state) }), name, look);
+    const skill = SKILL_KEYS[Math.floor(random() * SKILL_KEYS.length)];
+    const r = addVassal(Object.assign({}, state, { merit: state.merit - recruitCost(state) }), name, look, skill);
     return { ok: true, state: r.state, vassal: r.vassal };
   }
 
   /** 合戦のあと「仲間になりたそうにこちらを見ている」相手を迎える (ただ)。 */
   function acceptRecruitOffer(state, offer) {
     if (!offer || !hasVassalSlot(state)) return { ok: false, state: state };
-    const r = addVassal(state, offer.name, offer.look);
+    const r = addVassal(state, offer.name, offer.look, offer.skill);
     return { ok: true, state: r.state, vassal: r.vassal };
   }
 
@@ -299,7 +337,7 @@
       });
     }
     const allies = state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, MAX_BATTLE_VASSALS)
-      .map(function (v) { return { id: v.id, name: v.name, look: v.look, level: v.level, cd: allyInterval(v.level) }; });
+      .map(function (v) { return { id: v.id, name: v.name, look: v.look, level: v.level, skill: v.skill, cd: allyInterval(v.level) }; });
     const maxHp = Math.round(playerMaxHp(r) * fx.hpMul);
     const items = state.items || { fish: 0, matatabi: 0 };
     const b = {
@@ -308,6 +346,8 @@
       enemies: enemies, current: 0, allies: allies,
       cd: { lure: 0, punch: 0 },
       charge: { on: false, t: 0 },
+      skills: battleSkills(allies),
+      healCd: HEAL_INTERVAL,
       items: { fish: items.fish || 0, matatabi: items.matatabi || 0 },
       used: { fish: 0, matatabi: 0 },
       merit: 0, bonus: 0, materials: 0, loot: { fish: 0, matatabi: 0 },
@@ -467,9 +507,22 @@
     if (b.charge.on) {
       const before = chargeLevel(b.charge.t);
       const tgt = currentEnemy(b);
-      b.charge.t += dt * (tgt && tgt.state === 'charmed' ? 2 : 1);
+      b.charge.t += dt * (tgt && tgt.state === 'charmed' ? 2 : 1) * b.skills.speed;
       const lv = chargeLevel(b.charge.t);
       if (lv > before) b.events.push({ type: 'charge', level: lv });
+    }
+
+    // 癒やし猫: ときどき体力を戻してくれる
+    if (b.skills.heal > 0) {
+      b.healCd -= dt;
+      if (b.healCd <= 0) {
+        b.healCd = HEAL_INTERVAL;
+        if (b.player.hp < b.player.maxHp) {
+          const amount = Math.min(b.player.maxHp - b.player.hp, Math.max(1, Math.round(b.player.maxHp * b.skills.heal)));
+          b.player.hp += amount;
+          b.events.push({ type: 'skill', skill: 'heal', amount: amount });
+        }
+      }
     }
 
     // 出陣の家臣は、戦える敵がいれば少しずつ攻撃する (夢中は解けない)
@@ -513,7 +566,8 @@
     }
     const k = ENEMY_KINDS[e.kind];
     const alert = isAlert(e);
-    let gain = MUCHU_MAX / k.lures + 1;
+    let gain = (MUCHU_MAX / k.lures + 1) * b.skills.lure;
+    if (b.skills.lure > 1) b.events.push({ type: 'skill', skill: 'jarashi' });
     if (alert) {
       gain *= WEAK_LURE;          // こちらを見ている。効きが小さい
       b.cd.lure = LURE_MISS_COOLDOWN;
@@ -534,6 +588,7 @@
     if (b.phase !== 'fight' || b.cd.punch > 0 || b.charge.on) return false;
     b.charge = { on: true, t: 0 };
     b.events.push({ type: 'chargeStart' });
+    if (b.skills.speed > 1) b.events.push({ type: 'skill', skill: 'quick' });
     return true;
   }
 
@@ -567,7 +622,8 @@
       return;
     }
     const k = ENEMY_KINDS[e.kind];
-    const pow = b.player.atk * CHARGE_POWER[level];
+    const pow = b.player.atk * CHARGE_POWER[level] * (level >= 1 ? b.skills.power : 1);
+    if (level >= 1 && b.skills.power > 1) b.events.push({ type: 'skill', skill: 'punch' });
     if (e.state === 'charmed') {
       // 夢中 MAX の敵に当てる: 大ダメージ。溜めていれば吹っ飛ぶ
       e.charm = 0;
@@ -628,7 +684,7 @@
     if (random() >= 0.5) return null;
     const pool = b.enemies.filter(function (e) { return !e.boss; });
     const e = pool[Math.floor(random() * pool.length)] || b.enemies[0];
-    return { name: pickVassalName(state, random), look: e.look, from: e.name };
+    return { name: pickVassalName(state, random), look: e.look, from: e.name, skill: skillFromEnemy(e.kind, random) };
   }
 
   /** 合戦の結果を state に反映する。勝てば手柄・資材、負けても出世は下がらない。 */
@@ -858,7 +914,9 @@
         name: v.name,
         level: Number.isInteger(v.level) ? Math.min(VASSAL_MAX_LEVEL, Math.max(1, v.level)) : 1,
         job: VASSAL_JOBS.indexOf(v.job) >= 0 ? v.job : 'training',
-        look: VASSAL_LOOKS.indexOf(v.look) >= 0 ? v.look : VASSAL_LOOKS[v.id % VASSAL_LOOKS.length]
+        look: VASSAL_LOOKS.indexOf(v.look) >= 0 ? v.look : VASSAL_LOOKS[v.id % VASSAL_LOOKS.length],
+        // 得意技が無い前の保存データは、番号で決める (読み込むたびに変わらないように)
+        skill: VASSAL_SKILLS[v.skill] ? v.skill : SKILL_KEYS[v.id % SKILL_KEYS.length]
       };
     }) : base.vassals;
     out.castle = { cells: new Array(MAP_CELLS).fill(null) };
@@ -919,6 +977,12 @@
     vassalSlots: vassalSlots,
     hasVassalSlot: hasVassalSlot,
     VASSAL_LOOKS: VASSAL_LOOKS,
+    VASSAL_SKILLS: VASSAL_SKILLS,
+    SKILL_KEYS: SKILL_KEYS,
+    HEAL_INTERVAL: HEAL_INTERVAL,
+    skillPower: skillPower,
+    battleSkills: battleSkills,
+    skillFromEnemy: skillFromEnemy,
     MAX_BATTLE_VASSALS: MAX_BATTLE_VASSALS,
     acceptRecruitOffer: acceptRecruitOffer,
     recruitCost: recruitCost,

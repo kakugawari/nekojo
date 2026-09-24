@@ -422,12 +422,25 @@ async function run() {
     ok(vs === 1, `村で仲間を募れる (${vs}人)`);
     ok(await phone.evaluate(() => { const im = document.querySelector('.vassal-card img'); return im && im.naturalWidth > 20; }),
       '家臣の姿が設定資料の絵で出る');
+    // 得意技: 札に名前と強さが出る。出陣していないときは「出陣で効く」と添える
+    const sk0 = await phone.evaluate(() => {
+      const v = window.__app.state().vassals[0];
+      const el = document.querySelector('.vassal-card .vassal-skill');
+      return { skill: v.skill, text: el ? el.textContent : '', on: el ? el.classList.contains('on') : null };
+    });
+    const skName = await phone.evaluate((k) => window.Core.VASSAL_SKILLS[k].name, sk0.skill);
+    ok(sk0.text.includes(skName) && sk0.text.includes('出陣で効く') && sk0.on === false, `家臣の札に得意技が出る (${sk0.text.slice(0, 30)}…)`);
     await phone.locator('.vassal-card .job').nth(2).tap();
     await phone.waitForTimeout(60);
     ok(await phone.evaluate(() => window.__app.state().vassals[0].job === 'battle'), '役目を「出陣」にできる');
+    ok(await phone.evaluate(() => { const el = document.querySelector('.vassal-card .vassal-skill'); return el.classList.contains('on') && !el.textContent.includes('出陣で効く'); }),
+      '出陣にすると、得意技の札が「効いている」表示になる');
+    const eff1 = await phone.evaluate(() => document.querySelector('.vassal-card .skill-effect').textContent);
     await phone.locator('.vassal-train').first().tap();
     await phone.waitForTimeout(60);
     ok(await phone.evaluate(() => window.__app.state().vassals[0].level === 2), '家臣を鍛えるとレベルが上がる');
+    const eff2 = await phone.evaluate(() => document.querySelector('.vassal-card .skill-effect').textContent);
+    ok(eff1 !== eff2, `鍛えると得意技も強くなる (${eff1} → ${eff2})`);
 
     await phone.locator('#tab-battle').tap();
     await phone.evaluate(() => { const b = window.__app.battle(); if (b) b.player.hp = 0; });
@@ -435,6 +448,18 @@ async function run() {
     await phone.locator('#btnNext').tap();
     await phone.waitForTimeout(80);
     ok(await phone.evaluate(() => window.__app.battle().allies.length === 1), '出陣の家臣が、次の戦でいっしょに戦う');
+    // 癒やし猫にして、戦いの最中に体力が戻るのを見る (画面に「+N」が出る知らせ)
+    await phone.evaluate(() => {
+      const b = window.__app.battle();
+      b.allies[0].skill = 'heal';
+      b.skills = window.Core.battleSkills(b.allies);
+      b.player.hp = 5;
+      b.healCd = 0.2;
+      b.enemies.forEach((e) => { e.cd = 999; });
+    });
+    await phone.waitForTimeout(500);
+    const healed = await phone.evaluate(() => window.__app.battle().player.hp);
+    ok(healed > 5, `癒やし猫が、戦いの最中に体力を戻す (5 → ${healed})`);
 
     // ------------------------------------------------ 城主 → 城と村
     section('城と村 (マスに建てる地図)');

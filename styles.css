@@ -363,6 +363,7 @@ img { -webkit-user-drag: none; }
   paint-order: stroke fill;
 }
 .panel-text { margin: 0; font-size: 14px; color: var(--ink-2); line-height: 1.6; }
+.ready-allies { display: block; margin-top: 6px; font-size: 13px; font-weight: 800; color: var(--ink); }
 .result-rows { display: flex; flex-direction: column; gap: 4px; font-size: 15px; min-width: 220px; }
 .result-row { display: flex; justify-content: space-between; gap: 16px; }
 .result-row b { font-variant-numeric: tabular-nums; }
@@ -607,6 +608,12 @@ img { -webkit-user-drag: none; }
 .vassal-name { font-weight: 800; font-size: 15px; }
 .vassal-level { font-size: 12px; color: var(--ink-2); }
 .vassal-train { margin-left: auto; padding: 5px 10px; font-size: 12px; }
+/* 得意技: 出陣していないときは沈めて「出陣で効く」と添える */
+.vassal-skill { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 2px; padding: 5px 8px; border-radius: 10px; background: var(--paper-2); border: 1.5px dashed var(--paper-edge); font-size: 12px; color: var(--ink-2); }
+.vassal-skill.on { border-style: solid; border-color: var(--gold); background: #fff6d8; color: var(--ink); }
+.vassal-skill .skill-name { font-size: 13px; color: var(--ink); }
+.vassal-skill .skill-effect { font-weight: 800; }
+.vassal-skill .skill-text { flex-basis: 100%; font-size: 11px; }
 .jobs { display: flex; border: 2px solid var(--paper-edge); border-radius: 999px; overflow: hidden; }
 .job {
   flex: 1 1 0;

@@ -494,6 +494,11 @@
   }
 
   function heroX() { return fx(C.PLAYER_X); }
+  /** 出陣の家臣の立ち位置 (自分の左うしろ) */
+  function allyPos(i) {
+    const s = fieldSize.s;
+    return { x: heroX() - (fieldSize.land ? 62 + i * 34 : 70 + i * 38) * s, y: fieldSize.ground - (18 + i * 10) * s };
+  }
   function enemyX(e) {
     // 歩いてくる間は、画面の右の外から出てくるように引き伸ばす (横画面ではそのままだと半身が見えた所から出る)
     if (fieldSize.land && e.state === 'enter' && e.x > C.ENEMY_X) {
@@ -593,6 +598,18 @@
         addEffect({ kind: 'text', x: ev.item === 'fish' ? heroX() : ex, y: top - 10 * s,
           text: ev.item === 'fish' ? '🐟 +' + ev.amount : '🌿 夢中 MAX!', color: ev.item === 'fish' ? '#3a8fe0' : '#5fa83a', size: 20, dur: 1.0 });
         setFace('smile', 0.8);
+      } else if (ev.type === 'skill') {
+        // 家臣の得意技が効いた。その家臣が跳ねて、しるしを出す
+        const i2 = b.allies.findIndex(function (x) { return x.skill === ev.skill; });
+        if (i2 >= 0) {
+          const a = b.allies[i2];
+          const pos = allyPos(i2);
+          a.hop = 1;
+          addEffect({ kind: 'text', x: pos.x, y: pos.y - 105 * s, text: C.VASSAL_SKILLS[ev.skill].icon, color: '#fff', size: 20, dur: 0.7 });
+        }
+        if (ev.skill === 'heal') {
+          addEffect({ kind: 'num', x: heroX(), y: fieldSize.ground - 170 * s, text: '+' + ev.amount, heal: true, dur: 0.9 });
+        }
       } else if (ev.type === 'allyAttack') {
         const a = b.allies.find(function (x) { return x.id === ev.ally; });
         if (a) a.hop = 1;
@@ -700,7 +717,7 @@
       ctx.globalAlpha = 1;
     } else if (e.kind === 'num') {
       ctx.globalAlpha = k < 0.7 ? 1 : (1 - k) / 0.3;
-      outlinedText(ctx, e.text, e.x, e.y - 30 * s * k, e.crit ? 32 : (e.hurt ? 22 : 24), e.hurt ? '#ff6a55' : (e.crit ? '#ffd84a' : '#ffffff'));
+      outlinedText(ctx, e.text, e.x, e.y - 30 * s * k, e.crit ? 32 : (e.hurt || e.heal ? 22 : 24), e.hurt ? '#ff6a55' : (e.heal ? '#5fcf5a' : (e.crit ? '#ffd84a' : '#ffffff')));
       ctx.globalAlpha = 1;
     } else if (e.kind === 'text') {
       ctx.globalAlpha = k < 0.6 ? 1 : (1 - k) / 0.4;
@@ -946,10 +963,13 @@
     const allies = b ? b.allies : state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, C.MAX_BATTLE_VASSALS);
     allies.forEach(function (a, i) {
       a.hop = Math.max(0, (a.hop || 0) - dt / 0.3);
-      const ax = heroX() - (fieldSize.land ? 62 + i * 34 : 70 + i * 38) * s;
-      const ay = fieldSize.ground - (18 + i * 10) * s;
-      shadow(ctx, ax, ay, 20 * s);
-      drawSprite(ctx, imgs[a.look] || imgs['cat-chatora'], ax, ay - Math.sin(a.hop * Math.PI) * 14 * s, s * 0.62, {});
+      const pos = allyPos(i);
+      const jump = Math.sin(a.hop * Math.PI) * 14 * s;
+      shadow(ctx, pos.x, pos.y, 20 * s);
+      drawSprite(ctx, imgs[a.look] || imgs['cat-chatora'], pos.x, pos.y - jump, s * 0.62, {});
+      // 得意技のしるし (頭の上に小さく)
+      const sk = C.VASSAL_SKILLS[a.skill];
+      if (sk) outlinedText(ctx, sk.icon, pos.x + 14 * s, pos.y - 92 * s - jump, 14, '#fff', '#fff');
     });
 
     if (b) {
@@ -999,7 +1019,14 @@
       '大きなボス猫は、5回振ると MAX になるにゃ',
       'MAX の敵に 会心まで ためて、<br>特大 猫パンチ!'
     ];
-    els.readyText.innerHTML = tips[Math.min(r, tips.length - 1)];
+    let html = tips[Math.min(r, tips.length - 1)];
+    const goers = state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, C.MAX_BATTLE_VASSALS);
+    if (goers.length) {
+      html += '<span class="ready-allies">いっしょに出陣: ' + goers.map(function (v) {
+        return (C.VASSAL_SKILLS[v.skill] ? C.VASSAL_SKILLS[v.skill].icon : '') + v.name;
+      }).join(' ・ ') + '</span>';
+    }
+    els.readyText.innerHTML = html;
     renderHud(true);
   }
 
@@ -1052,7 +1079,7 @@
       if (pendingOffer) {
         els.offer.hidden = false;
         els.offerImg.src = imgs[pendingOffer.look].src;
-        els.offerText.textContent = pendingOffer.from + 'の「' + pendingOffer.name + '」が、仲間になりたそうにこちらを見ている!';
+        els.offerText.textContent = pendingOffer.from + 'の「' + pendingOffer.name + '」(' + skillLabel(pendingOffer.skill) + ') が、仲間になりたそうにこちらを見ている!';
       } else {
         els.offer.hidden = true;
       }
@@ -1127,6 +1154,20 @@
 
   const JOB_LABELS = { training: '自主練', labor: '普請', battle: '出陣' };
 
+  /** 得意技の強さを、画面に出す短い言葉にする */
+  function skillEffectText(skill, level) {
+    const p = C.skillPower(skill, level);
+    if (skill === 'jarashi') return 'ゲージ x' + p.toFixed(2);
+    if (skill === 'punch') return '溜めパンチ x' + p.toFixed(2);
+    if (skill === 'quick') return '溜める速さ x' + p.toFixed(2);
+    if (skill === 'heal') return C.HEAL_INTERVAL + '秒ごとに 体力 +' + Math.round(p * 100) + '%';
+    return '';
+  }
+  function skillLabel(skill) {
+    const k = C.VASSAL_SKILLS[skill];
+    return k ? k.icon + ' ' + k.name : '';
+  }
+
   function renderVassalsView() {
     const unlocked = isUnlocked('vassals');
     els.vassalsLocked.hidden = unlocked;
@@ -1160,6 +1201,18 @@
       train.addEventListener('click', function () { doTrainVassal(v.id); });
       top.appendChild(train);
       info.appendChild(top);
+
+      // 得意技 (出陣しているときだけ効く)
+      const sk = C.VASSAL_SKILLS[v.skill];
+      if (sk) {
+        const skill = document.createElement('div');
+        skill.className = 'vassal-skill' + (v.job === 'battle' ? ' on' : '');
+        skill.innerHTML = '<b class="skill-name"></b><span class="skill-effect"></span><span class="skill-text"></span>';
+        skill.querySelector('.skill-name').textContent = skillLabel(v.skill);
+        skill.querySelector('.skill-effect').textContent = skillEffectText(v.skill, v.level) + (v.job === 'battle' ? '' : ' (出陣で効く)');
+        skill.querySelector('.skill-text').textContent = sk.text;
+        info.appendChild(skill);
+      }
 
       const jobs = document.createElement('div');
       jobs.className = 'jobs';

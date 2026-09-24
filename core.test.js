@@ -582,6 +582,102 @@ test('合戦のあと: 枠が空いていれば、倒した相手が仲間にな
   assert.strictEqual(Core.rollRecruitOffer(stateAtRank(0), runBattle(stateAtRank(0), skilled, 1)), null, '足軽より前は仲間を持てない');
 });
 
+// ---------------------------------------------------------- 家臣の得意技
+
+/** 出陣の家臣 (得意技・レベル) を決め打ちして 1 対 1 にする */
+function duelWithSkills(kind, r, skills) {
+  const s = stateAtRank(r || 3);
+  s.vassals = skills.map((sk, i) => ({ id: i + 1, name: 'v' + i, level: sk[1], job: 'battle', look: 'cat-gray', skill: sk[0] }));
+  const b = Core.createBattle(s, Core.mulberry32(1));
+  const k = Core.ENEMY_KINDS[kind];
+  Object.assign(b.enemies[0], { kind: kind, name: k.name, look: k.look, boss: !!k.boss, interval: k.interval, cd: k.interval });
+  b.allies.forEach((a) => { a.cd = 999; }); // 家臣の攻撃は止めて、得意技だけを見る
+  return { b, e: untilReady(b) };
+}
+
+test('得意技: 家臣はひとつずつ得意技を持つ。村で募ると 4 つのどれか、倒した相手はその種類で決まる', () => {
+  let s = stateAtRank(3);
+  s = Object.assign({}, s, { merit: 100000 });
+  const got = new Set();
+  for (let seed = 1; seed <= 12; seed++) {
+    const r = Core.recruitVassal(Object.assign({}, s, { vassals: [] }), Core.mulberry32(seed));
+    assert.ok(Core.SKILL_KEYS.includes(r.vassal.skill));
+    got.add(r.vassal.skill);
+  }
+  assert.strictEqual(got.size, 4, '4 つとも出る');
+  const rnd = Core.mulberry32(3);
+  assert.strictEqual(Core.skillFromEnemy('quick', rnd), 'quick', 'すばしっこい猫 → すばやい猫');
+  assert.strictEqual(Core.skillFromEnemy('samurai', rnd), 'punch', 'ねこ侍 → パンチ名人');
+  for (let i = 0; i < 10; i++) assert.ok(['jarashi', 'heal'].includes(Core.skillFromEnemy('nora', rnd)), 'のら猫 → じゃらし名人か癒やし猫');
+  const acc = Core.acceptRecruitOffer(s, { name: 'シロ', look: 'cat-gray', from: 'すばしっこい猫', skill: 'quick' });
+  assert.strictEqual(acc.vassal.skill, 'quick', '仲間入りした相手は、誘われたときの得意技のまま');
+});
+
+test('得意技: 前の保存データの家臣にも得意技がつく (番号で決まり、読み直しても変わらない)', () => {
+  const raw = Object.assign(Core.createInitialState(), { vassals: [{ id: 5, name: 'ミケ', level: 2, job: 'battle', look: 'cat-gray' }] });
+  const a = Core.sanitizeState(JSON.parse(JSON.stringify(raw)));
+  const b2 = Core.sanitizeState(JSON.parse(JSON.stringify(raw)));
+  assert.ok(Core.SKILL_KEYS.includes(a.vassals[0].skill));
+  assert.strictEqual(a.vassals[0].skill, b2.vassals[0].skill);
+  const kept = Core.sanitizeState(Object.assign({}, raw, { vassals: [Object.assign({}, raw.vassals[0], { skill: 'heal' })] }));
+  assert.strictEqual(kept.vassals[0].skill, 'heal', 'ある得意技はそのまま');
+});
+
+test('得意技: じゃらし名人がいると夢中ゲージがたまりやすい。鍛えるほど強い', () => {
+  const plain = duelWithSkills('samurai', 3, []);
+  const lv1 = duelWithSkills('samurai', 3, [['jarashi', 1]]);
+  const lv10 = duelWithSkills('samurai', 3, [['jarashi', 10]]);
+  [plain, lv1, lv10].forEach((d) => Core.lure(d.b));
+  assert.ok(lv1.e.muchu > plain.e.muchu && lv10.e.muchu > lv1.e.muchu, `${plain.e.muchu} < ${lv1.e.muchu} < ${lv10.e.muchu}`);
+  assert.ok(lv1.b.events.some((ev) => ev.type === 'skill' && ev.skill === 'jarashi'), '効いたと知らせる (家臣が跳ねる)');
+});
+
+test('得意技: パンチ名人は溜めパンチ (強以上) だけ強くする。すぐ離すパンチは同じ', () => {
+  const plain = duelWithSkills('nora', 3, []);
+  const pm = duelWithSkills('nora', 3, [['punch', 5]]);
+  for (const d of [plain, pm]) { d.e.hp = d.e.maxHp = 100000; d.e.cd = 99; }
+  Core.punch(plain.b); Core.punch(pm.b);
+  assert.strictEqual(plain.e.maxHp - plain.e.hp, pm.e.maxHp - pm.e.hp, 'すぐ離すパンチは同じ');
+  step(plain.b, 1); step(pm.b, 1);
+  for (const d of [plain, pm]) { d.e.state = 'idle'; d.e.x = Core.ENEMY_X; d.e.cd = 99; d.e.hp = d.e.maxHp; hold(d.b, 0.9); }
+  const a = plain.e.maxHp - plain.e.hp, c = pm.e.maxHp - pm.e.hp;
+  assert.strictEqual(c, Math.round(plain.b.player.atk * Core.CHARGE_POWER[1] * Core.skillPower('punch', 5)), `強パンチが x${Core.skillPower('punch', 5)} (${a} → ${c})`);
+});
+
+test('得意技: すばやい猫がいると溜めが早くたまる (カウンターに間に合いやすい)', () => {
+  const plain = duelWithSkills('nora', 3, []);
+  const q = duelWithSkills('nora', 3, [['quick', 10]]);
+  for (const d of [plain, q]) { d.e.cd = 99; Core.punchPress(d.b); step(d.b, 0.6); }
+  assert.strictEqual(Core.chargeLevel(plain.b.charge.t), 0, 'ふつうは 0.6 秒ではまだ強にならない');
+  assert.strictEqual(Core.chargeLevel(q.b.charge.t), 1, `すばやい猫 Lv10 なら強になる (x${Core.skillPower('quick', 10)})`);
+});
+
+test('得意技: 癒やし猫は、ときどき体力を戻してくれる (満タンより上には戻らない)', () => {
+  const { b, e } = duelWithSkills('nora', 3, [['heal', 5]]);
+  e.cd = 999;
+  b.player.hp = 10;
+  step(b, Core.HEAL_INTERVAL + 0.1);
+  const want = Math.round(b.player.maxHp * Core.skillPower('heal', 5));
+  assert.strictEqual(b.player.hp, 10 + want, `${Core.HEAL_INTERVAL} 秒で体力 +${want}`);
+  assert.ok(b.events.some((ev) => ev.type === 'skill' && ev.skill === 'heal' && ev.amount === want));
+  b.player.hp = b.player.maxHp - 1;
+  step(b, Core.HEAL_INTERVAL + 0.1);
+  assert.strictEqual(b.player.hp, b.player.maxHp);
+});
+
+test('得意技: 効くのは出陣している家臣だけ。2 人いれば足し合わせ', () => {
+  let s = stateAtRank(5);
+  s.vassals = [
+    { id: 1, name: 'a', level: 1, job: 'training', look: 'cat-gray', skill: 'jarashi' },
+    { id: 2, name: 'b', level: 1, job: 'battle', look: 'cat-gray', skill: 'jarashi' },
+    { id: 3, name: 'c', level: 1, job: 'battle', look: 'cat-gray', skill: 'jarashi' }
+  ];
+  const b = Core.createBattle(s, Core.mulberry32(1));
+  const p = Core.skillPower('jarashi', 1);
+  assert.ok(Math.abs(b.skills.lure - (1 + 2 * (p - 1))) < 1e-9, '出陣の 2 人ぶん (自主練の子は入らない)');
+  assert.deepStrictEqual(Core.battleSkills([]), { lure: 1, power: 1, speed: 1, heal: 0 });
+});
+
 // 手ごたえの見張り。数字は各段位 30 回ずつ実際に戦わせて測った値をもとに線を引いた
 // (下手: r0 30/30 残67%、r1 以上 0/30。溜めない: r0 30/30、r1・r2 9/30、r3 以上 0/30。
 //  ふつう: 全段位 30/30 残24〜67%。上手: 全段位 30/30)
