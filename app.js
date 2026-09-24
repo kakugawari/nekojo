@@ -18,7 +18,7 @@
     portraitImg: $('portraitImg'), rankTag: $('rankTag'), lvText: $('lvText'),
     hpFill: $('hpFill'), hpText: $('hpText'), nextFill: $('nextFill'),
     enemyUnit: $('enemyUnit'), enemyName: $('enemyName'), enemyHpFill: $('enemyHpFill'), enemyFaceImg: $('enemyFaceImg'),
-    missionText: $('missionText'), pawGauge: $('pawGauge'),
+    missionText: $('missionText'), chargeGauge: $('chargeGauge'), chargeFill: $('chargeFill'), chargeLabel: $('chargeLabel'),
     btnItem: $('btnItem'), itemBadge: $('itemBadge'), itemMenu: $('itemMenu'),
     btnFish: $('btnFish'), btnMatatabi: $('btnMatatabi'), fishCount: $('fishCount'), matatabiCount: $('matatabiCount'),
     btnPause: $('btnPause'), pausePanel: $('pausePanel'), btnResume: $('btnResume'), btnRetreat: $('btnRetreat'),
@@ -214,21 +214,26 @@
 
     const e = b ? b.enemies[b.current] : null;
     const showEnemy = !!(e && (e.alive || e.state === 'down') && e.state !== 'wait');
-    setOnce('enemyShown', showEnemy, function (v) {
-      els.enemyUnit.hidden = !v;
-      els.pawGauge.classList.toggle('idle', !v); // 横画面では、敵がいない間ゲージを隠す (縦は常に出す)
-    });
+    setOnce('enemyShown', showEnemy, function (v) { els.enemyUnit.hidden = !v; });
     if (showEnemy) {
       setText(els.enemyName, 'enemyName', e.name);
       setWidth(els.enemyHpFill, 'enemyHp', e.hp / e.maxHp * 100);
       setOnce('enemyFace', e.look, function (v) { els.enemyFaceImg.src = imgs[v].src; });
     }
 
-    const paw = b ? b.paw : 0;
-    setOnce('paw', paw, function (v) {
-      els.pawGauge.querySelectorAll('i').forEach(function (i, k) { i.classList.toggle('on', k < v); });
-      els.pawGauge.classList.toggle('full', v >= C.PAW_MAX);
+    // 溜めゲージ (押している長さ)。30 段に丸めて、変わったときだけ書き換える
+    const charging = !!(b && b.charge.on);
+    const ch = charging ? Math.round(Math.min(1, b.charge.t / C.CHARGE_LEVELS[2]) * 30) / 30 : 0;
+    setOnce('charge', ch, function (v) { els.chargeFill.style.transform = 'scaleX(' + v + ')'; });
+    const lv = charging ? C.chargeLevel(b.charge.t) : -1;
+    setOnce('chargeLv', lv, function (v) {
+      els.chargeGauge.classList.toggle('on', v >= 0);
+      els.chargeGauge.classList.toggle('lv1', v === 1);
+      els.chargeGauge.classList.toggle('lv2', v === 2);
+      els.chargeLabel.textContent = v < 0 ? 'ながおしで ためる' : ['ためて…', '強パンチ!', '会心!'][v];
     });
+    // 夢中 MAX の間は、猫パンチが光る (今だ!)
+    setOnce('ready', !!(e && e.state === 'charmed'), function (v) { els.btnPunch.classList.toggle('ready', v); });
 
     const items = b ? b.items : state.items;
     setText(els.itemBadge, 'itemBadge', String(items.fish + items.matatabi));
@@ -449,10 +454,39 @@
   // ---------------------------------------------------------- 効果
 
   let effects = [];
-  const anim = { lure: 0, punch: 0, hurt: 0, shake: 0, flash: 0, knock: 0 };
+  const anim = { lure: 0, punch: 0, hurt: 0, shake: 0, flash: 0, knock: 0, punchLevel: 0, charge: 0 };
   const petals = [];
   for (let i = 0; i < 12; i++) petals.push({ x: Math.random(), y: Math.random(), v: 0.03 + Math.random() * 0.03, p: Math.random() * 6 });
   let cheer = { t: 3, text: '' };
+
+  // 効果音。いまは溜めが会心に届いたときの「ポン」だけ。音は最初に画面を押したときに鳴らせるようになる (iOS の決まり)
+  let audioCtx = null;
+  const sfxCount = { pon: 0 };
+  function unlockAudio() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      try { audioCtx = new AC(); } catch (err) { return; }
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function playPon() {
+    sfxCount.pon++;
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(520, t);
+    o.frequency.exponentialRampToValueAtTime(1040, t + 0.08);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start(t);
+    o.stop(t + 0.3);
+  }
 
   function addEffect(e) {
     e.t = 0;
@@ -476,9 +510,9 @@
   }
 
   const LURE_TEXT = {
-    charm: ['夢中!', '#ff5f9e', 20], perfect: ['見切り!', '#c8412f', 26], dodge: ['ひらり…', '#ff7fb0', 20],
-    resist: ['まだまだ…?', '#7a6650', 16], wary: ['警戒中…', '#7a6650', 16], full: ['もう夢中!', '#ff5f9e', 16]
+    charm: ['♡', '#ff5f9e', 26], max: ['夢中 MAX!', '#ff5f9e', 24], weak: ['見られてる…', '#7a6650', 16], full: ['もう夢中!', '#ff5f9e', 16]
   };
+  const PUNCH_WORD = ['バシッ!', 'ドカッ!', 'ドッカーン!'];
 
   function handleEvents(b) {
     const s = fieldSize.s;
@@ -489,27 +523,51 @@
       const ev = b.events[i];
       if (ev.type === 'lure') {
         anim.lure = 1;
-        addEffect({ kind: 'swish', dur: 0.45, big: ev.result === 'perfect' });
+        addEffect({ kind: 'swish', dur: 0.45, big: ev.result === 'max' });
         const lt = LURE_TEXT[ev.result];
-        if (lt) addEffect({ kind: 'text', x: ex, y: top - 10 * s, text: lt[0], color: lt[1], size: lt[2], dur: 0.9 });
-        if (ev.result === 'perfect') setFace('smile', 1.0);
-        if (ev.result === 'dodge' || ev.result === 'wary') setFace('shy', 0.7);
+        // 字は顔のあたりに出す (頭の上はゲージと「今だ!」の場所)
+        if (lt) addEffect({ kind: 'text', x: ex, y: top + 40 * s, text: lt[0], color: lt[1], size: lt[2], dur: 0.9 });
+        if (ev.result === 'max') setFace('smile', 1.0);
+        if (ev.result === 'weak') setFace('shy', 0.7);
+      } else if (ev.type === 'chargeStart') {
+        anim.charge = 0;
+      } else if (ev.type === 'charge') {
+        const hx = heroX() + 44 * s, hy = fieldSize.ground - 80 * s;
+        if (ev.level === 2) {
+          addEffect({ kind: 'text', x: hx, y: hy - 40 * s, text: 'ポン!', color: '#ffd84a', size: 30, stroke: '#3a2a1c', dur: 0.8 });
+          addEffect({ kind: 'ring', x: hx, y: hy, r: 60 * s, dur: 0.35 });
+          playPon();
+          setFace('serious', 1.0);
+        } else {
+          addEffect({ kind: 'ring', x: hx, y: hy, r: 40 * s, dur: 0.3 });
+        }
+      } else if (ev.type === 'chargeBroken') {
+        addEffect({ kind: 'text', x: heroX() + 30 * s, y: fieldSize.ground - 170 * s, text: 'あっ…', color: '#7a6650', size: 18, dur: 0.8 });
       } else if (ev.type === 'hit') {
         if (ev.source === 'punch') {
+          const lv = ev.level || 0;
           anim.punch = 1;
+          anim.punchLevel = lv;
           anim.knock = 1;
-          const big = ev.combo || ev.crit;
-          addEffect({ kind: 'burst', x: ex - 20 * s, y: fieldSize.ground - 80 * s, r: (big ? 70 : 46) * s, dur: 0.3 });
-          addEffect({ kind: 'text', x: ex + 10 * s, y: top - 30 * s, text: ev.armor ? 'カキン!' : 'バシッ!', color: '#ffd84a', size: big ? 40 : 32, rot: -0.12, dur: 0.75, stroke: '#3a2a1c' });
-          if (ev.combo) startCutin();
-          if (ev.crit) addEffect({ kind: 'text', x: ex, y: top - 70 * s, text: ev.open ? 'スキあり!' : '会心の猫パンチ!', color: '#c8412f', size: 20, dur: 1.0 });
+          const big = lv >= 1 || ev.max || ev.crit;
+          addEffect({ kind: 'burst', x: ex - 20 * s, y: fieldSize.ground - 80 * s, r: [46, 64, 90][lv] * s * (ev.max ? 1.15 : 1), dur: 0.3 + 0.1 * lv });
+          addEffect({ kind: 'text', x: ex + 10 * s, y: top - 30 * s, text: ev.armor && !ev.max ? 'カキン!' : PUNCH_WORD[lv], color: '#ffd84a', size: [32, 38, 44][lv], rot: -0.12, dur: 0.75, stroke: '#3a2a1c' });
+          let label = '';
+          if (ev.counter) label = 'カウンター!';
+          else if (ev.open) label = 'スキあり!';
+          else if (lv === 2) label = ev.max ? '特大 猫パンチ!' : '会心の猫パンチ!';
+          else if (lv === 1) label = '強パンチ!';
+          if (label) addEffect({ kind: 'text', x: ex, y: top - 70 * s, text: label, color: '#c8412f', size: 20, dur: 1.0 });
+          if (lv === 2 && ev.max) startCutin();
+          if (lv >= 1) anim.shake = 0.6 + 0.4 * (lv - 1);
           if (big) setFace('smile', 1.0);
         } else if (ev.source === 'ally') {
           addEffect({ kind: 'burst', x: ex - 10 * s, y: fieldSize.ground - 100 * s, r: 20 * s, dur: 0.2 });
         }
-        addEffect({ kind: 'num', x: ex + 30 * s, y: top + 10 * s, text: String(ev.amount), crit: ev.crit || ev.combo, dur: 0.8 });
+        addEffect({ kind: 'num', x: ex + 30 * s, y: top + 10 * s, text: String(ev.amount), crit: ev.crit || ev.max, dur: 0.8 });
       } else if (ev.type === 'parry') {
         anim.punch = 1;
+        anim.punchLevel = ev.level || 0;
         addEffect({ kind: 'text', x: ex, y: top - 20 * s, text: '受け流し!', color: '#3f4d70', size: 22, dur: 0.9 });
       } else if (ev.type === 'open') {
         addEffect({ kind: 'text', x: ex, y: top - 40 * s, text: 'スキあり!', color: '#ff9a1a', size: 20, dur: 0.9 });
@@ -528,11 +586,12 @@
         setFace('surprised', 0.7);
       } else if (ev.type === 'miss') {
         anim.punch = 1;
+        anim.punchLevel = ev.level || 0;
         addEffect({ kind: 'text', x: heroX() + 60 * s, y: fieldSize.ground - 140 * s, text: 'スカッ', color: '#7a6650', size: 16, dur: 0.7 });
         setFace('shy', 0.8);
       } else if (ev.type === 'item') {
         addEffect({ kind: 'text', x: ev.item === 'fish' ? heroX() : ex, y: top - 10 * s,
-          text: ev.item === 'fish' ? '🐟 +' + ev.amount : '🌿 またたび!', color: ev.item === 'fish' ? '#3a8fe0' : '#5fa83a', size: 20, dur: 1.0 });
+          text: ev.item === 'fish' ? '🐟 +' + ev.amount : '🌿 夢中 MAX!', color: ev.item === 'fish' ? '#3a8fe0' : '#5fa83a', size: 20, dur: 1.0 });
         setFace('smile', 0.8);
       } else if (ev.type === 'allyAttack') {
         const a = b.allies.find(function (x) { return x.id === ev.ally; });
@@ -666,6 +725,13 @@
       });
       feather(ctx, cx + Math.cos(a1) * rx, cy + Math.sin(a1) * ry, 26 * s, a1 + Math.PI / 2);
       ctx.globalAlpha = 1;
+    } else if (e.kind === 'ring') {
+      // 溜めの段が上がったとき、肉球から広がる輪
+      ctx.globalAlpha = 1 - k;
+      ctx.strokeStyle = '#ffe27a';
+      ctx.lineWidth = 5 * (1 - k) + 1;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r * (0.4 + k), 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
     } else if (e.kind === 'dust') {
       ctx.fillStyle = 'rgba(255,248,230,' + (0.8 * (1 - k)) + ')';
       for (let i = 0; i < 7; i++) {
@@ -673,6 +739,46 @@
         const d = 40 * s * k;
         ctx.beginPath(); ctx.arc(e.x + Math.cos(a) * d, e.y + Math.sin(a) * d * 0.5, (12 + 8 * k) * s, 0, Math.PI * 2); ctx.fill();
       }
+    }
+  }
+
+  /** 敵の頭の上: 夢中ゲージと、しるし (警戒「!」/ 攻撃の予告 赤い「!」/ 夢中「♡」/ MAX 肉球) */
+  function drawMood(ctx, e, x, headY, t) {
+    const s = fieldSize.s;
+    const mood = C.enemyMood(e);
+    const gw = 96 * s, gh = 12 * s, gx = x - gw / 2 + 10 * s, gy = headY - 34 * s;
+    // ゲージ
+    ctx.fillStyle = 'rgba(30,26,40,.82)';
+    ctx.beginPath(); ctx.roundRect(gx - 2, gy - 2, gw + 4, gh + 4, gh / 2 + 2); ctx.fill();
+    const k = Math.max(0, Math.min(1, e.muchu / C.MUCHU_MAX));
+    if (k > 0) {
+      const flash = mood === 'max' ? 0.75 + 0.25 * Math.sin(t * 14) : 1;
+      ctx.globalAlpha = flash;
+      ctx.fillStyle = mood === 'max' ? '#ffd84a' : (e.muchu >= C.MUCHU_CHASE ? '#ff5f9e' : '#ff9cc4');
+      ctx.beginPath(); ctx.roundRect(gx, gy, gw * k, gh, gh / 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // 半分の印 (ここから先は追いかけていて、攻撃してこない)
+    ctx.fillStyle = 'rgba(255,255,255,.6)';
+    ctx.fillRect(gx + gw * C.MUCHU_CHASE / C.MUCHU_MAX - 1, gy + 2, 2, gh - 4);
+    // しるし (ゲージの左)
+    const ix = gx - 16 * s, iy = gy + gh / 2 + 7 * s;
+    if (mood === 'attack') {
+      const p = 1 + 0.15 * Math.sin(t * 24);
+      ctx.fillStyle = 'rgba(255,75,58,.35)';
+      ctx.beginPath(); ctx.arc(ix, iy - 8 * s, 22 * s * p, 0, Math.PI * 2); ctx.fill();
+      outlinedText(ctx, '!', ix, iy, 38 * p, '#ff3b2a', '#fff');
+    } else if (mood === 'alert') {
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = '#3a2a1c';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ix, iy - 7 * s, 13 * s, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      outlinedText(ctx, '!', ix, iy, 20, '#3a2a1c', '#fff');
+    } else if (mood === 'chase') {
+      outlinedText(ctx, '♥', ix, iy + Math.sin(t * 8) * 2 * s, 24 * (0.8 + 0.4 * k), '#ff5f9e', '#fff');
+    } else if (mood === 'max') {
+      outlinedText(ctx, '🐾', ix, iy + Math.sin(t * 10) * 3 * s, 26, '#fff', '#fff');
+      outlinedText(ctx, '今だ!', x + 10 * s, gy - 12 * s, 16 + Math.sin(t * 12) * 2, '#c8412f', '#fff');
     }
   }
 
@@ -684,20 +790,30 @@
     let rot = 0;
     let alpha = 1;
     const headY = function () { return y - 150 * sc; };
+    const chasing = C.isChasing(e);
 
     if (e.state === 'enter') {
       y -= Math.abs(Math.sin(t * 10)) * 6 * s;
+    } else if (e.state === 'idle' && chasing) {
+      // 羽を追いかけて、ぴょこぴょこ跳ねる
+      y -= Math.abs(Math.sin(t * 9)) * 16 * s;
+      x -= 10 * s + Math.sin(t * 4.5) * 8 * s;
+      rot = Math.sin(t * 9) * 0.06;
     } else if (e.state === 'idle') {
       y -= Math.abs(Math.sin(t * 3 + e.id)) * 3 * s;
     } else if (e.state === 'windup') {
       rot = -0.16;
       x += Math.sin(t * 40) * 2;
     } else if (e.state === 'charmed') {
-      // 羽に飛びつく
-      const ph = (e.age % C.JUMP_PERIOD) / C.JUMP_PERIOD;
-      y -= Math.sin(ph * Math.PI) * 46 * s;
-      rot = Math.sin(ph * Math.PI * 2) * 0.12;
+      // 夢中 MAX: 羽に見とれて動けない (小さく揺れるだけ)
+      rot = -0.1 + Math.sin(t * 3) * 0.03;
       x -= 18 * s;
+      y -= 6 * s;
+    } else if (e.state === 'knock') {
+      // 吹っ飛ぶ: のけぞって回る (位置は core の e.x が動かす)
+      const k = Math.max(0, e.timer) / Math.max(0.01, e.knockTime);
+      rot = 0.55 * k * (e.knockDist / 90);
+      y -= Math.sin(k * Math.PI) * e.knockDist * 0.35 * s;
     } else if (e.state === 'recover') {
       rot = 0.22 * Math.max(0, e.timer / 0.6);
       x += 16 * s * Math.max(0, e.timer / 0.6);
@@ -713,43 +829,44 @@
     const flash = anim.knock > 0.6 && e.state !== 'down' ? anim.knock : 0;
     drawSprite(ctx, imgs[e.look], x, y, sc, { rot: rot, alpha: alpha, flash: flash });
 
-    // 夢中: ぶらさがる羽とハート。飛びつきの高いところ (会心になる所) で星が光る
+    // 夢中: ぶらさがる羽とハート
+    if (e.state === 'charmed' || chasing) {
+      feather(ctx, x - 40 * s, headY() - 4 * s + Math.sin(t * 8) * 6 * s, 22 * s, -1.2 + Math.sin(t * 6) * 0.4);
+    }
     if (e.state === 'charmed') {
-      feather(ctx, x - 40 * s, headY() - 24 * s + Math.sin(t * 8) * 6 * s, 22 * s, -1.2 + Math.sin(t * 6) * 0.4);
       for (let i = 0; i < 3; i++) {
         const a = t * 3 + i * 2.1;
-        outlinedText(ctx, '♥', x + Math.cos(a) * 34 * s, headY() + 18 * s + Math.sin(a) * 10 * s, 16, '#ff7fb0', '#fff');
-      }
-      if (C.atJumpPeak(e)) {
-        ctx.strokeStyle = 'rgba(255,226,122,.95)';
-        ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.arc(x, headY() + 60 * sc, 70 * sc, 0, Math.PI * 2); ctx.stroke();
-        outlinedText(ctx, '★', x + 50 * sc, headY() + 10 * sc, 26, '#ffe27a');
+        outlinedText(ctx, '♥', x + Math.cos(a) * 34 * s, headY() + 30 * s + Math.sin(a) * 10 * s, 16, '#ff7fb0', '#fff');
       }
     }
-    if (e.state === 'windup') outlinedText(ctx, '!', x - 34 * s, headY() + 8 * s, 34 + Math.sin(t * 20) * 3, '#ff4b3a', '#fff');
-    if (e.state === 'recover' && e.open) outlinedText(ctx, 'スキ!', x, headY() - 6 * s, 18 + Math.sin(t * 12) * 2, '#ff9a1a', '#fff');
-    if (e.kind === 'quick' && (e.state === 'idle' || e.state === 'recover') && C.isLooking(e)) {
-      outlinedText(ctx, '👀', x + 26 * s, headY() + 6 * s, 20, '#fff', '#fff');
-    }
-    if (e.kind === 'boss' && e.state !== 'charmed' && e.lureCount > 0 && e.state !== 'down') {
-      outlinedText(ctx, '?'.repeat(e.lureCount), x + 30 * s, headY() + 4 * s, 20, '#ff7fb0', '#fff');
-    }
+    if (e.state === 'recover' && e.open) outlinedText(ctx, 'スキ!', x + 40 * s, headY() + 20 * s, 18 + Math.sin(t * 12) * 2, '#ff9a1a', '#fff');
     if (e.state === 'down') {
       // 目を回す
       for (let i = 0; i < 3; i++) {
         const a = t * 5 + i * 2.1;
         outlinedText(ctx, '★', x + Math.cos(a) * 30 * s, headY() + 20 * s + Math.sin(a) * 8 * s, 14, '#ffe27a');
       }
+    } else if (e.state !== 'enter') {
+      drawMood(ctx, e, enemyX(e), fieldSize.ground - 150 * sc, t);
     }
-    // 肉球ゲージ (頭の上)
-    if (b.paw > 0 && e.state !== 'down') {
-      for (let i = 0; i < C.PAW_MAX; i++) {
-        ctx.globalAlpha = i < b.paw ? 1 : 0.3;
-        outlinedText(ctx, '🐾', x - 44 * s + i * 22 * s, headY() - 30 * s, 15, '#fff', '#fff');
-      }
-      ctx.globalAlpha = 1;
-    }
+  }
+
+  // 溜めの光は、一度だけ小さな絵に描いておき、毎コマは拡大して置くだけにする (毎コマ光の濃淡を作り直すより軽い)
+  const glowCache = {};
+  function glowSprite(pink) {
+    const key = pink ? 'pink' : 'gold';
+    if (glowCache[key]) return glowCache[key];
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const x = c.getContext('2d');
+    const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0, 'rgba(255,255,240,.95)');
+    g.addColorStop(0.45, pink ? 'rgba(255,120,190,.8)' : 'rgba(255,216,74,.75)');
+    g.addColorStop(1, 'rgba(255,216,74,0)');
+    x.fillStyle = g;
+    x.fillRect(0, 0, 128, 128);
+    glowCache[key] = c;
+    return c;
   }
 
   function drawHero(ctx, b, t, dt) {
@@ -759,10 +876,24 @@
     const y = fieldSize.ground;
     shadow(ctx, x, y, 38 * s);
     if (anim.punch > 0) {
-      // 飛び込んでパンチ
+      // 飛び込んでパンチ。溜めた段が高いほど深く飛び込む
       const k = Math.sin(anim.punch * Math.PI);
-      const dash = (b && b.enemies[b.current] ? enemyX(b.enemies[b.current]) - x - 120 * s : 60 * s) * k;
-      drawSprite(ctx, imgs['pose-punch'], x + dash, y - k * 24 * s, s * 0.95, { anchor: 0.4 });
+      const reach = [0.55, 0.8, 1][anim.punchLevel || 0];
+      const dash = (b && b.enemies[b.current] ? enemyX(b.enemies[b.current]) - x - 120 * s : 60 * s) * k * reach;
+      drawSprite(ctx, imgs['pose-punch'], x + dash, y - k * (16 + 14 * (anim.punchLevel || 0)) * s, s * 0.95, { anchor: 0.4 });
+      return;
+    }
+    if (b && b.charge && b.charge.on) {
+      // 溜めている: 構えて、前の肉球がだんだん大きく光る
+      const c = Math.min(1, b.charge.t / C.CHARGE_LEVELS[2]);
+      const lv = C.chargeLevel(b.charge.t);
+      const shake = lv === 2 ? Math.sin(t * 50) * 2 * s : 0;
+      // 構えは、ふだんの姿を少し後ろへ引いて傾ける (パンチの絵は当たった瞬間の光まで描いてあるので使わない)
+      drawSprite(ctx, imgs[stageForRank(r)], x - 14 * s * c + shake, y, s, { rot: -0.08 * c });
+      const px = x + 44 * s, py = y - 80 * s;
+      const rad = (10 + 26 * c) * s * (1 + 0.08 * Math.sin(t * 18));
+      ctx.drawImage(glowSprite(lv === 2), px - rad, py - rad, rad * 2, rad * 2);
+      outlinedText(ctx, '🐾', px, py + 6 * s, 14 + 14 * c, '#fff', '#fff');
       return;
     }
     if (anim.lure > 0) {
@@ -860,13 +991,13 @@
     els.readyTitle.textContent = '第' + kanjiNum((state.battlesWon || 0) + 1) + '戦';
     const r = C.rankIndexOf(state);
     const tips = [
-      '猫じゃらしで すきを作って、<br>猫パンチ!',
-      '肉球ゲージを ためてから パンチすると<br>大ダメージ!',
-      'すばしっこい猫は、👀 のときに<br>猫じゃらしを振ろう',
-      '敵が「!」と振りかぶったら、<br>猫じゃらしで「見切り」!',
+      '猫じゃらしで ♡ をためて、<br>MAX 🐾 になったら 猫パンチ!',
+      '猫パンチは ながおしで ためられる!<br>MAX の敵には すぐたまるにゃ',
+      '頭に「!」が出ている敵は 猫じゃらしが効きにくい。<br>すばしっこい猫は よそ見のときに振ろう',
+      'カウンター: ためて待って、<br>赤い「!」が出たら はなそう!',
       'ねこ侍は、攻撃のあとの「スキ」を<br>パンチで ねらおう',
-      '大きなボス猫は、3回振ると夢中になるにゃ',
-      '羽に飛びついた ★ のときにパンチすると<br>会心の猫パンチ!'
+      '大きなボス猫は、5回振ると MAX になるにゃ',
+      'MAX の敵に 会心まで ためて、<br>特大 猫パンチ!'
     ];
     els.readyText.innerHTML = tips[Math.min(r, tips.length - 1)];
     renderHud(true);
@@ -959,6 +1090,7 @@
     els.rankUpArt.src = (prev < C.CASTLE_UNLOCK_RANK && idx >= C.CASTLE_UNLOCK_RANK) ? imgs['b-castle'].src : imgs[stageForRank(idx)].src;
     let text = rank.story;
     if (prev < C.VASSAL_UNLOCK_RANK && idx >= C.VASSAL_UNLOCK_RANK) text += '<br><b>家臣を持てるようになった!</b>';
+    if (prev < C.COUNTER_RANK && idx >= C.COUNTER_RANK) text += '<br><b>新しい技「カウンター」を覚えた!</b><br>ためて待って、赤い「!」で はなそう';
     if (prev < C.CASTLE_UNLOCK_RANK && idx >= C.CASTLE_UNLOCK_RANK) text += '<br><b>城と村を持てるようになった!</b>';
     if (stageForRank(prev) !== stageForRank(idx)) text += '<br>見た目も りっぱになった!';
     els.rankUpText.innerHTML = text;
@@ -970,6 +1102,8 @@
 
   function pauseBattle() {
     if (!battle || battle.phase !== 'fight') return;
+    battle.charge = { on: false, t: 0 }; // 溜めは捨てる (止めている間にたまらないように)
+    els.btnPunch.classList.remove('charging');
     paused = true;
     els.itemMenu.hidden = true;
     els.pausePanel.hidden = false;
@@ -1446,6 +1580,19 @@
 
   function doLure() { if (!battle || paused) return false; const ok = C.lure(battle); if (ok) press(els.btnLure); return ok; }
   function doPunch() { if (!battle || paused) return false; const ok = C.punch(battle); if (ok) press(els.btnPunch); return ok; }
+  /** 猫パンチを押しはじめる (溜めはじめ)。離すと出る */
+  function doPunchPress() {
+    unlockAudio();
+    if (!battle || paused) return false;
+    const ok = C.punchPress(battle);
+    if (ok) els.btnPunch.classList.add('charging');
+    return ok;
+  }
+  function doPunchRelease() {
+    els.btnPunch.classList.remove('charging');
+    if (!battle || paused) return false;
+    return C.punchRelease(battle);
+  }
   function doItem(kind) {
     if (!battle || paused) return false;
     const ok = C.useItem(battle, kind);
@@ -1548,8 +1695,17 @@
     });
     els.btnOfferYes.addEventListener('click', acceptOffer);
     els.btnOfferNo.addEventListener('click', function () { pendingOffer = null; els.offer.hidden = true; });
-    onDown(els.btnLure, doLure);
-    onDown(els.btnPunch, doPunch);
+    onDown(els.btnLure, function () { unlockAudio(); doLure(); });
+    // 猫パンチは長押しで溜める。指がボタンの外へずれても離すまで捕まえておく (setPointerCapture)
+    els.btnPunch.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      try { els.btnPunch.setPointerCapture(e.pointerId); } catch (err) { /* 捕まえられなくても押せる */ }
+      doPunchPress();
+    });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (type) {
+      els.btnPunch.addEventListener(type, function () { if (battle && battle.charge.on) doPunchRelease(); else els.btnPunch.classList.remove('charging'); });
+    });
+    els.btnPunch.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     els.btnItem.addEventListener('click', toggleItemMenu);
     els.btnFish.addEventListener('click', function () { doItem('fish'); });
     els.btnMatatabi.addEventListener('click', function () { doItem('matatabi'); });
@@ -1587,6 +1743,10 @@
       sortie: sortie,
       lure: doLure,
       punch: doPunch,
+      pressPunch: doPunchPress,
+      releasePunch: doPunchRelease,
+      mood: function () { const b = battle; return b ? C.enemyMood(b.enemies[b.current]) : 'none'; },
+      sfx: function () { return Object.assign({}, sfxCount); },
       item: doItem,
       paused: function () { return paused; },
       offer: function () { return pendingOffer; },

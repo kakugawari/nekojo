@@ -201,37 +201,70 @@ function runBattle(state, bot, seed) {
   const b = Core.createBattle(state, Core.mulberry32(seed));
   let next = 0;
   for (let i = 0; i < 60 * 300 && b.phase === 'fight'; i++) {
-    // 人と同じくらいの間隔 (0.2〜0.3秒) でしか押さない
-    if (b.t >= next && bot(b)) next = b.t + 0.2 + b.rng() * 0.1;
+    // 離すのはいつでも。押すのは人と同じくらいの間隔 (0.2〜0.3秒) でしか押さない
+    if (b.charge.on && bot.release(b)) Core.punchRelease(b);
+    if (b.t >= next && bot.press(b)) next = b.t + 0.2 + b.rng() * 0.1;
     Core.stepBattle(b, 1 / 60);
     b.events.length = 0;
   }
   return b;
 }
 
-// 下手: パンチだけを押し続ける
-const masher = (b) => Core.punch(b);
-// ふつう: 猫じゃらしで肉球を 3 つためてからパンチ。体力が減ったら魚
-const casual = (b) => {
-  const e = Core.currentEnemy(b); if (!e) return false;
-  if (b.player.hp < b.player.maxHp * 0.3 && b.items.fish > 0) return Core.useItem(b, 'fish');
-  if (e.state === 'charmed' && b.paw >= 3) return Core.punch(b);
-  return Core.lure(b);
+// 下手: パンチをすぐ離して連打するだけ
+const masher = { press: (b) => Core.punch(b), release: () => true };
+// 溜めない: 猫じゃらしで MAX にして、すぐ離すパンチ
+const tapper = {
+  press(b) {
+    const e = Core.currentEnemy(b); if (!e) return false;
+    if (b.player.hp < b.player.maxHp * 0.3 && b.items.fish > 0) return Core.useItem(b, 'fish');
+    return e.state === 'charmed' ? Core.punch(b) : Core.lure(b);
+  },
+  release: () => true
 };
-// 上手: 振りかぶりに見切り、肉球を満タンにして飛びつきの高いところでパンチ、ねこ侍はスキを狙う
-const skilled = (b) => {
-  const e = Core.currentEnemy(b); if (!e) return false;
-  const k = Core.ENEMY_KINDS[e.kind];
-  if (b.player.hp < b.player.maxHp * 0.35 && b.items.fish > 0) return Core.useItem(b, 'fish');
-  if (e.state === 'windup' && b.cd.lure === 0) return Core.lure(b);
-  if (e.state === 'recover' && e.open) return Core.punch(b);
-  if (e.state === 'charmed') {
-    if (b.paw >= Core.PAW_MAX || e.charm < 0.5) return (Core.atJumpPeak(e) || e.charm < 0.35) ? Core.punch(b) : false;
+// ふつう: 「!」を気にせず猫じゃらしを振り、MAX になったら強パンチまで溜めて離す。体力が減ったら魚
+const casual = {
+  press(b) {
+    const e = Core.currentEnemy(b); if (!e || b.charge.on) return false;
+    if (b.player.hp < b.player.maxHp * 0.3 && b.items.fish > 0) return Core.useItem(b, 'fish');
+    if (e.state === 'charmed') return Core.punchPress(b);
     return Core.lure(b);
-  }
-  if ((e.state === 'idle' || e.state === 'recover') && e.wary <= 0 && (!k.needLook || Core.isLooking(e))) return Core.lure(b);
-  return false;
+  },
+  release(b) { const e = Core.currentEnemy(b); return !e || e.state !== 'charmed' || Core.chargeLevel(b.charge.t) >= 1; }
 };
+// 上手: 「!」のときは振らない。MAX で会心まで溜める。ねこ侍はスキを狙う。
+// カウンターを覚えたら、警戒中は溜めて待ち、攻撃の予告を見てから離す (反応の遅れ 0.15〜0.35 秒)
+const skilled = {
+  press(b) {
+    const e = Core.currentEnemy(b); if (!e || b.charge.on) return false;
+    if (b.player.hp < b.player.maxHp * 0.35 && b.items.fish > 0) return Core.useItem(b, 'fish');
+    if (e.state === 'recover' && e.open) return Core.punch(b);
+    if (e.state === 'charmed') return Core.punchPress(b);
+    if (e.state === 'idle' && !Core.isAlert(e)) return Core.lure(b);
+    if (Core.canCounter(b) && (e.state === 'idle' || e.state === 'knock') && Core.isAlert(e)) return Core.punchPress(b);
+    return false;
+  },
+  release(b) {
+    const e = Core.currentEnemy(b);
+    if (!e) return true;
+    if (e.state === 'charmed') return Core.chargeLevel(b.charge.t) >= 2 || e.charm < 0.1;
+    if (e.state === 'windup') {
+      if (e.react === undefined) e.react = 0.15 + b.rng() * 0.2;
+      return (Core.WINDUP - e.timer) >= e.react && Core.chargeLevel(b.charge.t) >= 1;
+    }
+    e.react = undefined;
+    return !Core.isAlert(e) && e.state === 'idle';
+  }
+};
+
+/** 押してから t 秒たって離す (そのあいだ戦は進む) */
+function hold(b, seconds) {
+  assert.strictEqual(Core.punchPress(b), true, '押せる');
+  for (let i = 0; i < Math.round(seconds * 60); i++) Core.stepBattle(b, 1 / 60);
+  return Core.punchRelease(b);
+}
+function step(b, seconds) {
+  for (let i = 0; i < Math.round(seconds * 60); i++) Core.stepBattle(b, 1 / 60);
+}
 
 test('合戦: 敵は1匹ずつ。数は段位で増え、最後は大将 (最初の戦はのら猫の親分、あとは大きなボス猫)', () => {
   for (const r of [0, 3, 9]) {
@@ -254,146 +287,210 @@ test('合戦: 入ってくる途中の敵には、じゃらしもパンチも当
   assert.strictEqual(b.enemies[0].hp, b.enemies[0].maxHp);
 });
 
-test('合戦: のら猫は猫じゃらしですぐ夢中になり、当たるたびに肉球がたまる', () => {
+test('合戦: のら猫は猫じゃらし2回で夢中 MAX。ゲージは ♡ でたまり、MAX で動けなくなる', () => {
   const { b, e } = duelWith('nora');
+  assert.strictEqual(Core.enemyMood(e), 'none');
+  Core.lure(b);
+  assert.ok(e.muchu > Core.MUCHU_CHASE && e.muchu < Core.MUCHU_MAX, `1回目で半分より上 (${e.muchu})`);
+  assert.strictEqual(e.state, 'idle');
+  assert.strictEqual(Core.enemyMood(e), 'chase', '頭の上は ♡');
+  b.cd.lure = 0;
   Core.lure(b);
   assert.strictEqual(e.state, 'charmed');
-  assert.strictEqual(b.paw, 1);
-  for (let i = 0; i < 6; i++) { b.cd.lure = 0; Core.lure(b); }
-  assert.strictEqual(b.paw, Core.PAW_MAX, '5 で満タン');
+  assert.strictEqual(e.muchu, Core.MUCHU_MAX);
+  assert.strictEqual(Core.enemyMood(e), 'max', '頭の上は肉球 (今だ!)');
+  assert.ok(b.events.some((ev) => ev.type === 'lure' && ev.result === 'max'));
 });
 
-test('合戦: 肉球が満タンになると、それ以上振っても夢中は延びない (振り続けて安全、にならない)', () => {
+test('合戦: 夢中 MAX は決まった長さで切れ、ゲージは減っていく。切れると飽きて警戒する', () => {
   const { b, e } = duelWith('nora');
-  for (let i = 0; i < 5; i++) { b.cd.lure = 0; Core.lure(b); }
-  const left = e.charm;
-  b.cd.lure = 0; Core.lure(b);
-  assert.strictEqual(e.charm, left);
-  assert.ok(b.events.some((ev) => ev.result === 'full'));
-});
-
-test('合戦: 夢中が切れると飽きて、肉球ゲージは消える', () => {
-  const { b, e } = duelWith('nora');
-  Core.lure(b);
-  for (let i = 0; i < 60 * 3; i++) Core.stepBattle(b, 1 / 60);
-  assert.notStrictEqual(e.state, 'charmed');
-  assert.strictEqual(b.paw, 0);
+  Core.useItem(b, 'matatabi');
+  step(b, 2);
+  assert.strictEqual(e.state, 'charmed');
+  assert.ok(e.muchu < Core.MUCHU_MAX && e.muchu > 0, `残り時間に合わせて減る (${Math.round(e.muchu)})`);
+  step(b, 2.1);
+  assert.strictEqual(e.state, 'idle');
+  assert.strictEqual(e.muchu, 0);
   assert.ok(b.events.some((ev) => ev.type === 'bored'));
+  assert.strictEqual(Core.enemyMood(e), 'alert', '飽きたら警戒 (頭の上に「!」)');
 });
 
-test('合戦: 夢中の間は攻撃してこない。夢中でなければ振りかぶってから攻撃する', () => {
-  const { b, e } = duelWith('nora');
+test('合戦: 振るのをやめると、夢中ゲージは少しずつ減る', () => {
+  const { b, e } = duelWith('samurai');
   Core.lure(b);
-  const hp = b.player.hp;
-  for (let i = 0; i < Math.floor(e.charm * 60) - 1; i++) Core.stepBattle(b, 1 / 60);
-  assert.strictEqual(b.player.hp, hp, '夢中の間は無事');
-  let sawWindup = false;
-  for (let i = 0; i < 60 * 4 && b.player.hp === hp; i++) { Core.stepBattle(b, 1 / 60); if (e.state === 'windup') sawWindup = true; }
-  assert.ok(sawWindup && b.player.hp < hp, '夢中が切れると、振りかぶってから攻撃してくる');
+  const g = e.muchu;
+  step(b, 0.8);
+  assert.strictEqual(e.muchu, g, 'すぐには減らない');
+  step(b, 1.2);
+  assert.ok(e.muchu < g, `しばらくすると減る (${g} → ${Math.round(e.muchu)})`);
 });
 
-test('合戦: 夢中の敵へのパンチは、肉球の数だけ大きく効く。満タンなら「猫じゃらしコンボ」', () => {
-  for (const paw of [1, 3, 5]) {
-    const { b, e } = duelWith('nora');
-    for (let i = 0; i < paw; i++) { b.cd.lure = 0; Core.lure(b); }
-    e.age = 0; // 飛びつきの低いところ (会心にしない)
-    const hp = e.hp;
-    Core.punch(b);
-    assert.strictEqual(hp - e.hp, Math.min(hp, Math.round(b.player.atk * Core.comboMul(paw))), `肉球${paw}`);
-    const ev = b.events.find((x) => x.type === 'hit');
-    assert.strictEqual(ev.combo, paw === Core.PAW_MAX);
-    assert.strictEqual(b.paw, 0, 'パンチで肉球は使い切る');
+test('合戦: 羽を追いかけている間 (ゲージ半分以上) は攻撃してこない。ゲージが無ければ振りかぶってから攻撃する', () => {
+  const a = duelWith('samurai');
+  const hp0 = a.b.player.hp;
+  a.e.cd = 0.9; // もうすぐ振りかぶる所から
+  for (let i = 0; i < 60 * 3; i++) {
+    a.e.muchu = 70; a.e.muchuIdle = 0; // 振り続けて、半分より上を保つ
+    Core.stepBattle(a.b, 1 / 60);
   }
-  assert.ok(Core.comboMul(5) > Core.comboMul(4) * 1.4, '満タンは特大');
+  assert.ok(Core.isChasing(a.e));
+  assert.strictEqual(a.b.player.hp, hp0, '追いかけている間は、攻撃の間隔 (1.8秒) を過ぎても殴られない');
+  const c = duelWith('nora');
+  const hp1 = c.b.player.hp;
+  step(c.b, c.e.interval - Core.WINDUP + 0.05);
+  assert.strictEqual(c.e.state, 'windup', '先に振りかぶる (赤い「!」)');
+  assert.strictEqual(Core.enemyMood(c.e), 'attack');
+  step(c.b, Core.WINDUP);
+  assert.ok(c.b.player.hp < hp1, '振りかぶりのあとに殴られる');
 });
 
-test('合戦: 飛びつきの高いところでパンチすると「会心の猫パンチ」(1.5倍)', () => {
-  const { b, e } = duelWith('nora', 0);
+test('合戦: 警戒中 (「!」) の猫じゃらしは効きが小さく、次に振れるまで長い', () => {
+  const { b, e } = duelWith('nora');
+  e.wary = Core.WARY;
+  assert.strictEqual(Core.enemyMood(e), 'alert');
   Core.lure(b);
-  e.age = Core.JUMP_PERIOD * 0.45;
-  assert.strictEqual(Core.atJumpPeak(e), true);
-  e.hp = e.maxHp = 10000;
+  assert.ok(e.muchu > 0 && e.muchu < 20, `少しだけたまる (${e.muchu})`);
+  assert.ok(b.cd.lure > Core.LURE_COOLDOWN, '次に振れるまで長い');
+  assert.ok(b.events.some((ev) => ev.type === 'lure' && ev.result === 'weak'));
+});
+
+test('合戦: 溜めパンチは押している長さで 通常 → 強 → 会心。段が上がると知らせる', () => {
+  const { b, e } = duelWith('nora', 1);
+  e.hp = e.maxHp = 100000;
+  const atk = b.player.atk;
+  let before = e.hp;
+  hold(b, 0.1);
+  assert.strictEqual(before - e.hp, atk, 'すぐ離すと通常パンチ');
+  step(b, 0.5); e.state = 'idle'; e.x = Core.ENEMY_X; e.cd = 99;
+  before = e.hp;
+  Core.punchPress(b);
+  step(b, 0.85);
+  assert.ok(b.events.some((ev) => ev.type === 'charge' && ev.level === 1), '強になったと知らせる');
+  Core.punchRelease(b);
+  assert.strictEqual(before - e.hp, atk * Core.CHARGE_POWER[1]);
+  assert.strictEqual(e.state, 'knock', '強パンチは敵を吹っ飛ばす');
+  step(b, 1); e.state = 'idle'; e.cd = 99;
+  before = e.hp;
+  b.events.length = 0;
+  hold(b, 1.55);
+  assert.ok(b.events.some((ev) => ev.type === 'charge' && ev.level === 2), '会心になったと知らせる (ポン!)');
+  assert.strictEqual(before - e.hp, Math.round(atk * Core.CHARGE_POWER[2]));
+});
+
+test('合戦: 夢中 MAX の敵には大ダメージ。溜めも 2 倍の速さでたまる', () => {
+  const { b, e } = duelWith('nora', 1);
+  e.hp = e.maxHp = 100000;
+  Core.useItem(b, 'matatabi');
+  Core.punchPress(b);
+  step(b, 0.42);
+  assert.strictEqual(Core.chargeLevel(b.charge.t), 1, '0.4 秒で強になる (ふだんは 0.8 秒)');
+  const before = e.hp;
+  Core.punchRelease(b);
+  assert.strictEqual(before - e.hp, Math.round(b.player.atk * Core.CHARGE_POWER[1] * Core.MAX_MUL));
+  assert.strictEqual(e.muchu, 0, '殴られると夢中は解ける');
+  assert.ok(e.wary > 0, 'そのあと警戒する');
+});
+
+test('合戦: 溜めている途中で殴られると、溜めは解ける', () => {
+  const { b, e } = duelWith('nora');
+  Core.punchPress(b);
+  step(b, e.interval + 0.1);
+  assert.ok(b.player.hp < b.player.maxHp);
+  assert.strictEqual(b.charge.on, false);
+  assert.ok(b.events.some((ev) => ev.type === 'chargeBroken'));
+  assert.strictEqual(Core.punchRelease(b), false, '離してもパンチは出ない');
+});
+
+test('合戦: 吹っ飛ばしても敵の攻撃の溜めは止まらない (強パンチを続けて封じ込め、にならない)', () => {
+  const { b, e } = duelWith('nora', 1);
+  e.hp = e.maxHp = 100000;
+  const hp0 = b.player.hp;
+  for (let i = 0; i < 4; i++) { hold(b, 0.85); step(b, Core.PUNCH_COOLDOWN + 0.05); }
+  assert.ok(b.player.hp < hp0, '強パンチを続けていても殴られる');
+});
+
+test('合戦: カウンターは足軽から。溜めたパンチを攻撃の予告に合わせて離すと、攻撃を打ち消して会心', () => {
+  const setup = (r) => {
+    const { b, e } = duelWith('nora', r);
+    e.hp = e.maxHp = 100000;
+    Core.punchPress(b);
+    step(b, e.interval - Core.WINDUP + 0.1); // 溜めながら待つと、振りかぶる
+    assert.strictEqual(e.state, 'windup');
+    return { b, e };
+  };
+  const a = setup(Core.COUNTER_RANK);
+  const hp0 = a.b.player.hp;
+  Core.punchRelease(a.b);
+  assert.ok(a.b.events.some((ev) => ev.type === 'hit' && ev.counter), 'カウンター!');
+  step(a.b, Core.WINDUP);
+  assert.strictEqual(a.b.player.hp, hp0, '攻撃は打ち消された');
+  const n = setup(Core.COUNTER_RANK - 1);
+  const hp1 = n.b.player.hp;
+  Core.punchRelease(n.b);
+  assert.ok(!n.b.events.some((ev) => ev.type === 'hit' && ev.counter), 'まだ覚えていない');
+  step(n.b, Core.WINDUP);
+  assert.ok(n.b.player.hp < hp1);
+  // すぐ離すパンチではカウンターにならない (連打で全部打ち消せてしまうので)
+  const { b, e } = duelWith('nora', Core.COUNTER_RANK);
+  e.hp = e.maxHp = 100000;
+  step(b, e.interval - Core.WINDUP + 0.1);
+  const hp2 = b.player.hp;
   Core.punch(b);
-  const ev = b.events.find((x) => x.type === 'hit');
-  assert.strictEqual(ev.crit, true);
-  assert.strictEqual(ev.amount, Math.round(b.player.atk * Core.comboMul(1) * 1.5));
+  assert.ok(!b.events.some((ev) => ev.type === 'hit' && ev.counter));
+  step(b, Core.WINDUP);
+  assert.ok(b.player.hp < hp2);
 });
 
-test('合戦: 殴られた敵はしばらく警戒して羽に引っかからない。外すと次に振れるまで長い', () => {
-  const { b, e } = duelWith('nora');
-  e.hp = e.maxHp = 10000;
-  Core.lure(b); Core.punch(b);
-  for (let i = 0; i < 60 * 0.7; i++) Core.stepBattle(b, 1 / 60); // 殴られてのけぞる間を過ぎる
-  b.cd.lure = 0;
-  Core.lure(b);
-  assert.ok(b.events.some((ev) => ev.result === 'wary'));
-  assert.ok(b.cd.lure > Core.LURE_COOLDOWN, '外した猫じゃらしは待ち時間が長い');
-  assert.notStrictEqual(e.state, 'charmed');
-});
-
-test('合戦: 振りかぶった瞬間の猫じゃらしは「見切り」。攻撃を止め、肉球が2たまる (警戒中でも効く)', () => {
-  const { b, e } = duelWith('nora');
-  e.wary = 5;
-  while (e.state !== 'windup') Core.stepBattle(b, 1 / 60);
-  const hp = b.player.hp;
-  Core.lure(b);
-  assert.strictEqual(e.state, 'charmed');
-  assert.strictEqual(b.paw, 2);
-  assert.ok(b.events.some((ev) => ev.result === 'perfect'));
-  for (let i = 0; i < 30; i++) Core.stepBattle(b, 1 / 60);
-  assert.strictEqual(b.player.hp, hp, '攻撃は来ない');
-});
-
-test('合戦: すばしっこい猫は、羽を見ているときに振らないとかわす', () => {
+test('合戦: すばしっこい猫は、こちらを見ている間 (「!」) は猫じゃらしが効きにくい', () => {
   const { b, e } = duelWith('quick');
-  e.age = Core.JUMP_PERIOD * 0 + 1.0; // 見ていない所 (0.75〜1.8秒)
-  assert.strictEqual(Core.isLooking(e), false);
+  const alertTimes = [];
+  for (let i = 0; i < 18; i++) { alertTimes.push(Core.isAlert(e)); step(b, 0.1); e.cd = 99; }
+  const n = alertTimes.filter(Boolean).length;
+  assert.ok(n >= 6 && n <= 12, `半分くらいの間こちらを見ている (${n}/18)`);
+  while (!Core.isAlert(e)) step(b, 1 / 60);
   Core.lure(b);
-  assert.ok(b.events.some((ev) => ev.result === 'dodge'));
-  assert.notStrictEqual(e.state, 'charmed');
-  b.cd.lure = 0;
-  e.age = 1.8 + 0.2; // 見ている所
+  assert.ok(e.muchu < 15, '見られているときは効きにくい');
+  e.muchu = 0; b.cd.lure = 0;
+  while (Core.isAlert(e)) step(b, 1 / 60);
   Core.lure(b);
-  assert.strictEqual(e.state, 'charmed');
+  assert.ok(e.muchu > 30, 'よそ見しているときは効く');
 });
 
 test('合戦: ねこ侍は夢中でないときに殴ると受け流して反撃。攻撃のあとのスキに殴ると会心', () => {
   const { b, e } = duelWith('samurai');
-  const hp = b.player.hp;
-  const ehp = e.hp;
+  const hp0 = b.player.hp;
   Core.punch(b);
   assert.ok(b.events.some((ev) => ev.type === 'parry'));
-  assert.ok(b.player.hp < hp, '反撃される');
-  assert.strictEqual(e.hp, ehp, '受け流されて効かない');
-  while (!(e.state === 'recover' && e.open)) Core.stepBattle(b, 1 / 60);
+  assert.strictEqual(e.hp, e.maxHp);
+  assert.ok(b.player.hp < hp0, '反撃される');
   b.cd.punch = 0;
-  const before = e.hp;
+  step(b, e.interval + 0.2);
+  assert.strictEqual(e.state, 'recover');
+  assert.strictEqual(e.open, true, '攻撃のあとはスキ');
   Core.punch(b);
-  assert.strictEqual(before - e.hp, Math.min(before, Math.round(b.player.atk * 2.5)));
   assert.ok(b.events.some((ev) => ev.type === 'hit' && ev.open && ev.crit));
 });
 
-test('合戦: 大きなボス猫は3回振ってやっと夢中。夢中でないとパンチは半分', () => {
+test('合戦: 大きなボス猫は5回振ってやっと MAX。夢中でないとパンチは半分', () => {
   const { b, e } = duelWith('boss');
-  e.hp = e.maxHp = 10000;
-  const results = [];
-  for (let i = 0; i < 3; i++) { b.cd.lure = 0; Core.lure(b); results.push(b.events.filter((ev) => ev.type === 'lure').pop().result); }
-  assert.deepStrictEqual(results, ['resist', 'resist', 'charm']);
+  for (let i = 0; i < 4; i++) { Core.lure(b); b.cd.lure = 0; }
+  assert.strictEqual(e.state, 'idle', '4回ではまだ');
+  Core.lure(b);
+  assert.strictEqual(e.state, 'charmed');
   const { b: b2, e: e2 } = duelWith('boss');
-  e2.hp = e2.maxHp = 10000;
   Core.punch(b2);
-  assert.strictEqual(10000 - e2.hp, Math.round(b2.player.atk * 0.5));
+  assert.strictEqual(e2.maxHp - e2.hp, Math.round(b2.player.atk * 0.5));
 });
 
-test('合戦: 魚で体力が戻り、またたびで敵が夢中になる。持っている数だけ使える', () => {
+test('合戦: 魚で体力が戻り、またたびで敵がすぐ夢中 MAX になる。持っている数だけ使える', () => {
   const { b, e } = duelWith('boss');
   assert.strictEqual(Core.useItem(b, 'fish'), false, '体力が満タンなら魚は使わない');
   b.player.hp = 10;
   assert.strictEqual(Core.useItem(b, 'fish'), true);
   assert.strictEqual(b.player.hp, 10 + Math.round(b.player.maxHp * 0.4));
   assert.strictEqual(Core.useItem(b, 'matatabi'), true);
-  assert.strictEqual(e.state, 'charmed', 'ボス猫でも、またたびなら一発で夢中');
-  assert.strictEqual(b.paw, 2);
+  assert.strictEqual(e.state, 'charmed', 'ボス猫でも、またたびなら一発で MAX');
+  assert.strictEqual(e.muchu, Core.MUCHU_MAX);
   assert.strictEqual(Core.useItem(b, 'matatabi'), false, '1つしか持っていない');
 });
 
@@ -486,21 +583,22 @@ test('合戦のあと: 枠が空いていれば、倒した相手が仲間にな
 });
 
 // 手ごたえの見張り。数字は各段位 30 回ずつ実際に戦わせて測った値をもとに線を引いた
-// (下手: r0 30/30 残75%、r1 以上 0/30。ふつう: 全段位 30/30 残18〜64%。上手: 全段位 30/30)
-test('手ごたえ: パンチだけでは最初の戦しか勝てない。猫じゃらしを使えば全段位で勝てる', () => {
+// (下手: r0 30/30 残67%、r1 以上 0/30。溜めない: r0 30/30、r1・r2 9/30、r3 以上 0/30。
+//  ふつう: 全段位 30/30 残24〜67%。上手: 全段位 30/30)
+test('手ごたえ: パンチ連打は最初の戦だけ。溜めパンチを使えば全段位で勝てる', () => {
   const wins = (r, bot) => {
     let w = 0;
     for (let seed = 1; seed <= 30; seed++) if (runBattle(stateAtRank(r), bot, seed).phase === 'won') w++;
     return w;
   };
   assert.strictEqual(wins(0, masher), 30, '村の子猫はパンチ連打で勝てる');
-  assert.ok(wins(3, masher) <= 3, 'パンチ連打だけでは足軽の戦に勝てない');
+  assert.ok(wins(3, masher) <= 3, 'パンチ連打だけでは足軽の戦に勝てない (連打でカウンターを拾えない)');
+  assert.ok(wins(3, tapper) <= 3, '溜めずに殴るだけでは足軽の戦に勝てない (溜めパンチに意味がある)');
   for (let r = 0; r < Core.RANKS.length; r++) {
     assert.ok(wins(r, casual) >= 26, `ふつうに遊べば勝てる (段位${r})`);
     assert.ok(wins(r, skilled) >= 29, `上手に遊べば勝てる (段位${r})`);
   }
-  // 猫じゃらしを使えば無傷、にならないこと。測った値: 30/30 が殴られる。
-  // 外したときの待ち時間を普通に戻すと 0/30、パンチのあとの警戒を無くすと 21〜27/30 になる
+  // 猫じゃらしを使えば無傷、にならないこと (測った値: どの段位も 30/30 が殴られる)
   for (const r of [1, 4, 8]) {
     let hurt = 0;
     for (let seed = 1; seed <= 30; seed++) {

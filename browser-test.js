@@ -275,11 +275,12 @@ async function run() {
       '敵が出てくると、右上に敵の名前と体力が出る');
     ok(await phone.evaluate(() => window.__app.face() === 'serious'), '戦っている間は真剣な顔');
 
+    // 夢中ゲージ: 1回目で ♡ (追いかける)、2回目で MAX (🐾 今だ!)。のら猫は2回で MAX
+    ok(await phone.evaluate(() => window.__app.mood() === 'none'), 'はじめは頭の上に何も出ていない');
     await phone.locator('#btnLure').tap();
     await phone.waitForTimeout(60);
-    const charmed = await phone.evaluate(() => { const b = window.__app.battle(); return { st: b.enemies[b.current].state, paw: b.paw }; });
-    ok(charmed.st === 'charmed' && charmed.paw === 1, `猫じゃらしを指で押すと、敵が夢中になり肉球が1つたまる (${charmed.st}, ${charmed.paw})`);
-    ok(await phone.evaluate(() => document.querySelectorAll('#pawGauge i.on').length === 1), '下の肉球ゲージに1つ灯る');
+    const g1 = await phone.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; return { st: e.state, muchu: e.muchu, mood: window.__app.mood() }; });
+    ok(g1.st === 'idle' && g1.muchu > 50 && g1.mood === 'chase', `猫じゃらしを指で押すと、夢中ゲージがたまり頭の上に ♡ (${Math.round(g1.muchu)}, ${g1.mood})`);
     const cdOf = () => phone.evaluate(() => parseFloat(document.getElementById('lureCd').style.getPropertyValue('--cd')) || 0);
     const cd1 = await cdOf();
     ok(cd1 > 0.5, `振った直後は、猫じゃらしのボタンに待ち時間の影がかかる (${cd1.toFixed(2)})`);
@@ -288,14 +289,53 @@ async function run() {
     ok(cd2 === 0, `待ち時間が明けると影が消える (${cd2})`);
     await phone.locator('#btnLure').tap();
     await phone.waitForTimeout(60);
-    ok(await phone.evaluate(() => window.__app.battle().paw === 2), '続けて振ると肉球がたまる');
+    const g2 = await phone.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; return { st: e.state, mood: window.__app.mood(), ready: document.getElementById('btnPunch').classList.contains('ready') }; });
+    ok(g2.st === 'charmed' && g2.mood === 'max', `続けて振ると MAX になり、敵が動けなくなる (頭の上は 🐾) (${g2.st}, ${g2.mood})`);
+    ok(g2.ready, 'MAX の間は、猫パンチのボタンが光る');
+    ok(await phone.evaluate(() => document.querySelector('#btnPunch .round-glow').getAnimations().length > 0), '光は点滅している');
 
-    const hp0 = await phone.evaluate(() => { const b = window.__app.battle(); return b.enemies[b.current].hp; });
-    await phone.locator('#btnPunch').tap();
+    // 溜めパンチ: 本物の指のように、押したまま待ってから離す
+    const cdp = await context.newCDPSession(phone);
+    const touchAt = async (sel) => { const r = await phone.locator(sel).boundingBox(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; };
+    const touch = (type, pt) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pt ? [pt] : [] });
+    const pp = await touchAt('#btnPunch');
+    await phone.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; e.hp = e.maxHp = 5000; });
+    ok(await phone.evaluate(() => document.getElementById('chargeLabel').textContent === 'ながおしで ためる'), '溜めゲージに「ながおしで ためる」と出ている');
+    await touch('touchStart', pp);
+    await phone.waitForTimeout(520); // MAX の敵なら 0.4 秒で強になる
+    const holding = await phone.evaluate(() => ({
+      on: window.__app.battle().charge.on,
+      label: document.getElementById('chargeLabel').textContent,
+      fill: document.getElementById('chargeFill').style.transform,
+      lv1: document.getElementById('chargeGauge').classList.contains('lv1')
+    }));
+    ok(holding.on && holding.lv1 && holding.label === '強パンチ!', `押したままにすると溜まり、ゲージが「強パンチ!」になる (${holding.label}, ${holding.fill})`);
+    const before = await phone.evaluate(() => { const b = window.__app.battle(); return { hp: b.enemies[b.current].hp, atk: b.player.atk }; });
+    await touch('touchEnd');
     await phone.waitForTimeout(60);
-    const afterPunch = await phone.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; return { hp: e.hp, paw: b.paw, atk: b.player.atk }; });
-    ok(hp0 - afterPunch.hp >= Math.round(afterPunch.atk * 2.9) && afterPunch.paw === 0,
-      `夢中の敵に猫パンチすると大きく効き、肉球を使い切る (${hp0} → ${afterPunch.hp})`);
+    const afterStrong = await phone.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; return { hp: e.hp, st: e.state, on: b.charge.on }; });
+    ok(!afterStrong.on && before.hp - afterStrong.hp === before.atk * 2 * 3,
+      `離すと強パンチ。MAX の敵には 強(2倍)x MAX(3倍) で効く (${before.hp} → ${afterStrong.hp}、攻撃力 ${before.atk})`);
+    ok(afterStrong.st === 'knock', '強パンチで敵が吹っ飛ぶ');
+
+    // 会心まで溜めると「ポン!」が鳴り、離すと特大猫パンチ (カットイン)
+    await phone.waitForTimeout(700);
+    await phone.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; e.wary = 0; b.items.matatabi = Math.max(1, b.items.matatabi); });
+    await phone.evaluate(() => window.__app.item('matatabi'));
+    const pon0 = await phone.evaluate(() => window.__app.sfx().pon);
+    await touch('touchStart', pp);
+    await phone.waitForTimeout(900); // MAX の敵なら 0.75 秒で会心
+    const full = await phone.evaluate(() => ({ label: document.getElementById('chargeLabel').textContent, pon: window.__app.sfx().pon }));
+    ok(full.label === '会心!' && full.pon === pon0 + 1, `会心まで溜まると「ポン!」が1回鳴る (${full.label}, ${full.pon - pon0}回)`);
+    // 指をボタンの外へずらしてから離しても、パンチは出る (指を捕まえている)
+    await touch('touchMove', { x: pp.x - 200, y: pp.y - 300 });
+    const hpBig = await phone.evaluate(() => { const b = window.__app.battle(); return b.enemies[b.current].hp; });
+    await touch('touchEnd');
+    await phone.waitForTimeout(80);
+    const big = await phone.evaluate(() => { const b = window.__app.battle(); return { hp: b.enemies[b.current].hp, on: b.charge.on, cutin: !document.getElementById('cutin').hidden }; });
+    ok(!big.on && hpBig - big.hp === Math.round(before.atk * 3.5 * 3), `指をずらしてから離しても、特大猫パンチが出る (${hpBig} → ${big.hp})`);
+    ok(big.cutin, '特大猫パンチでカットインが出る');
+    await phone.waitForTimeout(1100);
 
     // アイテム: 魚で体力が戻る
     await phone.evaluate(() => { window.__app.battle().player.hp = 10; });
@@ -514,7 +554,7 @@ async function run() {
       await lp.waitForFunction(() => { const b = window.__app.battle(); const e = b && b.enemies[b.current]; return e && e.state === 'idle'; }, null, { timeout: 8000 });
       await lp.waitForTimeout(100);
       const R = {};
-      for (const [k, q] of Object.entries({ player: '.unit-player', enemy: '#enemyUnit', pause: '#btnPause', mission: '#mission', paw: '#pawGauge', item: '#btnItem', lure: '#btnLure', punch: '#btnPunch' })) R[k] = await rectOf(q);
+      for (const [k, q] of Object.entries({ player: '.unit-player', enemy: '#enemyUnit', pause: '#btnPause', mission: '#mission', charge: '#chargeGauge', item: '#btnItem', lure: '#btnLure', punch: '#btnPunch' })) R[k] = await rectOf(q);
       ok(R.lure.left >= tab.right && R.lure.bottom <= LH - SAFE.b && R.punch.right <= LW - SAFE.r && R.punch.bottom <= LH - SAFE.b && R.pause.right <= LW - SAFE.r,
         '猫じゃらし・猫パンチ・一時停止は安全域の内側 (角の丸みや指の帯にかからない)');
       const names = Object.keys(R);
@@ -531,11 +571,11 @@ async function run() {
       ok(L.heroX - L.heroHalf > R.lure.right - fl && L.enemyX < R.punch.left - fl, `自分と敵は、左右のボタンの間に立つ (自分 ${Math.round(L.heroX)} / 敵 ${Math.round(L.enemyX)})`);
       ok(L.ground <= R.lure.bottom - fl * 0 && L.ground > LH * 0.75, `足もとは画面の下の方、ボタンの下端より上 (${L.ground})`);
       // 敵の頭の上には「会心の猫パンチ!」「バシッ!」が出る。上に重ねた札がそこを隠さないこと
-      // (肉球ゲージを右上に置いたら、会心の字がゲージの下に隠れた)
+      // (前の肉球ゲージを右上に置いたら、会心の字がゲージの下に隠れた。いまの溜めゲージは猫パンチの上)
       {
         const top = L.ground - 150 * L.s - 70 * L.s - 24;
         const pop = { left: fl + L.enemyX - 100, right: fl + L.enemyX + 100, top: top, bottom: L.ground };
-        const cover = ['paw', 'mission', 'item', 'player'].filter((k) => { const a = R[k]; return a.left < pop.right && pop.left < a.right && a.top < pop.bottom && pop.top < a.bottom; });
+        const cover = ['charge', 'mission', 'item', 'player'].filter((k) => { const a = R[k]; return a.left < pop.right && pop.left < a.right && a.top < pop.bottom && pop.top < a.bottom; });
         ok(cover.length === 0, `敵の頭の上 (当たったときの字が出る所) を、札が隠さない${cover.length ? ' (' + cover.join(',') + ')' : ''}`);
       }
       ok(L.enterLeft >= L.w, `敵は画面の右の外から歩いてくる (出だしの左端 ${Math.round(L.enterLeft)} ≥ 幅 ${L.w})`);
@@ -546,7 +586,7 @@ async function run() {
       // 猫じゃらしとパンチを指で押す
       await lp.locator('#btnLure').tap();
       await lp.waitForTimeout(60);
-      ok(await lp.evaluate(() => window.__app.battle().paw === 1), '横でも猫じゃらしを指で押せる (肉球が1つたまる)');
+      ok(await lp.evaluate(() => { const b = window.__app.battle(); return b.enemies[b.current].muchu > 0; }), '横でも猫じゃらしを指で押せる (夢中ゲージがたまる)');
       const hp0 = await lp.evaluate(() => { const b = window.__app.battle(); return b.enemies[b.current].hp; });
       await lp.locator('#btnPunch').tap();
       await lp.waitForTimeout(60);
@@ -580,7 +620,6 @@ async function run() {
       await lp.waitForFunction(() => !document.getElementById('resultPanel').hidden, null, { timeout: 8000 });
       const rp = await rectOf('#resultPanel');
       ok(inside(rp) && rp.left > L.heroX + fl, `勝利の札は画面に収まり、自分の姿を隠さないよう右に寄る (左端 ${Math.round(rp.left)})`);
-      ok(await lp.evaluate(() => getComputedStyle(document.getElementById('pawGauge')).visibility === 'hidden'), '敵がいない間は肉球ゲージを隠す');
       const pz = await rectOf('#btnPause');
       ok(Math.abs(pz.right - (LW - SAFE.r - 8)) <= 1, `敵の札が消えても、一時停止は右上に残る (右端 ${Math.round(pz.right)})`);
       if (await lp.evaluate(() => !document.getElementById('rankModal').hidden)) {

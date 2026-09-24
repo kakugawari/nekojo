@@ -482,32 +482,64 @@ img { -webkit-user-drag: none; }
   font-size: 11px;
   line-height: 16px;
 }
-.paw-gauge {
+.charge-gauge {
+  position: relative;
   align-self: end;
   margin-bottom: 42px;
   height: 30px;
-  padding: 3px 6px;
   border-radius: 999px;
   background: linear-gradient(rgba(30,26,40,.88), rgba(20,18,30,.88));
   border: 2px solid var(--gold);
+  overflow: hidden;
+  pointer-events: none;
+}
+/* 溜めた量。transform だけで伸ばす (塗り直しが要らず、遅い端末でも軽い) */
+.charge-fill {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  will-change: transform;
+  background: linear-gradient(90deg, #ffe9a8, #ffb347);
+}
+.charge-gauge.lv1 .charge-fill { background: linear-gradient(90deg, #ffd166, #ff8a3a); }
+.charge-gauge.lv2 .charge-fill { background: linear-gradient(90deg, #ffe27a, #ff5f9e, #c9a6ff); }
+.charge-gauge.lv2 { box-shadow: 0 0 0 2px #fff, 0 0 16px 5px rgba(255,226,122,.9); }
+/* 「強」になる所 (0.8 / 1.5 秒) の印 */
+.charge-tick { position: absolute; left: 53.3%; top: 3px; bottom: 3px; width: 2px; background: rgba(255,255,255,.55); }
+.charge-gauge:not(.on) .charge-tick { opacity: 0; }
+.charge-label {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 2px;
+  justify-content: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  -webkit-text-stroke: 3px #3a2a1c;
+  paint-order: stroke fill;
 }
-.paw-gauge i {
-  flex: 1 1 0;
-  height: 20px;
-  font-style: normal;
-  font-size: 14px;
-  line-height: 20px;
-  text-align: center;
-  opacity: .28;
-  filter: grayscale(1);
+
+/* 夢中 MAX の間、猫パンチのボタンが光る (今だ!)。光は opacity だけで点滅させる (塗り直しが要らない) */
+.round-glow {
+  position: absolute;
+  left: 4px;
+  top: 0;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px #fff, 0 0 26px 12px rgba(255,226,122,.95);
+  opacity: 0;
+  will-change: opacity;
+  pointer-events: none;
 }
-.paw-gauge i::after { content: "🐾"; }
-.paw-gauge i.on { opacity: 1; filter: none; }
-.paw-gauge.full { box-shadow: 0 0 0 2px #fff, 0 0 16px 5px rgba(255,226,122,.9); }
+.punch-btn.ready .round-glow { animation: punch-ready .5s ease-in-out infinite alternate; }
+@keyframes punch-ready { from { opacity: .3; } to { opacity: 1; } }
+.punch-btn.charging .round-face { transform: scale(.92); }
+.punch-btn { -webkit-touch-callout: none; touch-action: none; }
 
 .item-menu {
   position: absolute;
@@ -808,8 +840,9 @@ img { -webkit-user-drag: none; }
   .item-btn { left: 31px; bottom: calc(140px + var(--safe-b)); margin: 0; }
   /* 肉球ゲージは左上、お題の下。右上に置くと、敵の上に出る「会心の猫パンチ!」の字を隠した。
      戦っていない間 (敵が出ていない間) は隠す */
-  .paw-gauge { left: 14px; top: calc(122px + var(--safe-t)); width: 190px; margin: 0; }
-  .paw-gauge.idle { visibility: hidden; }
+  /* 溜めゲージは猫パンチの上。敵の頭の上 (当たったときの字が出る所) にかからない幅にする */
+  .charge-gauge { right: calc(8px + var(--safe-r)); bottom: calc(140px + var(--safe-b)); width: 88px; height: 40px; border-radius: 14px; margin: 0; }
+  .charge-label { white-space: normal; line-height: 1.1; padding: 0 8px; text-align: center; font-size: 11px; }
   .item-menu { left: 102px; bottom: calc(96px + var(--safe-b)); }
   .field-banner { top: 30%; }
   /* 札は右寄せ (真ん中だと、左に立つ自分の姿に重なる) */

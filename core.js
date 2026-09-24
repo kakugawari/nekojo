@@ -217,27 +217,39 @@
   const ENTER_X = SCENE_W + 40;
   const ENTER_TIME = 1.2;
   const DOWN_TIME = 1.3;
-  const WINDUP = 0.6;
-  const RECOVER = 0.6;
+  const WINDUP = 0.6;              // 攻撃の予告 (頭の上に赤い「!」)。覚えていれば、この間に溜めパンチを離すとカウンター
+  const RECOVER = 0.6;             // 敵が攻撃したあとの戻り
   const LURE_COOLDOWN = 0.45;
+  const LURE_MISS_COOLDOWN = 1.2;  // 効きの小さかった猫じゃらしは、次に振れるまで長い (連打で押し切れないように)
   const PUNCH_COOLDOWN = 0.4;
-  const PAW_MAX = 5;
-  const JUMP_PERIOD = 0.9;
-  const JUMP_PEAK = [0.3, 0.62];   // 飛びつきの 1 回のうち、高いところ (会心になる所) の割合
+  // 夢中ゲージ: 猫じゃらしでたまり、MAX で敵は動けなくなる。振るのをやめると少しずつ減る
+  const MUCHU_MAX = 100;
+  const MUCHU_CHASE = 50;          // ここまでたまると羽を追いかけていて、攻撃してこない
+  const MUCHU_HOLD = 1.0;          // 振るのをやめてから、減りはじめるまで
+  const MUCHU_DECAY = 30;          // 1 秒に減る量
+  const WEAK_LURE = 0.25;          // 警戒中 (頭の上に「!」) の猫じゃらしの効き
+  const WARY = 1.8;                // 殴られた・夢中が解けた敵は、しばらく警戒する
   const LOOK_PERIOD = 1.8;
-  const LOOK_OPEN = 0.75;          // すばしっこい猫が羽を見ている長さ
-  const WARY = 1.8;                // 殴られた敵は、しばらく羽に引っかからない (振りかぶりの見切りだけは効く)
-  const LURE_MISS_COOLDOWN = 1.2;  // 外した猫じゃらしは、次に振れるまで長い (連打で見切りを拾えないように)
+  const LOOK_ALERT = 0.9;          // すばしっこい猫がこちらを見ている (警戒している) 長さ
+  // 溜めパンチ: 押している長さで 通常 → 強 → 会心。夢中 MAX の敵が相手だと 2 倍の速さで溜まる
+  const CHARGE_LEVELS = [0, 0.8, 1.5];
+  const CHARGE_POWER = [1, 2, 3.5];
+  const MAX_MUL = 3;               // 夢中 MAX の敵に当てたとき
+  const COUNTER_MUL = 2.5;         // カウンター (攻撃の予告にパンチを当てる)
+  const OPEN_MUL = 2.5;            // ねこ侍の攻撃のあとのスキ
+  const COUNTER_RANK = 3;          // 足軽になるとカウンターを覚える
+  const KNOCK_TIME = [0.3, 0.55, 0.9];
+  const KNOCK_DIST = [10, 45, 90];
 
   const ENEMY_KINDS = {
-    nora: { name: 'のら猫', look: 'cat-chatora', hp: 1.0, atk: 1.0, interval: 2.0, charm: 2.2 },
-    quick: { name: 'すばしっこい猫', look: 'cat-gray', hp: 0.8, atk: 0.9, interval: 1.5, charm: 1.6, needLook: true },
-    samurai: { name: 'ねこ侍', look: 'cat-kuro', hp: 1.3, atk: 1.3, interval: 1.8, charm: 1.2, parry: true, open: 1.0 },
-    boss: { name: '大きなボス猫', look: 'cat-red', hp: 3.0, atk: 1.5, interval: 2.2, charm: 2.4, lureNeed: 3, armor: 0.5, boss: true }
+    nora: { name: 'のら猫', look: 'cat-chatora', hp: 1.0, atk: 1.0, interval: 2.0, lures: 2, maxTime: 2.6 },
+    quick: { name: 'すばしっこい猫', look: 'cat-gray', hp: 0.8, atk: 0.9, interval: 1.5, lures: 3, maxTime: 2.0, glance: true },
+    samurai: { name: 'ねこ侍', look: 'cat-kuro', hp: 1.3, atk: 1.3, interval: 1.8, lures: 3, maxTime: 1.8, parry: true, open: 1.0 },
+    boss: { name: '大きなボス猫', look: 'cat-red', hp: 3.0, atk: 1.5, interval: 2.2, lures: 5, maxTime: 2.4, armor: 0.5, boss: true }
   };
   const ITEM_KINDS = {
     fish: { name: '魚', effect: '体力を 40% 回復' },
-    matatabi: { name: 'またたび', effect: '敵を 4 秒夢中にして、肉球 +2' }
+    matatabi: { name: 'またたび', effect: '敵の夢中ゲージがすぐ MAX (4 秒)' }
   };
 
   function playerMaxHp(rankIndex) { return 60 + 12 * rankIndex; }
@@ -248,7 +260,9 @@
   }
   function allyDamage(level) { return 2 + 2 * level; }
   function allyInterval(level) { return Math.max(1.2, 2.6 - 0.12 * level); }
-  function comboMul(paw) { return 1.5 + 0.7 * paw + (paw >= PAW_MAX ? 1.5 : 0); }
+  /** 押していた長さ → 溜めの段 (0 通常 / 1 強 / 2 会心) */
+  function chargeLevel(t) { return t >= CHARGE_LEVELS[2] ? 2 : (t >= CHARGE_LEVELS[1] ? 1 : 0); }
+  function canCounter(b) { return b.rank >= COUNTER_RANK; }
 
   function enemyPool(rankIndex) {
     if (rankIndex < 1) return ['nora'];
@@ -279,7 +293,8 @@
       enemies.push({
         id: i + 1, kind: kind, look: k.look, name: leader && !k.boss ? k.name + 'の親分' : k.name, boss: leader,
         hp: hp, maxHp: hp, atk: Math.round(baseAtk * k.atk), interval: k.interval,
-        state: 'wait', timer: 0, cd: k.interval, charm: 0, lureCount: 0, age: 0, wary: 0, x: ENTER_X,
+        state: 'wait', timer: 0, cd: k.interval, age: 0, x: ENTER_X,
+        muchu: 0, muchuIdle: 0, charm: 0, charmTime: 0, wary: 0, knockTime: 0, knockDist: 0, open: false,
         alive: true, reward: Math.round(enemyReward(r, leader) * fx.meritMul)
       });
     }
@@ -292,7 +307,7 @@
       player: { x: PLAYER_X, hp: maxHp, maxHp: maxHp, atk: Math.round(playerAtk(r) * fx.atkMul) },
       enemies: enemies, current: 0, allies: allies,
       cd: { lure: 0, punch: 0 },
-      paw: 0,
+      charge: { on: false, t: 0 },
       items: { fish: items.fish || 0, matatabi: items.matatabi || 0 },
       used: { fish: 0, matatabi: 0 },
       merit: 0, bonus: 0, materials: 0, loot: { fish: 0, matatabi: 0 },
@@ -313,20 +328,27 @@
     e.state = 'enter';
     e.timer = ENTER_TIME;
     e.x = ENTER_X;
-    b.paw = 0;
     b.events.push({ type: 'enter', id: e.id, boss: e.boss });
   }
 
-  /** 夢中の敵が羽に飛びついて、いちばん高いところにいるか (会心になる所) */
-  function atJumpPeak(e) {
-    if (e.state !== 'charmed') return false;
-    const ph = (e.age % JUMP_PERIOD) / JUMP_PERIOD;
-    return ph >= JUMP_PEAK[0] && ph <= JUMP_PEAK[1];
+  /** 警戒している (頭の上に「!」。猫じゃらしが効きにくい) */
+  function isAlert(e) {
+    if (e.state === 'windup' || e.wary > 0) return true;
+    if (ENEMY_KINDS[e.kind].glance && e.state === 'idle' && e.muchu < MUCHU_CHASE) return (e.age % LOOK_PERIOD) < LOOK_ALERT;
+    return false;
   }
-
-  /** すばしっこい猫が羽を見ているか */
-  function isLooking(e) {
-    return (e.age % LOOK_PERIOD) < LOOK_OPEN;
+  /** 羽を追いかけていて、攻撃してこない */
+  function isChasing(e) {
+    return e.state === 'idle' && e.muchu >= MUCHU_CHASE && !isAlert(e);
+  }
+  /** 敵の頭の上のしるし: alert「!」/ attack 赤い「!」/ chase「♡」/ max 肉球 / none */
+  function enemyMood(e) {
+    if (!e || !e.alive || e.state === 'enter' || e.state === 'wait') return 'none';
+    if (e.state === 'charmed') return 'max';
+    if (e.state === 'windup') return 'attack';
+    if (isAlert(e)) return 'alert';
+    if (e.muchu > 0) return 'chase';
+    return 'none';
   }
 
   function hurtEnemy(b, e, amount, source, extra) {
@@ -336,8 +358,8 @@
       e.alive = false;
       e.state = 'down';
       e.timer = DOWN_TIME;
+      e.muchu = 0;
       e.charm = 0;
-      b.paw = 0;
       b.merit += e.reward;
       b.events.push({ type: 'down', id: e.id, reward: e.reward, boss: e.boss });
     }
@@ -346,12 +368,18 @@
   function hurtPlayer(b, amount, id) {
     b.player.hp = Math.max(0, b.player.hp - amount);
     b.events.push({ type: 'playerHit', id: id, amount: amount });
+    if (b.charge.on) {
+      // 殴られると溜めが解ける (溜めている間も敵は待ってくれない)
+      b.charge = { on: false, t: 0 };
+      b.events.push({ type: 'chargeBroken' });
+    }
   }
 
   function finish(b) {
     if (b.phase !== 'fight') return;
     if (b.player.hp <= 0) {
       b.phase = 'lost';
+      b.charge = { on: false, t: 0 };
       b.events.push({ type: 'lost' });
       return;
     }
@@ -359,6 +387,7 @@
       const last = b.enemies[b.enemies.length - 1];
       if (last.state === 'down' && last.timer > 0) return; // 倒れる様子を見せてから終わる
       b.phase = 'won';
+      b.charge = { on: false, t: 0 };
       b.bonus = Math.round(b.merit * 0.3);
       b.materials = Math.round((b.merit + b.bonus) / 4);
       const random = b.rng || Math.random;
@@ -379,6 +408,10 @@
     if (e) {
       e.age += dt;
       e.wary = Math.max(0, e.wary - dt);
+      if (e.state !== 'charmed' && e.state !== 'down') {
+        e.muchuIdle += dt;
+        if (e.muchuIdle > MUCHU_HOLD) e.muchu = Math.max(0, e.muchu - MUCHU_DECAY * dt);
+      }
       if (e.state === 'down') {
         e.timer -= dt;
         if (e.timer <= 0) {
@@ -389,20 +422,28 @@
         e.x = ENEMY_X + (ENTER_X - ENEMY_X) * Math.max(0, e.timer / ENTER_TIME);
         if (e.timer <= 0) { e.state = 'idle'; e.x = ENEMY_X; e.cd = e.interval; }
       } else if (e.state === 'charmed') {
+        // 夢中 MAX: 動けない。ゲージは残り時間に合わせて減っていく
         e.charm -= dt;
+        e.muchu = MUCHU_MAX * Math.max(0, e.charm / e.charmTime);
         if (e.charm <= 0) {
           e.charm = 0;
+          e.muchu = 0;
           e.state = 'idle';
           e.cd = e.interval;
-          e.lureCount = 0;
-          if (b.paw > 0) b.events.push({ type: 'bored', id: e.id }); // 飽きた。ゲージは消える
-          b.paw = 0;
+          e.wary = WARY;
+          b.events.push({ type: 'bored', id: e.id }); // 飽きた
         }
+      } else if (e.state === 'knock') {
+        // 吹っ飛んで戻ってくる。その間も攻撃の溜めは進む (連続で吹っ飛ばして封じ込め、にならないように)
+        e.timer -= dt;
+        e.cd -= dt;
+        e.x = ENEMY_X + e.knockDist * Math.sin(Math.PI * Math.max(0, e.timer) / e.knockTime * 0.5);
+        if (e.timer <= 0) { e.state = 'idle'; e.x = ENEMY_X; }
       } else if (e.state === 'recover') {
         e.timer -= dt;
-        if (e.timer <= 0) { e.state = 'idle'; e.cd = e.interval; }
+        if (e.timer <= 0) { e.state = 'idle'; e.open = false; }
       } else if (e.state === 'idle') {
-        e.cd -= dt;
+        if (!isChasing(e)) e.cd -= dt;
         if (e.cd <= WINDUP) {
           e.state = 'windup';
           e.timer = WINDUP;
@@ -415,10 +456,20 @@
           const k = ENEMY_KINDS[e.kind];
           e.state = 'recover';
           e.timer = k.open || RECOVER;
+          e.cd = e.interval;
           e.open = !!k.open; // ねこ侍は攻撃のあとにスキができる
           if (e.open) b.events.push({ type: 'open', id: e.id });
         }
       }
+    }
+
+    // 溜め。夢中 MAX の敵が相手なら 2 倍の速さ
+    if (b.charge.on) {
+      const before = chargeLevel(b.charge.t);
+      const tgt = currentEnemy(b);
+      b.charge.t += dt * (tgt && tgt.state === 'charmed' ? 2 : 1);
+      const lv = chargeLevel(b.charge.t);
+      if (lv > before) b.events.push({ type: 'charge', level: lv });
     }
 
     // 出陣の家臣は、戦える敵がいれば少しずつ攻撃する (夢中は解けない)
@@ -439,11 +490,13 @@
     return b;
   }
 
-  function charm(b, e, seconds, pawGain) {
+  /** 夢中 MAX にする (動けなくなる) */
+  function toMax(e, seconds) {
     e.state = 'charmed';
-    e.charm = Math.max(e.charm, seconds);
+    e.charm = e.charmTime = seconds;
+    e.muchu = MUCHU_MAX;
     e.open = false;
-    b.paw = Math.min(PAW_MAX, b.paw + pawGain);
+    e.wary = 0;
   }
 
   function lure(b) {
@@ -454,76 +507,101 @@
       b.events.push({ type: 'lure', result: 'miss' });
       return true;
     }
-    const k = ENEMY_KINDS[e.kind];
-    const perfect = e.state === 'windup';
-    let result;
     if (e.state === 'charmed') {
-      if (b.paw >= PAW_MAX) {
-        result = 'full'; // もう満タン。夢中は延びない
-      } else {
-        charm(b, e, k.charm, 1);
-        result = 'charm';
-      }
-    } else if (e.wary > 0 && !perfect) {
-      result = 'wary';            // 殴られたばかりで警戒している
-      b.cd.lure = LURE_MISS_COOLDOWN;
-    } else if (k.needLook && !perfect && !isLooking(e)) {
-      result = 'dodge';           // すばしっこい猫が、ひらりとかわす
-      b.cd.lure = LURE_MISS_COOLDOWN;
-      e.cd = Math.max(WINDUP + 0.05, e.cd - 0.5);
-    } else if (k.lureNeed && !perfect && e.lureCount + 1 < k.lureNeed) {
-      e.lureCount++;
-      b.paw = Math.min(PAW_MAX, b.paw + 1);
-      result = 'resist';          // 大きなボス猫は何回か振らないと夢中にならない
-    } else {
-      charm(b, e, k.charm + (perfect ? 1.0 : 0), perfect ? 2 : 1);
-      result = perfect ? 'perfect' : 'charm';
-    }
-    b.events.push({ type: 'lure', result: result, id: e.id, paw: b.paw, lureCount: e.lureCount });
-    return true;
-  }
-
-  function punch(b) {
-    if (b.phase !== 'fight' || b.cd.punch > 0) return false;
-    b.cd.punch = PUNCH_COOLDOWN;
-    const e = currentEnemy(b);
-    if (!e || e.state === 'enter' || e.state === 'down') {
-      b.events.push({ type: 'miss' });
+      b.events.push({ type: 'lure', result: 'full', id: e.id, muchu: e.muchu }); // もう MAX。延びない
       return true;
     }
     const k = ENEMY_KINDS[e.kind];
-    const atk = b.player.atk;
+    const alert = isAlert(e);
+    let gain = MUCHU_MAX / k.lures + 1;
+    if (alert) {
+      gain *= WEAK_LURE;          // こちらを見ている。効きが小さい
+      b.cd.lure = LURE_MISS_COOLDOWN;
+    }
+    e.muchu = Math.min(MUCHU_MAX, e.muchu + gain);
+    e.muchuIdle = 0;
+    let result = alert ? 'weak' : 'charm';
+    if (e.muchu >= MUCHU_MAX) {
+      toMax(e, k.maxTime);
+      result = 'max';
+    }
+    b.events.push({ type: 'lure', result: result, id: e.id, muchu: e.muchu });
+    return true;
+  }
+
+  /** パンチを押しはじめる (溜めはじめ) */
+  function punchPress(b) {
+    if (b.phase !== 'fight' || b.cd.punch > 0 || b.charge.on) return false;
+    b.charge = { on: true, t: 0 };
+    b.events.push({ type: 'chargeStart' });
+    return true;
+  }
+
+  /** パンチを離す。押していた長さで強さが決まる */
+  function punchRelease(b) {
+    if (!b.charge.on) return false;
+    const level = chargeLevel(b.charge.t);
+    b.charge = { on: false, t: 0 };
+    if (b.phase !== 'fight') return false;
+    strike(b, level);
+    return true;
+  }
+
+  /** すぐ離すパンチ (通常) */
+  function punch(b) {
+    if (!punchPress(b)) return false;
+    return punchRelease(b);
+  }
+
+  function knock(e, level) {
+    e.state = 'knock';
+    e.timer = e.knockTime = KNOCK_TIME[level];
+    e.knockDist = KNOCK_DIST[level];
+  }
+
+  function strike(b, level) {
+    b.cd.punch = PUNCH_COOLDOWN;
+    const e = currentEnemy(b);
+    if (!e || e.state === 'enter' || e.state === 'down') {
+      b.events.push({ type: 'miss', level: level });
+      return;
+    }
+    const k = ENEMY_KINDS[e.kind];
+    const pow = b.player.atk * CHARGE_POWER[level];
     if (e.state === 'charmed') {
-      const full = b.paw >= PAW_MAX;
-      const crit = atJumpPeak(e);
-      const amount = Math.round(atk * comboMul(b.paw) * (crit ? 1.5 : 1));
-      const paw = b.paw;
-      b.paw = 0;
-      e.state = 'recover';
-      e.timer = RECOVER;
+      // 夢中 MAX の敵に当てる: 大ダメージ。溜めていれば吹っ飛ぶ
       e.charm = 0;
-      e.lureCount = 0;
-      e.open = false;
+      e.muchu = 0;
       e.wary = WARY;
       e.cd = e.interval;
-      hurtEnemy(b, e, amount, 'punch', { crit: crit, combo: full, paw: paw });
+      knock(e, level);
+      hurtEnemy(b, e, Math.round(pow * MAX_MUL), 'punch', { level: level, max: true, crit: level === 2 });
+    } else if (e.state === 'windup' && canCounter(b) && level >= 1) {
+      // カウンター: 溜めておいたパンチを、攻撃の予告 (赤い「!」) に合わせて離す。攻撃を打ち消して会心。
+      // すぐ離すパンチでは起きない (連打しているだけで全部の攻撃を打ち消せてしまうので)
+      e.muchu = 0;
+      e.wary = WARY;
+      e.cd = e.interval;
+      knock(e, Math.max(1, level));
+      hurtEnemy(b, e, Math.round(pow * COUNTER_MUL), 'punch', { level: level, counter: true, crit: true });
     } else if (e.state === 'recover' && e.open) {
       e.open = false;
-      e.state = 'recover';
-      e.timer = RECOVER;
       e.wary = WARY;
-      hurtEnemy(b, e, Math.round(atk * 2.5), 'punch', { crit: true, open: true });
+      knock(e, level);
+      hurtEnemy(b, e, Math.round(pow * OPEN_MUL), 'punch', { level: level, open: true, crit: true });
     } else if (k.parry) {
       // ねこ侍: 受け流して、すぐ反撃
-      b.events.push({ type: 'parry', id: e.id });
+      b.events.push({ type: 'parry', id: e.id, level: level });
+      e.muchu = 0;
       hurtPlayer(b, Math.round(e.atk * 0.7), e.id);
-      e.state = 'idle';
-      e.cd = e.interval;
     } else {
-      hurtEnemy(b, e, Math.round(atk * (k.armor || 1)), 'punch', { armor: !!k.armor });
+      // ふつうに殴る。溜めていれば吹っ飛ぶ (攻撃の溜めは止まらない)
+      e.muchu = 0;
+      e.wary = WARY;
+      if (level > 0 && e.state !== 'windup') knock(e, level);
+      hurtEnemy(b, e, Math.round(pow * (k.armor || 1)), 'punch', { level: level, armor: !!k.armor });
     }
     finish(b);
-    return true;
   }
 
   function useItem(b, kind) {
@@ -538,8 +616,8 @@
       b.player.hp = Math.min(b.player.maxHp, b.player.hp + heal);
       b.events.push({ type: 'item', item: kind, amount: heal });
     } else {
-      charm(b, e, 4, 2);
-      b.events.push({ type: 'item', item: kind, id: e.id, paw: b.paw });
+      toMax(e, 4);
+      b.events.push({ type: 'item', item: kind, id: e.id });
     }
     return true;
   }
@@ -875,23 +953,32 @@
     WINDUP: WINDUP,
     LURE_COOLDOWN: LURE_COOLDOWN,
     PUNCH_COOLDOWN: PUNCH_COOLDOWN,
-    PAW_MAX: PAW_MAX,
     WARY: WARY,
-    JUMP_PERIOD: JUMP_PERIOD,
+    MUCHU_MAX: MUCHU_MAX,
+    MUCHU_CHASE: MUCHU_CHASE,
+    CHARGE_LEVELS: CHARGE_LEVELS,
+    CHARGE_POWER: CHARGE_POWER,
+    MAX_MUL: MAX_MUL,
+    COUNTER_MUL: COUNTER_MUL,
+    COUNTER_RANK: COUNTER_RANK,
     ENEMY_KINDS: ENEMY_KINDS,
     ITEM_KINDS: ITEM_KINDS,
     playerMaxHp: playerMaxHp,
     playerAtk: playerAtk,
     enemyReward: enemyReward,
-    comboMul: comboMul,
     battleSize: battleSize,
+    chargeLevel: chargeLevel,
+    canCounter: canCounter,
     createBattle: createBattle,
     stepBattle: stepBattle,
     currentEnemy: currentEnemy,
-    atJumpPeak: atJumpPeak,
-    isLooking: isLooking,
+    isAlert: isAlert,
+    isChasing: isChasing,
+    enemyMood: enemyMood,
     lure: lure,
     punch: punch,
+    punchPress: punchPress,
+    punchRelease: punchRelease,
     useItem: useItem,
     rollRecruitOffer: rollRecruitOffer,
     applyBattleResult: applyBattleResult,

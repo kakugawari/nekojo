@@ -83,7 +83,7 @@
 
       <div class="item-menu" id="itemMenu" hidden>
         <button type="button" class="item-choice" id="btnFish"><span class="item-icon">🐟</span><span class="item-name">魚</span><span class="item-note">体力が戻る</span><b class="item-count" id="fishCount">×0</b></button>
-        <button type="button" class="item-choice" id="btnMatatabi"><span class="item-icon">🌿</span><span class="item-name">またたび</span><span class="item-note">敵がしばらく夢中</span><b class="item-count" id="matatabiCount">×0</b></button>
+        <button type="button" class="item-choice" id="btnMatatabi"><span class="item-icon">🌿</span><span class="item-name">またたび</span><span class="item-note">敵がすぐ夢中 MAX</span><b class="item-count" id="matatabiCount">×0</b></button>
       </div>
 
       <div class="controls">
@@ -109,10 +109,14 @@
           <span>アイテム</span>
           <b class="item-badge" id="itemBadge">3</b>
         </button>
-        <div class="paw-gauge" id="pawGauge" aria-label="肉球ゲージ">
-          <i></i><i></i><i></i><i></i><i></i>
+        <!-- 溜めゲージ: パンチを押している長さ。印は「強」(0.8秒) の所 -->
+        <div class="charge-gauge" id="chargeGauge" aria-label="溜めゲージ">
+          <i class="charge-fill" id="chargeFill"></i>
+          <b class="charge-tick"></b>
+          <span class="charge-label" id="chargeLabel">ながおしで ためる</span>
         </div>
-        <button type="button" class="round-btn punch-btn" id="btnPunch" aria-label="猫パンチ">
+        <button type="button" class="round-btn punch-btn" id="btnPunch" aria-label="猫パンチ (ながおしで ためる)">
+          <span class="round-glow"></span>
           <span class="round-face">
             <svg viewBox="0 0 64 64" aria-hidden="true">
               <ellipse cx="32" cy="40" rx="14" ry="12" fill="#7a4a1c"/>
@@ -196,7 +200,7 @@
 <div class="cutin" id="cutin" hidden>
   <div class="cutin-band"></div>
   <img class="cutin-art" src="./img/pose-special.png" alt="">
-  <div class="cutin-text">猫じゃらし<br>コンボ!</div>
+  <div class="cutin-text">特大<br>猫パンチ!</div>
 </div>
 
 <!-- ================================================= 物語・出世 -->
