@@ -92,6 +92,42 @@
     };
   }
 
+  // ---------------------------------------------------------- 修行 (主人公を小判で鍛える)
+  //
+  // 敵の強さは段位で決まるので、出世しても相手も強くなる。修行は段位と関係なく主人公だけが強くなる。
+  // 負けて持ち帰った小判で鍛えれば、挑み直すたびに少しずつ勝ちやすくなる。
+
+  const HERO_PER = 0.15;           // 1 段で +15%
+  const HERO_TRAIN = {
+    hp: { name: '体力', icon: '❤️', per: HERO_PER },
+    atk: { name: 'パンチ', icon: '👊', per: HERO_PER }
+  };
+  const HERO_TRAIN_MAX = 10;
+
+  function heroLevel(state, key) {
+    const h = state.hero || {};
+    return Number.isInteger(h[key]) ? h[key] : 0;
+  }
+  /** 鍛えたぶんの倍率 (1 段で +15%) */
+  function heroMul(state, key) {
+    return 1 + HERO_TRAIN[key].per * heroLevel(state, key);
+  }
+  const HERO_COST_BASE = 10;
+  const HERO_COST_STEP = 15;
+  function heroTrainCost(state, key) {
+    return HERO_COST_BASE + HERO_COST_STEP * heroLevel(state, key);
+  }
+  function canTrainHero(state, key) {
+    return !!HERO_TRAIN[key] && heroLevel(state, key) < HERO_TRAIN_MAX && state.merit >= heroTrainCost(state, key);
+  }
+  /** 小判を払って 体力 (hp) か パンチ (atk) を 1 段上げる。出世 (経験値) は下がらない */
+  function trainHero(state, key) {
+    if (!canTrainHero(state, key)) return { ok: false, state: state };
+    const hero = Object.assign({ hp: 0, atk: 0 }, state.hero);
+    hero[key] = heroLevel(state, key) + 1;
+    return { ok: true, state: Object.assign({}, state, { merit: state.merit - heroTrainCost(state, key), hero: hero }) };
+  }
+
   // ---------------------------------------------------------- 家臣
 
   const VASSAL_NAMES = ['トラ', 'コマ', 'ミケ', 'クロ', 'シロ', 'タマ', 'チャチャ', 'モモ', 'ハチ', 'ゴマ'];
@@ -338,11 +374,11 @@
     }
     const allies = state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, MAX_BATTLE_VASSALS)
       .map(function (v) { return { id: v.id, name: v.name, look: v.look, level: v.level, skill: v.skill, cd: allyInterval(v.level) }; });
-    const maxHp = Math.round(playerMaxHp(r) * fx.hpMul);
+    const maxHp = Math.round(playerMaxHp(r) * fx.hpMul * heroMul(state, 'hp'));
     const items = state.items || { fish: 0, matatabi: 0 };
     const b = {
       rank: r, t: 0, phase: 'fight', rng: random,
-      player: { x: PLAYER_X, hp: maxHp, maxHp: maxHp, atk: Math.round(playerAtk(r) * fx.atkMul) },
+      player: { x: PLAYER_X, hp: maxHp, maxHp: maxHp, atk: Math.round(playerAtk(r) * fx.atkMul * heroMul(state, 'atk')) },
       enemies: enemies, current: 0, allies: allies,
       cd: { lure: 0, punch: 0 },
       charge: { on: false, t: 0 },
@@ -687,6 +723,13 @@
     return { name: pickVassalName(state, random), look: e.look, from: e.name, skill: skillFromEnemy(e.kind, random) };
   }
 
+  /** 負け・退却で持ち帰る小判: 倒した敵のぶん + 戦っていた相手に与えた傷のぶん (その相手の手柄の半分まで) */
+  function lossReward(b) {
+    const e = b.enemies[b.current];
+    const partial = e && e.alive ? Math.round(e.reward * 0.5 * (1 - e.hp / e.maxHp)) : 0;
+    return b.merit + partial;
+  }
+
   /** 合戦の結果を state に反映する。勝てば手柄・資材、負けても出世は下がらない。 */
   function applyBattleResult(state, b) {
     // 使ったアイテムは、勝っても負けても減る
@@ -705,9 +748,18 @@
       });
       return r;
     }
+    // 負け・退却: 倒した敵のぶんの小判 (と資材) は持ち帰る。勝ったときの上乗せと拾い物は無し。
+    // 何も持ち帰れないと、挑み直しても強くなれず、同じ戦の繰り返しになる。持ち帰った小判で修行する。
+    // 経験値 (出世) は入れない。敵の強さは段位で決まるので、勝たずに出世すると相手だけ強くなってしまう
     const idx = rankIndexOf(state);
-    const changed = b.used.fish || b.used.matatabi;
-    return { state: changed ? Object.assign({}, state, { items: items }) : state, prevRankIndex: idx, rankIndex: idx, rankedUp: false };
+    const got = lossReward(b);
+    const changed = got > 0 || b.used.fish || b.used.matatabi;
+    const next = changed ? Object.assign({}, state, {
+      merit: state.merit + got,
+      materials: state.materials + Math.round(got / 4),
+      items: items
+    }) : state;
+    return { state: next, prevRankIndex: idx, rankIndex: idx, rankedUp: false };
   }
 
   // ---------------------------------------------------------- 城と村 (マスに建てる)
@@ -883,6 +935,7 @@
       battlesWon: 0,
       storySeen: false,
       items: { fish: 2, matatabi: 1 },
+      hero: { hp: 0, atk: 0 },
       village: { population: 0, cells: new Array(MAP_CELLS).fill(null) },
       castle: { cells: new Array(MAP_CELLS).fill(null) }
     };
@@ -901,6 +954,11 @@
     out.nextVassalId = Number.isInteger(raw.nextVassalId) ? raw.nextVassalId : base.nextVassalId;
     out.battlesWon = Number.isInteger(raw.battlesWon) ? Math.max(0, raw.battlesWon) : base.battlesWon;
     out.storySeen = raw.storySeen === true;
+    const hero = raw.hero && typeof raw.hero === 'object' ? raw.hero : {};
+    out.hero = {
+      hp: Number.isInteger(hero.hp) ? Math.min(HERO_TRAIN_MAX, Math.max(0, hero.hp)) : 0,
+      atk: Number.isInteger(hero.atk) ? Math.min(HERO_TRAIN_MAX, Math.max(0, hero.atk)) : 0
+    };
     const it = raw.items || {};
     out.items = {
       fish: Number.isInteger(it.fish) ? Math.max(0, it.fish) : base.items.fish,
@@ -978,6 +1036,13 @@
     hasVassalSlot: hasVassalSlot,
     VASSAL_LOOKS: VASSAL_LOOKS,
     VASSAL_SKILLS: VASSAL_SKILLS,
+    HERO_TRAIN: HERO_TRAIN,
+    HERO_TRAIN_MAX: HERO_TRAIN_MAX,
+    heroLevel: heroLevel,
+    heroMul: heroMul,
+    heroTrainCost: heroTrainCost,
+    canTrainHero: canTrainHero,
+    trainHero: trainHero,
     SKILL_KEYS: SKILL_KEYS,
     HEAL_INTERVAL: HEAL_INTERVAL,
     skillPower: skillPower,
@@ -1046,6 +1111,7 @@
     useItem: useItem,
     rollRecruitOffer: rollRecruitOffer,
     applyBattleResult: applyBattleResult,
+    lossReward: lossReward,
 
     createInitialState: createInitialState,
     sanitizeState: sanitizeState,

@@ -678,6 +678,81 @@ test('得意技: 効くのは出陣している家臣だけ。2 人いれば足�
   assert.deepStrictEqual(Core.battleSkills([]), { lure: 1, power: 1, speed: 1, heal: 0 });
 });
 
+// ---------------------------------------------------------- 負けても強くなる (持ち帰りと修行)
+
+test('負け: 倒した敵のぶんと、戦っていた相手に与えた傷のぶんの小判は持ち帰る。経験値 (出世) は入らない', () => {
+  const s = stateAtRank(1);
+  const b = Core.createBattle(s, Core.mulberry32(4));
+  const e1 = untilReady(b);
+  e1.hp = 1; Core.punch(b);                      // 1 匹目を倒す
+  step(b, 1.5);
+  const e2 = untilReady(b);
+  e2.hp = Math.round(e2.maxHp / 2);              // 2 匹目は半分まで削った
+  b.player.hp = 0; step(b, 0.1);                 // そこで負け
+  assert.strictEqual(b.phase, 'lost');
+  const want = e1.reward + Math.round(e2.reward * 0.5 * 0.5);
+  assert.strictEqual(Core.lossReward(b), want);
+  const r = Core.applyBattleResult(s, b);
+  assert.strictEqual(r.state.merit, s.merit + want, '小判は増える');
+  assert.strictEqual(r.state.totalMerit, s.totalMerit, '経験値は増えない (勝たずに出世すると、相手だけ強くなるので)');
+  assert.strictEqual(r.rankedUp, false);
+  assert.strictEqual(r.state.materials, s.materials + Math.round(want / 4));
+  assert.strictEqual(r.state.battlesWon, s.battlesWon);
+});
+
+test('修行: 小判で体力とパンチを鍛える。1 段で +15%、値段は上がっていく。出世は下がらない', () => {
+  let s = Object.assign(stateAtRank(1), { merit: 1000 });
+  const b0 = Core.createBattle(s, Core.mulberry32(1));
+  assert.strictEqual(Core.heroTrainCost(s, 'hp'), 10);
+  s = Core.trainHero(s, 'hp').state;
+  assert.strictEqual(s.merit, 990);
+  assert.strictEqual(Core.heroTrainCost(s, 'hp'), 25, '上げるほど高くなる');
+  s = Core.trainHero(s, 'atk').state;
+  s = Core.trainHero(s, 'atk').state;
+  assert.strictEqual(s.totalMerit, Core.RANKS[1].threshold, '小判を使っても出世は下がらない');
+  const b1 = Core.createBattle(s, Core.mulberry32(1));
+  assert.strictEqual(b1.player.maxHp, Math.round(b0.player.maxHp * 1.15));
+  assert.strictEqual(b1.player.atk, Math.round(Core.playerAtk(1) * 1.3));
+  assert.strictEqual(b1.enemies[0].maxHp, b0.enemies[0].maxHp, '敵は強くならない');
+  assert.strictEqual(Core.trainHero(Object.assign({}, s, { merit: 5 }), 'hp').ok, false, '小判が足りないと鍛えられない');
+  let full = Object.assign({}, s, { merit: 1e9 });
+  for (let i = 0; i < 20; i++) full = Core.trainHero(full, 'hp').state;
+  assert.strictEqual(Core.heroLevel(full, 'hp'), Core.HERO_TRAIN_MAX, `Lv${Core.HERO_TRAIN_MAX} で止まる`);
+});
+
+test('修行: 前の保存データ (修行が無い) は Lv0 から。壊れた値は直す', () => {
+  const raw = Core.createInitialState();
+  delete raw.hero;
+  assert.deepStrictEqual(Core.sanitizeState(raw).hero, { hp: 0, atk: 0 });
+  assert.deepStrictEqual(Core.sanitizeState(Object.assign(raw, { hero: { hp: 99, atk: -3 } })).hero, { hp: Core.HERO_TRAIN_MAX, atk: 0 });
+});
+
+// 挑み直しの見張り (いただいた声: 「負けても強くなったりお金がたまったりしないと、同じことの繰り返し」)。
+// 負けたら持ち帰った小判で修行 (安い方から) して、もう一度。測った値 (20 人ずつ、草履取りの戦):
+// 溜めない子 中央 4 回目・遅くても 6 回目で勝つ。連打 3 回目。修行しないと 10 回挑んでも勝てない子がいる
+test('挑み直すと強くなる: 溜めない子でも、負けて修行すれば 10 回以内に勝てる', () => {
+  const trainAll = (s) => {
+    for (;;) {
+      const k = Core.heroTrainCost(s, 'hp') <= Core.heroTrainCost(s, 'atk') ? 'hp' : 'atk';
+      const r = Core.trainHero(s, k); if (!r.ok) return s; s = r.state;
+    }
+  };
+  const tries = (seed, useTrain) => {
+    let s = stateAtRank(1);
+    for (let n = 1; n <= 10; n++) {
+      const b = runBattle(s, tapper, seed * 100 + n);
+      s = Core.applyBattleResult(s, b).state;
+      if (b.phase === 'won') return n;
+      if (useTrain) s = trainAll(s);
+    }
+    return 99;
+  };
+  const withTrain = [], without = [];
+  for (let seed = 1; seed <= 20; seed++) { withTrain.push(tries(seed, true)); without.push(tries(seed, false)); }
+  assert.ok(withTrain.every((n) => n <= 10), `修行すれば全員 10 回以内に勝つ (${withTrain.join(',')})`);
+  assert.ok(without.filter((n) => n === 99).length >= 10, `修行しないと、10 回挑んでも勝てない子が多い (${without.filter((n) => n === 99).length}/20)`);
+});
+
 // 手ごたえの見張り。数字は各段位 30 回ずつ実際に戦わせて測った値をもとに線を引いた
 // (下手: r0 30/30 残67%、r1 以上 0/30。溜めない: r0 30/30、r1・r2 9/30、r3 以上 0/30。
 //  ふつう: 全段位 30/30 残24〜67%。上手: 全段位 30/30)

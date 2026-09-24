@@ -25,6 +25,7 @@
     coinVassals: $('coinVassals'),
     field: $('field'), fieldBg: $('fieldBg'), fieldFg: $('fieldFg'), fieldBanner: $('fieldBanner'),
     readyPanel: $('readyPanel'), readyTitle: $('readyTitle'), readyText: $('readyText'), btnSortie: $('btnSortie'),
+    readyTrain: $('readyTrain'), resultTrain: $('resultTrain'),
     resultPanel: $('resultPanel'), resultTitle: $('resultTitle'), resultRows: $('resultRows'),
     offer: $('offer'), offerImg: $('offerImg'), offerText: $('offerText'),
     btnOfferYes: $('btnOfferYes'), btnOfferNo: $('btnOfferNo'), btnNext: $('btnNext'),
@@ -206,7 +207,7 @@
       : 100);
 
     const b = battle;
-    const maxHp = b ? b.player.maxHp : Math.round(C.playerMaxHp(r) * C.townEffects(state).hpMul);
+    const maxHp = b ? b.player.maxHp : heroStats().hp;
     const hp = b ? b.player.hp : maxHp;
     setWidth(els.hpFill, 'hp', hp / maxHp * 100);
     setText(els.hpText, 'hpText', Math.ceil(hp) + '/' + maxHp);
@@ -220,6 +221,9 @@
       setWidth(els.enemyHpFill, 'enemyHp', e.hp / e.maxHp * 100);
       setOnce('enemyFace', e.look, function (v) { els.enemyFaceImg.src = imgs[v].src; });
     }
+
+    // 修行の札 (小判・段位・修行の段が変わったときだけ書き換える)
+    setOnce('train', Math.floor(state.merit) + '|' + r + '|' + C.heroLevel(state, 'hp') + '|' + C.heroLevel(state, 'atk'), renderTrain);
 
     // 溜めゲージ (押している長さ)。30 段に丸めて、変わったときだけ書き換える
     const charging = !!(b && b.charge.on);
@@ -999,6 +1003,66 @@
 
   let paused = false;
 
+  // ---------------------------------------------------------- 修行 (小判で主人公を鍛える)
+
+  /** いまの体力の最大・パンチの強さ (出陣したときの値) */
+  function heroStats(s) {
+    const st = s || state;
+    const r = C.rankIndexOf(st);
+    const fxs = C.townEffects(st);
+    return {
+      hp: Math.round(C.playerMaxHp(r) * fxs.hpMul * C.heroMul(st, 'hp')),
+      atk: Math.round(C.playerAtk(r) * fxs.atkMul * C.heroMul(st, 'atk'))
+    };
+  }
+
+  /** 修行の札。ボタンは一度だけ作り、あとは字と押せるかだけを書き換える
+   *  (小判は自主練の家臣で少しずつ増える。作り直すと、押している最中に札が入れ替わって押したことにならない) */
+  function renderTrain() {
+    [els.readyTrain, els.resultTrain].forEach(function (box) {
+      if (!box) return;
+      if (!box.firstChild) {
+        box.innerHTML = '<div class="train-head"></div><div class="train-row"></div>';
+        const rowEl = box.querySelector('.train-row');
+        ['hp', 'atk'].forEach(function (key) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'train-btn train-' + key;
+          btn.innerHTML = '<b></b><span></span>';
+          btn.addEventListener('click', function () { doTrainHero(key); });
+          rowEl.appendChild(btn);
+        });
+      }
+      const now = heroStats();
+      box.querySelector('.train-head').textContent = '修行 (小判で 主人公を鍛える)  ・ 手持ち 小判 ' + Math.floor(state.merit);
+      ['hp', 'atk'].forEach(function (key) {
+        const t = C.HERO_TRAIN[key];
+        const lv = C.heroLevel(state, key);
+        const btn = box.querySelector('.train-' + key);
+        let note = 'もう最大';
+        if (lv < C.HERO_TRAIN_MAX) {
+          const after = heroStats(C.trainHero(Object.assign({}, state, { merit: Infinity }), key).state);
+          note = '小判 ' + C.heroTrainCost(state, key) + ' ・ ' + now[key] + '→' + after[key];
+        }
+        btn.querySelector('b').textContent = t.icon + ' ' + t.name + ' Lv' + lv;
+        btn.querySelector('span').textContent = note;
+        btn.disabled = !C.canTrainHero(state, key);
+      });
+    });
+  }
+
+  function doTrainHero(key) {
+    const res = C.trainHero(state, key);
+    if (!res.ok) return false;
+    state = res.state;
+    saveSoon();
+    renderTrain();
+    renderHud(true);
+    showToast(C.HERO_TRAIN[key].name + 'が 上がった! (Lv' + C.heroLevel(state, key) + ')', 1400);
+    setFace('smile', 1.2);
+    return true;
+  }
+
   function showReady() {
     battle = null;
     lastBattle = null;
@@ -1027,6 +1091,8 @@
       }).join(' ・ ') + '</span>';
     }
     els.readyText.innerHTML = html;
+    els.resultTrain.hidden = true;
+    renderTrain();
     renderHud(true);
   }
 
@@ -1090,8 +1156,14 @@
     } else {
       setFace('shy', 3);
       els.resultTitle.textContent = 'ひと休み…';
-      els.resultRows.innerHTML = '<p class="panel-text">猫じゃらしで 夢中にすれば、<br>攻撃されずに たたけるにゃ。</p>';
+      // 負けても、倒したぶん (と戦っていた相手に与えた傷のぶん) の小判は持ち帰る。それで修行して、もう一度
+      const got = C.lossReward(b);
+      const downs = b.enemies.filter(function (e) { return !e.alive; }).length;
+      els.resultRows.innerHTML = row('倒した敵', downs + ' 匹') + row('持ち帰った小判', '+' + got) +
+        '<p class="panel-text">小判で 修行して、もう一度!<br>MAX で ためて なぐると 強いにゃ。</p>';
       els.offer.hidden = true;
+      els.resultTrain.hidden = false;
+      renderTrain();
       els.btnNext.textContent = 'もう一度';
       setTimeout(function () { els.resultPanel.hidden = false; }, 600);
     }
@@ -1838,6 +1910,7 @@
         renderTabs(); renderActiveView(); renderHud(true);
         if (res.rankedUp) showRankUp(res.prevRankIndex, res.rankIndex);
       },
+      trainHero: doTrainHero,
       debugSetMaterials: function (n) {
         state = Object.assign({}, state, { materials: n });
         renderActiveView();

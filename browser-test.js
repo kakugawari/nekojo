@@ -388,20 +388,47 @@ async function run() {
     const title2 = await phone.evaluate(() => document.getElementById('readyTitle').textContent);
     ok(title2 === '第二戦', `つぎの戦へ進める (${title2})`);
 
-    // 負けたとき
+    // 負けたとき: 倒したぶんの小判は持ち帰り、その場で修行して「もう一度」
+    ok(await phone.evaluate(() => document.querySelectorAll('#readyTrain .train-btn').length === 2), '出陣の札に、修行 (体力・パンチ) の札が出ている');
+    // 実際に踏んだ不具合の見張り: 出陣の札を開いたまま小判が増えても、修行の札が古いまま (手持ち 0) だった。
+    // 書き換えはボタンを作り直さずに行う (作り直すと、押している最中に札が入れ替わって押したことにならない)
+    await phone.evaluate(() => { document.querySelector('#readyTrain .train-hp').__mark = 1; });
+    const m0 = await phone.evaluate(() => Math.floor(window.__app.state().merit));
+    await phone.evaluate(() => { window.__app.debugAddMerit(7); window.__app.closeModals(); });
+    await phone.waitForTimeout(120);
+    const tr = await phone.evaluate(() => ({ head: document.querySelector('#readyTrain .train-head').textContent, same: document.querySelector('#readyTrain .train-hp').__mark === 1 }));
+    ok(tr.head.includes('小判 ' + (m0 + 7)), `札を開いたまま小判が増えても、修行の札の手持ちが書き変わる (${tr.head.split('・').pop().trim()})`);
+    ok(tr.same, '書き変わっても、ボタンは作り直さない');
     await phone.locator('#btnSortie').tap();
-    await phone.evaluate(() => { const b = window.__app.battle(); b.player.hp = 0; });
+    const lb = await phone.evaluate(() => ({ merit: window.__app.state().merit, total: window.__app.state().totalMerit, maxHp: window.__app.battle().player.maxHp }));
+    await phone.evaluate(() => { const b = window.__app.battle(); b.merit = 40; b.player.hp = 0; }); // 40 小判ぶん倒してから負けた
     await phone.waitForFunction(() => !document.getElementById('resultPanel').hidden, null, { timeout: 4000 }).catch(() => {});
     const lost = await phone.evaluate(() => ({
       title: document.getElementById('resultTitle').textContent,
       next: document.getElementById('btnNext').textContent,
-      wins: window.__app.state().battlesWon
+      rows: document.getElementById('resultRows').textContent,
+      wins: window.__app.state().battlesWon,
+      merit: window.__app.state().merit,
+      total: window.__app.state().totalMerit,
+      train: !document.getElementById('resultTrain').hidden && document.querySelectorAll('#resultTrain .train-btn').length
     }));
     ok(lost.title === 'ひと休み…' && lost.next === 'もう一度', `負けると「ひと休み」になり、やり直せる (${lost.title})`);
-    ok(lost.wins === 1, '負けても何も減らない');
+    ok(lost.rows.includes('持ち帰った小判') && lost.merit >= lb.merit + 40 && lost.total === lb.total,
+      `負けても、倒したぶんの小判は持ち帰る (小判 ${Math.floor(lb.merit)} → ${Math.floor(lost.merit)}、経験値は ${lost.total} のまま)`);
+    ok(lost.wins === 1, '負けても勝った数は減らない');
+    ok(lost.train === 2, '負けの札に、修行の札が出る');
+    const hpBtn = phone.locator('#resultTrain .train-hp');
+    const canTrain = await hpBtn.evaluate((el) => !el.disabled);
+    ok(canTrain, '持ち帰った小判で、体力を鍛えられる');
+    await hpBtn.tap();
+    await phone.waitForTimeout(60);
+    const trained = await phone.evaluate(() => ({ lv: window.Core.heroLevel(window.__app.state(), 'hp'), label: document.querySelector('#resultTrain .train-hp b').textContent }));
+    ok(trained.lv === 1 && trained.label.includes('Lv1'), `指で押すと体力が1段上がり、札も書き変わる (${trained.label})`);
     await phone.locator('#btnNext').tap();
     await phone.waitForTimeout(80);
-    ok(await phone.evaluate(() => !!window.__app.battle()), '「もう一度」ですぐ次の戦が始まる');
+    const again = await phone.evaluate(() => window.__app.battle() && window.__app.battle().player.maxHp);
+    ok(!!again, '「もう一度」ですぐ次の戦が始まる');
+    ok(again === Math.round(lb.maxHp * 1.15), `鍛えたぶん、次の戦では体力が多い (${lb.maxHp} → ${again})`);
 
     // ------------------------------------------------ 家臣
     section('家臣');
