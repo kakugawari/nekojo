@@ -1265,3 +1265,12 @@ test('手ごたえ (天下): ふつうに遊べば天下統一できる。兵を
   const tap = campaign(23, 2, tapper, 23, 1);
   assert.ok(tap.unified && tap.battles <= 80, `溜めない子も、修行して兵を 2 倍にすれば天下統一 (${tap.battles} 戦・負け ${tap.losses})`);
 });
+
+test('天下: 県ごとに昔の国の名前とひとことがある。取ったときの小判のめやすは、勝ったときの実際と同じ', () => {
+  Core.PREFS.forEach((p) => assert.ok(p.kuni && p.desc && p.desc.length >= 10, p.name));
+  const s = realmState(23, { merit: 0 });
+  const plan = Core.attackPlan(s, 23, 22, 500);
+  const b = Core.createBattle(s, Core.mulberry32(4), plan);
+  const merit = b.enemies.reduce((n, e) => n + e.reward, 0);
+  assert.strictEqual(Core.conquestReward(s, plan), merit + Math.round(merit * 0.3));
+});

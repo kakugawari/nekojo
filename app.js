@@ -48,7 +48,8 @@
   // ---------------------------------------------------------- 絵
 
   const IMG_NAMES = ['stage0', 'stage1', 'stage2', 'stage3', 'cat-normal', 'cat-chatora', 'cat-kuro', 'cat-gray', 'cat-red',
-    'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-special', 'pose-jarashi', 'pose-punch', 'b-villager']
+    'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-special', 'pose-jarashi', 'pose-punch', 'b-villager',
+    'r-coin', 'r-catcoin', 'r-swords', 'r-tag-strength', 'r-tag-reward']
     .concat(Object.keys(C.BUILDINGS).map(function (t) { return C.BUILDINGS[t].img; }));
   const imgs = {};
   IMG_NAMES.forEach(function (n) {
@@ -1888,10 +1889,9 @@
   // 指 1 本で動かす・2 本で広げる。
 
   const JMAP = window.JAPAN_MAP;
-  const REGION_COLORS = ['#d3e2f2', '#d9ecd2', '#f3e4c6', '#e6dbf0', '#f5dcd6', '#d5ede7', '#f0eac6', '#e8ddd0'];
-  const MINE_COLOR = '#f09a5f';
   const realmEls = {
-    sub: $('realmSub'),
+    sub: $('realmSub'), title: $('realmTitle'), top: $('realmTop'), back: $('btnRealmBack'),
+    guide: $('realmGuide'), bubble: $('realmBubble'), remain: $('realmRemain'), left: $('realmLeft'),
     locked: $('realmLocked'), content: $('realmContent'), map: $('realmMap'), canvas: $('realmCanvas'),
     sheet: $('realmSheet'), all: $('btnRealmAll'), unify: $('unifyModal'), unifyOk: $('btnUnifyOk')
   };
@@ -1922,19 +1922,37 @@
     return { id: p.id, path: path, rings: p.rings, lx: p.lx, ly: p.ly, lr: p.lr, box: { x0: x0, y0: y0, x1: x1, y1: y1 } };
   });
 
-  function realmFitK() { return Math.min(realm.w / JMAP.w, (realm.h - sheetCover()) / JMAP.h) * 0.96; }
+  /**
+   * 地図のうち、飾りや札に隠れていない所 (地図の中の px)。見る範囲はここに合わせる。
+   * 地図は画面いっぱいで、上に題字と数の帯、横 (右) か縦 (下) に札が重なっている
+   */
+  function freeRect() {
+    const m = realmEls.map.getBoundingClientRect();
+    let x0 = 0, y0 = 0, x1 = realm.w, y1 = realm.h;
+    const rectOf = function (el) { return el && !el.hidden && el.offsetWidth ? el.getBoundingClientRect() : null; };
+    [realmEls.title, realmEls.top, realmEls.remain].forEach(function (el) {
+      const b = rectOf(el);
+      if (b && (b.top + b.bottom) / 2 - m.top < realm.h * 0.35) y0 = Math.max(y0, b.bottom - m.top + 4);
+    });
+    const sh = rectOf(realmEls.sheet);
+    if (sh) {
+      if (sh.left - m.left > realm.w * 0.35) x1 = Math.min(x1, sh.left - m.left - 6);   // 横: 札は右
+      else y1 = Math.min(y1, sh.top - m.top - 6);                                       // 縦: 札は下
+    }
+    if (x1 - x0 < 80 || y1 - y0 < 80) return { x0: 0, y0: 0, x1: realm.w, y1: realm.h };
+    return { x0: x0, y0: y0, x1: x1, y1: y1 };
+  }
 
-  /** 縦画面では札が地図の下に重なっている。その高さ (px)。見る範囲は、隠れていない上の所に合わせる */
-  function sheetCover() {
-    const sh = realmEls.sheet, mp = realmEls.map;
-    if (!sh.offsetHeight || getComputedStyle(sh).position !== 'absolute') return 0;
-    return Math.max(0, mp.getBoundingClientRect().bottom - sh.getBoundingClientRect().top);
+  function realmFitK() {
+    const f = freeRect();
+    return Math.min((f.x1 - f.x0) / JMAP.w, (f.y1 - f.y0) / JMAP.h) * 0.96;
   }
 
   function sizeRealm() {
     const w = realmEls.map.clientWidth, h = realmEls.map.clientHeight;
     if (!(w >= 1 && h >= 1)) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // 画素の倍率は 1.5 まで (戦場と同じ)。塗る面積がそのまま重さになる
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     if (w === realm.w && h === realm.h && dpr === realm.dpr) return;
     const first = realm.w === 0;
     realm.w = w; realm.h = h; realm.dpr = dpr;
@@ -1945,9 +1963,17 @@
     realm.dirty = true;
   }
 
+  /** 地図の点 (mx, my) が、隠れていない所の真ん中に来る見る範囲 */
+  function centerOn(mx, my, k) {
+    const f = freeRect();
+    return { x: mx - ((f.x0 + f.x1) / 2 - realm.w / 2) / k, y: my - ((f.y0 + f.y1) / 2 - realm.h / 2) / k, k: k };
+  }
+
+  function wholeCamera() { return clampCam(centerOn(JMAP.w / 2, JMAP.h / 2, realmFitK())); }
+
   /** 見る範囲: 自分の国と攻め込めるとなりが入るように。国がまだ無ければ日本全体 */
   function homeCamera() {
-    if (!C.hasRealm(state)) return clampCam({ x: JMAP.w / 2, y: JMAP.h / 2 + sheetCover() / 2 / realmFitK(), k: realmFitK() });
+    if (!C.hasRealm(state)) return wholeCamera();
     const ids = [];
     for (let id = 1; id <= C.PREF_COUNT; id++) if (C.isMine(state, id) || C.attackSource(state, id)) ids.push(id);
     return frameCamera(ids);
@@ -1959,23 +1985,22 @@
       const b = prefShapes[id - 1].box;
       x0 = Math.min(x0, b.x0); y0 = Math.min(y0, b.y0); x1 = Math.max(x1, b.x1); y1 = Math.max(y1, b.y1);
     });
+    const f = freeRect();
     const pad = 1.25;
-    const cover = sheetCover();
-    const k = Math.min(realm.w / ((x1 - x0) * pad + 40), (realm.h - cover) / ((y1 - y0) * pad + 40));
-    // 札に隠れていない所の真ん中に来るように、真ん中を下へずらす
-    return clampCam({ x: (x0 + x1) / 2, y: (y0 + y1) / 2 + cover / 2 / k, k: k });
+    const k = Math.min((f.x1 - f.x0) / ((x1 - x0) * pad + 40), (f.y1 - f.y0) / ((y1 - y0) * pad + 40));
+    return clampCam(centerOn((x0 + x1) / 2, (y0 + y1) / 2, k));
   }
 
   function clampCam(c) {
     const fit = realmFitK();
     const k = Math.max(fit, Math.min(fit * 9, c.k));
-    // 地図の外ばかり見えないように、真ん中は地図の中に置く
-    const cover = sheetCover() / k;
-    const hw = realm.w / 2 / k, hh = realm.h / 2 / k;
-    const x = JMAP.w <= hw * 2 ? JMAP.w / 2 : Math.max(hw, Math.min(JMAP.w - hw, c.x));
-    // 縦は札に隠れる分だけ、下へ余分に動かせる (地図の下のはしを札の上に出せるように)
-    const y = JMAP.h + cover <= hh * 2 ? JMAP.h / 2 + cover / 2 : Math.max(hh, Math.min(JMAP.h - hh + cover, c.y));
-    return { x: x, y: y, k: k };
+    // 隠れていない所の真ん中が、地図の中から外れないように (地図の外の海ばかり見えないように)
+    const f = freeRect();
+    const off = { x: ((f.x0 + f.x1) / 2 - realm.w / 2) / k, y: ((f.y0 + f.y1) / 2 - realm.h / 2) / k };
+    const hw = (f.x1 - f.x0) / 2 / k, hh = (f.y1 - f.y0) / 2 / k;
+    const px = JMAP.w <= hw * 2 ? JMAP.w / 2 : Math.max(hw, Math.min(JMAP.w - hw, c.x + off.x));
+    const py = JMAP.h <= hh * 2 ? JMAP.h / 2 : Math.max(hh, Math.min(JMAP.h - hh, c.y + off.y));
+    return { x: px - off.x, y: py - off.y, k: k };
   }
 
   function moveCamera(to, instant) {
@@ -2025,12 +2050,98 @@
     return '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n);
   }
 
-  // ---- 描く
+  // ---- 描く (見本の絵 art/realm-mock.png に寄せる: 盛り上がった陸と崖・山と森・青い海と波・城と旗・白い名札)
+
+  // 地方ごとの陸の色 (見本の色: 近畿は桃色、中部は藤色、中国・四国は緑…)
+  const LAND_COLORS = ['#b8d98c', '#a9d08f', '#e7cd86', '#c3a7df', '#f0a898', '#9fd184', '#8ecfae', '#ebb487'];
+  const MINE_LAND = '#f7a646';
+  // 大名の旗の色 (地方ごと)。自分の国は赤
+  const FLAG_COLORS = ['#2f5f8f', '#2f6f4f', '#8a5a1a', '#5a3f9a', '#2f3f8f', '#2f6f3f', '#1f6f6f', '#9b2335'];
+  const MINE_FLAG = '#c8412f';
+
+  // 山・森の模様と、海の波の模様。一度だけ作って、地図の位置に合わせて敷く (パターン)
+  const TEX = 2;                         // 模様の細かさ (地図 1 単位 = 2px)
+  function makeTile(size, draw) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = size * TEX;
+    const g = cv.getContext('2d');
+    g.scale(TEX, TEX);
+    const rnd = C.mulberry32(size * 7 + 3);
+    // 端をまたぐ物は反対側にも描いて、つなぎ目を見せない
+    const wrap = function (x, y, r, fn) {
+      [-size, 0, size].forEach(function (ox) {
+        [-size, 0, size].forEach(function (oy) {
+          const X = x + ox, Y = y + oy;
+          if (X + r >= 0 && X - r <= size && Y + r >= 0 && Y - r <= size) fn(X, Y);
+        });
+      });
+    };
+    draw(g, rnd, wrap);
+    return cv;
+  }
+  const terrainTile = makeTile(480, function (g, rnd, wrap) {
+    // 細かなむら
+    for (let i = 0; i < 2600; i++) {
+      const x = rnd() * 480, y = rnd() * 480;
+      g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,.10)' : 'rgba(0,0,0,.07)';
+      g.fillRect(x, y, 1.5 + rnd() * 2, 1 + rnd() * 1.5);
+    }
+    // 森 (丸い木の固まり)
+    for (let i = 0; i < 150; i++) {
+      const cx = rnd() * 480, cy = rnd() * 480, n = 3 + Math.floor(rnd() * 4);
+      wrap(cx, cy, 14, function (X, Y) {
+        for (let j = 0; j < n; j++) {
+          const x = X + (rnd() - 0.5) * 16, y = Y + (rnd() - 0.5) * 10, r = 2.2 + rnd() * 2.4;
+          g.fillStyle = 'rgba(20,60,20,.30)'; g.beginPath(); g.arc(x, y + 0.8, r, 0, 7); g.fill();
+          g.fillStyle = 'rgba(255,255,255,.22)'; g.beginPath(); g.arc(x - r * 0.3, y - r * 0.3, r * 0.55, 0, 7); g.fill();
+        }
+      });
+    }
+    // 山 (左の面は明るく、右の面は暗い。大きな山は雪をかぶる)
+    const mts = [];
+    for (let i = 0; i < 95; i++) mts.push({ x: rnd() * 480, y: rnd() * 480, s: 7 + rnd() * 15 });
+    mts.sort(function (a, b) { return a.y - b.y; });
+    mts.forEach(function (m) {
+      wrap(m.x, m.y, m.s * 1.2, function (X, Y) {
+        const s = m.s, top = Y - s * 1.15;
+        g.fillStyle = 'rgba(0,0,0,.12)';
+        g.beginPath(); g.ellipse(X + s * 0.15, Y + 1, s * 1.05, s * 0.28, 0, 0, 7); g.fill();
+        g.fillStyle = 'rgba(255,255,255,.42)';
+        g.beginPath(); g.moveTo(X - s, Y); g.lineTo(X, top); g.lineTo(X + s * 0.05, Y); g.closePath(); g.fill();
+        g.fillStyle = 'rgba(0,0,0,.30)';
+        g.beginPath(); g.moveTo(X + s * 0.05, Y); g.lineTo(X, top); g.lineTo(X + s * 0.95, Y); g.closePath(); g.fill();
+        if (s > 15) {
+          g.fillStyle = 'rgba(255,255,255,.75)';
+          g.beginPath(); g.moveTo(X - s * 0.28, top + s * 0.32); g.lineTo(X, top); g.lineTo(X + s * 0.26, top + s * 0.3);
+          g.lineTo(X + s * 0.05, top + s * 0.22); g.closePath(); g.fill();
+        }
+      });
+    });
+  });
+  const seaTile = makeTile(240, function (g, rnd, wrap) {
+    for (let i = 0; i < 70; i++) {
+      const x = rnd() * 240, y = rnd() * 240, w = 5 + rnd() * 9;
+      wrap(x, y, w, function (X, Y) {
+        g.strokeStyle = 'rgba(255,255,255,' + (0.35 + rnd() * 0.3).toFixed(2) + ')';
+        g.lineWidth = 0.9;
+        g.lineCap = 'round';
+        g.beginPath(); g.moveTo(X - w, Y); g.quadraticCurveTo(X - w / 2, Y - w * 0.35, X, Y); g.quadraticCurveTo(X + w / 2, Y - w * 0.35, X + w, Y); g.stroke();
+      });
+    }
+    for (let i = 0; i < 260; i++) {
+      g.fillStyle = 'rgba(255,255,255,.08)';
+      g.fillRect(rnd() * 240, rnd() * 240, 3 + rnd() * 6, 0.8);
+    }
+  });
+  let terrainPat = null;
+  // 海の波の模様は、地図の下の背景に敷く (動かしても描き直さない)
+  realmEls.map.style.backgroundImage = 'url(' + seaTile.toDataURL() + '), linear-gradient(#2f9fc4, #4cbfd2)';
+  realmEls.map.style.backgroundSize = (240 * 0.5) + 'px, 100% 100%';
 
   // 動かしている最中 (指で動かす・寄る) は、止まっていたときに描いておいた絵 (まわりに余白つき) を
   // ずらして拡げて貼るだけにする。県を 47 塗り直すと、CPU4倍遅で 1コマ 33ms かかった (貼るだけなら 16.7ms)。
   // 止まったら、その位置で描き直す
-  const CACHE_MARGIN = 0.25;          // まわりの余白 (幅・高さの割合)
+  const CACHE_MARGIN = 0.12;          // まわりの余白 (幅・高さの割合)。はみ出した所は下の海 (CSS) が見える
   const realmCache = { canvas: document.createElement('canvas'), cam: null, W: 0, H: 0 };
 
   function realmMoving() { return !!realm.anim || !!(realm.gesture && realm.gesture.kind !== 'tap'); }
@@ -2049,7 +2160,7 @@
       drawRealmTo(cc.canvas.getContext('2d'), cc.cam, W, H, dpr);
       realm.fullDraws = (realm.fullDraws || 0) + 1;
     }
-    // 描いておいた絵を、いまの見る範囲に合わせて貼る
+    // 描いておいた絵を、いまの見る範囲に合わせて貼る (はみ出した所は、下に敷いた海の色が見える)
     const c = realm.cam, s = c.k / cc.cam.k;
     const dx = (-W / 2) * s + (cc.cam.x - c.x) * c.k + realm.w / 2;
     const dy = (-H / 2) * s + (cc.cam.y - c.y) * c.k + realm.h / 2;
@@ -2058,123 +2169,192 @@
     rctx.drawImage(cc.canvas, dx * dpr, dy * dpr, W * s * dpr, H * s * dpr);
   }
 
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  /** のぼり旗 (竿と、肉球を染めた布) */
+  function drawFlag(ctx, x, y, h, color) {
+    const w = h * 0.42;
+    ctx.fillStyle = '#5a3a1c';
+    ctx.fillRect(x - 1, y, 2, h);
+    ctx.fillStyle = color;
+    ctx.fillRect(x - w - 1, y + h * 0.06, w, h * 0.62);
+    ctx.fillStyle = 'rgba(0,0,0,.18)';
+    ctx.fillRect(x - w - 1, y + h * 0.06 + h * 0.56, w, h * 0.06);
+    const cx = x - 1 - w / 2, cy = y + h * 0.4, r = w * 0.2;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.ellipse(cx, cy + r * 0.5, r * 1.1, r * 0.9, 0, 0, 7); ctx.fill();
+    [-1, 0, 1].forEach(function (i) { ctx.beginPath(); ctx.arc(cx + i * r * 0.95, cy - r * 0.75 - (i === 0 ? r * 0.25 : 0), r * 0.42, 0, 7); ctx.fill(); });
+  }
+
   /** 見る範囲 c で、幅 W・高さ H (CSS px) の面に地図を描く (真ん中が c の位置) */
   function drawRealmTo(ctx, c, W, H, dpr) {
     const k = c.k;
     const toS = function (mx, my) { return { x: (mx - c.x) * k + W / 2, y: (my - c.y) * k + H / 2 }; };
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    ctx.setTransform(k * dpr, 0, 0, k * dpr, (W / 2 - c.x * k) * dpr, (H / 2 - c.y * k) * dpr);
+    const toMapXf = function () { ctx.setTransform(k * dpr, 0, 0, k * dpr, (W / 2 - c.x * k) * dpr, (H / 2 - c.y * k) * dpr); };
+    if (!terrainPat) {
+      terrainPat = ctx.createPattern(terrainTile, 'repeat');
+      terrainPat.setTransform(new DOMMatrix().scale(1 / TEX, 1 / TEX));
+    }
     const has = C.hasRealm(state);
     const sel = realm.sel;
     const selNb = sel ? C.prefOf(sel).nb : [];
+    const px = 1 / k;                    // 画面の 1px は地図の何単位か
 
-    // 沖縄の枠
+    // 海はキャンバスには描かない (地図の下の CSS の背景。波の模様も一度だけ作って敷く)。
+    // キャンバスで海を塗ると、面積が大きいぶん描き直しが重かった
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    toMapXf();
+
+    // 沖縄の枠 (紙の縁取り)
     const ob = JMAP.okinawaBox;
-    ctx.setLineDash([5 / k, 4 / k]);
-    ctx.lineWidth = 1.2 / k;
-    ctx.strokeStyle = 'rgba(58,42,28,.35)';
+    ctx.fillStyle = 'rgba(255,255,255,.10)';
+    ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+    ctx.lineWidth = 2 * px;
+    ctx.strokeStyle = 'rgba(255,246,220,.85)';
     ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
-    ctx.setLineDash([]);
 
-    prefShapes.forEach(function (p) {
-      const pref = C.prefOf(p.id);
-      const mine = C.isMine(state, p.id);
-      ctx.fillStyle = mine ? MINE_COLOR : REGION_COLORS[pref.region];
-      ctx.fill(p.path, 'evenodd');
-      // 敵の強さは、墨を重ねる濃さで見せる (遠い国ほど暗い)
-      if (has && !mine) {
-        const lv = state.realm.level[p.id - 1];
-        ctx.fillStyle = 'rgba(58,42,28,' + (0.04 + 0.3 * (lv - C.PREF_LEVEL_MIN) / C.PREF_LEVEL_SPAN).toFixed(3) + ')';
-        ctx.fill(p.path, 'evenodd');
-      }
-    });
+    // 岸の浅瀬 (陸のまわりの明るい水色)
     ctx.lineJoin = 'round';
-    ctx.lineWidth = 0.9 / k;
-    ctx.strokeStyle = 'rgba(58,42,28,.55)';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(180,242,240,.42)';
+    ctx.lineWidth = 16 * px;
     prefShapes.forEach(function (p) { ctx.stroke(p.path); });
 
-    // 攻め込める国 (自分の国のとなり) は赤い点線で囲む
+    // 崖: 陸を少し下へずらして、土の色で 2 段に塗る (陸が盛り上がって見える)
+    const cliff = function (dy, color) {
+      ctx.save(); ctx.translate(0, dy * px);
+      ctx.fillStyle = color;
+      prefShapes.forEach(function (p) { ctx.fill(p.path, 'evenodd'); });
+      ctx.restore();
+    };
+    cliff(8, '#6c4d31');
+    cliff(5, '#9a7550');
+
+    // 陸: 地方の色 (自分の国は橙)。そこへ山と森の模様を重ねる
+    prefShapes.forEach(function (p) {
+      const mine = C.isMine(state, p.id);
+      ctx.fillStyle = mine ? MINE_LAND : LAND_COLORS[C.prefOf(p.id).region];
+      ctx.fill(p.path, 'evenodd');
+    });
+    // (「重ねて色を混ぜる」overlay は重いので、白と黒を薄く重ねるだけにした)
+    ctx.fillStyle = terrainPat;
+    prefShapes.forEach(function (p) { ctx.fill(p.path, 'evenodd'); });
+
+    // 県ざかい (白い細い線)
+    ctx.strokeStyle = 'rgba(255,250,236,.85)';
+    ctx.lineWidth = 1.4 * px;
+    prefShapes.forEach(function (p) { ctx.stroke(p.path); });
+
+    // 攻め込める国 (自分の国のとなり) は赤い点線
     if (has) {
-      ctx.setLineDash([4 / k, 3 / k]);
-      ctx.lineWidth = 2 / k;
-      ctx.strokeStyle = '#c8412f';
+      ctx.setLineDash([5 * px, 4 * px]);
+      ctx.lineWidth = 2.2 * px;
+      ctx.strokeStyle = 'rgba(206,52,36,.95)';
       prefShapes.forEach(function (p) { if (C.attackSource(state, p.id)) ctx.stroke(p.path); });
       ctx.setLineDash([]);
     }
-    // 選んでいる県は金のふち。となりは細い金
+    // 選んでいる県: 明るくして、金色に光るふち
     if (sel) {
-      ctx.lineWidth = 1.6 / k;
-      ctx.strokeStyle = 'rgba(185,139,52,.9)';
-      selNb.forEach(function (id) { ctx.stroke(prefShapes[id - 1].path); });
-      ctx.lineWidth = 4.5 / k;
-      ctx.strokeStyle = '#fff6d0';
-      ctx.stroke(prefShapes[sel - 1].path);
-      ctx.lineWidth = 2.4 / k;
-      ctx.strokeStyle = '#b98b34';
-      ctx.stroke(prefShapes[sel - 1].path);
+      const sp = prefShapes[sel - 1].path;
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fillStyle = 'rgba(255,196,90,.45)';
+      ctx.fill(sp, 'evenodd');
+      ctx.globalCompositeOperation = 'source-over';
+      [[14, 'rgba(255,214,90,.22)'], [8, 'rgba(255,220,100,.45)'], [3.5, '#fff0a0'], [1.6, '#e8a21a']].forEach(function (s) {
+        ctx.lineWidth = s[0] * px; ctx.strokeStyle = s[1]; ctx.stroke(sp);
+      });
     }
 
-    // 字は画面の大きさで書く (地図を広げても太らない)
+    // ---- ここから先は画面の大きさで描く (地図を広げても城や字は太らない)
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.lineJoin = 'round';
-    const label = function (text, x, y, size, color, weight) {
-      ctx.font = (weight || 800) + ' ' + size + 'px "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(255,253,245,.95)';
-      ctx.strokeText(text, x, y);
-      ctx.fillStyle = color;
-      ctx.fillText(text, x, y);
-    };
-    // 字どうしが重ならないように、大事な県 (選んだ・となり・自分の国・広い県) から置いていき、
-    // すでに置いた字にかかる県は書かない (小さな点だけ)
+    const castle = imgs['b-castle'], face = imgs['face-smile'];
+    // 置く順: 選んだ県・となり・自分の国・広い県。すでに置いた物にかかる県は、城も札も出さない (小さな点だけ)
     const placed = [];
     const order = prefShapes.slice().sort(function (a, b) {
       const pr = function (p) { return (p.id === sel ? 1e6 : 0) + (selNb.indexOf(p.id) >= 0 ? 1e5 : 0) + (C.isMine(state, p.id) ? 1e4 : 0) + p.lr; };
       return pr(b) - pr(a);
     });
+    const font = function (w, size) { return w + ' ' + size + 'px "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif'; };
     order.forEach(function (p) {
       const pref = C.prefOf(p.id);
       const mine = C.isMine(state, p.id);
       const room = p.lr * k;               // 名前を書ける広さ (px)
       const focus = p.id === sel || selNb.indexOf(p.id) >= 0;
       const s = toS(p.lx, p.ly);
-      if (s.x < -40 || s.x > W + 40 || s.y < -30 || s.y > H + 30) return;
+      if (s.x < -60 || s.x > W + 60 || s.y < -60 || s.y > H + 40) return;
       const showName = room >= 6 || p.id === sel || (focus && room >= 3);
-      const showTroops = has && (room >= 9 || p.id === sel || (focus && room >= 4));
-      const home = has && state.realm.home === p.id;
+      const showNum = has && (room >= 9 || p.id === sel || (focus && room >= 4));
+      const ch = Math.max(0, Math.min(40, room * 1.8));   // 城の高さ
+      const showCastle = room >= 12 || (room >= 7 && (p.id === sel || mine));
       const dot = function () {
-        // 名前が書けない小さな国も、自分の国なら旗の点だけ
-        if (mine) { ctx.fillStyle = '#c8412f'; ctx.beginPath(); ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2); ctx.fill(); }
+        if (!mine) return;
+        ctx.fillStyle = MINE_FLAG; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(s.x, s.y, 3.2, 0, 7); ctx.fill(); ctx.stroke();
       };
-      if (!showName && !showTroops) { dot(); return; }
-      const bw = Math.max(showName ? pref.name.length * 11 : 0, showTroops ? 38 : 0) + 4;
-      const up = (showTroops ? 14 : 7) + (home ? 20 : 0), down = showTroops ? 20 : 7;
-      // 重なるときは、上下左右に少しずらして置けないか試す (県の中から大きく外れない範囲)
-      const tries = [[0, 0], [0, up + down], [0, -(up + down)], [bw, 0], [-bw, 0]];
+      if (!showName && !showNum) { dot(); return; }
+      // 札の大きさ
+      const name = pref.name, num = showNum ? String(C.troopsAt(state, p.id)) : '';
+      ctx.font = font(900, 12);
+      const nw = showName ? ctx.measureText(name).width : 0;
+      ctx.font = font(800, 11);
+      const mw = showNum ? ctx.measureText(num).width + 14 : 0;
+      const bw = Math.max(nw, mw) + 14 + (mine ? 14 : 0), bh = (showName && showNum) ? 32 : 19;
+      const cw = showCastle ? ch * castle.naturalWidth / castle.naturalHeight : 0;
+      const up = (showCastle ? ch * 0.8 : 0) + bh / 2, down = bh / 2;
+      const tries = [[0, 0], [0, up + down + 2], [0, -(up + down + 2)], [bw, 0], [-bw, 0]];
       let at = null;
       for (let i = 0; i < tries.length && !at; i++) {
         const x = s.x + tries[i][0], y = s.y + tries[i][1];
-        const box = { x0: x - bw / 2, x1: x + bw / 2, y0: y - up, y1: y + down };
+        const box = { x0: x - Math.max(bw, cw) / 2, x1: x + Math.max(bw, cw) / 2, y0: y - up, y1: y + down };
         const hit = placed.some(function (q) { return box.x0 < q.x1 && box.x1 > q.x0 && box.y0 < q.y1 && box.y1 > q.y0; });
         if (!hit || (p.id === sel && i === tries.length - 1)) at = { x: x, y: y, box: box };
       }
       if (!at) { dot(); return; }
       placed.push(at.box);
       if (at.x !== s.x || at.y !== s.y) {
-        // ずらしたときは、県の中の点と字を細い線でつなぐ
-        ctx.strokeStyle = 'rgba(58,42,28,.5)';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(at.x, at.y + (at.y > s.y ? -up : at.y < s.y ? down : 0) * 0.6); ctx.stroke();
-        ctx.fillStyle = mine ? '#c8412f' : 'rgba(58,42,28,.7)';
-        ctx.beginPath(); ctx.arc(s.x, s.y, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,250,236,.9)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(at.x, at.y); ctx.stroke();
+        ctx.fillStyle = mine ? MINE_FLAG : 'rgba(58,42,28,.8)';
+        ctx.beginPath(); ctx.arc(s.x, s.y, 2.4, 0, 7); ctx.fill();
       }
-      let y = at.y - (showTroops ? 7 : 0);
-      if (home) label('🏯', at.x, y - 14, 13, '#000', 400);
-      if (showName) label(pref.name, at.x, y, 11, mine ? '#7a2a14' : '#3a2a1c');
-      if (showTroops) label((mine ? '🚩' : '⚔') + C.troopsAt(state, p.id), at.x, y + 13, 10, mine ? '#7a2a14' : '#6b3a3a', 700);
+      // 城と旗 (札の上)
+      if (showCastle && ready(castle)) {
+        const top = at.y - bh / 2 - ch * 0.82;
+        ctx.fillStyle = 'rgba(40,30,20,.25)';
+        ctx.beginPath(); ctx.ellipse(at.x, at.y - bh / 2 + 1, cw * 0.42, ch * 0.08, 0, 0, 7); ctx.fill();
+        ctx.drawImage(castle, at.x - cw / 2, top, cw, ch);
+        drawFlag(ctx, at.x + cw * 0.36, top - ch * 0.12, ch * 0.62, mine ? MINE_FLAG : FLAG_COLORS[pref.region]);
+      }
+      // 白い名札 (名前と、兵の数)
+      const x0 = at.x - bw / 2, y0 = at.y - bh / 2;
+      ctx.fillStyle = 'rgba(58,42,28,.28)';
+      roundRect(ctx, x0 + 1, y0 + 2, bw, bh, 9); ctx.fill();
+      ctx.fillStyle = p.id === sel ? '#fff8dc' : 'rgba(255,253,247,.94)';
+      roundRect(ctx, x0, y0, bw, bh, 9); ctx.fill();
+      ctx.strokeStyle = p.id === sel ? '#e8a21a' : 'rgba(185,139,52,.55)'; ctx.lineWidth = p.id === sel ? 2 : 1;
+      ctx.stroke();
+      const tx = at.x + (mine ? 7 : 0);
+      if (mine && ready(face)) {
+        const fh = 16, fw = fh * face.naturalWidth / face.naturalHeight;
+        ctx.drawImage(face, x0 + 4, at.y - fh / 2, fw, fh);
+      }
+      if (showName) {
+        ctx.font = font(900, 12);
+        ctx.fillStyle = mine ? '#8a2a10' : '#3a2a1c';
+        ctx.fillText(name, tx, showNum ? at.y - 7 : at.y + 0.5);
+      }
+      if (showNum) {
+        ctx.font = font(800, 11);
+        ctx.fillStyle = mine ? '#c8412f' : '#5a4632';
+        ctx.fillText((mine ? '🚩' : '⚔') + num, tx, showName ? at.y + 8 : at.y + 0.5);
+      }
     });
   }
 
@@ -2251,8 +2431,8 @@
     const around = pref.nb.filter(function (n) { return !((id === 46 && n === 47) || (id === 47 && n === 46)); });
     if (shape.lr * realm.cam.k < 10) {
       // となりが大きい (青森のとなりの北海道など) と寄り足りないので、選んだ県が指で押せる大きさ (12px) までは寄る
-      const cam = frameCamera([id].concat(around));
-      if (shape.lr * cam.k < 12) { cam.k = 12 / shape.lr; cam.x = shape.lx; cam.y = shape.ly + sheetCover() / 2 / cam.k; }
+      let cam = frameCamera([id].concat(around));
+      if (shape.lr * cam.k < 12) cam = centerOn(shape.lx, shape.ly, 12 / shape.lr);
       moveCamera(cam);
     }
     realm.dirty = true;
@@ -2273,21 +2453,55 @@
     realm.dirty = true;
   }
 
+  /** 上の紺の帯: 取った国の数・兵・小判 */
   function updateRealmNumbers() {
     const has = C.hasRealm(state);
-    const text = (has ? '🏯 ' + C.ownedCount(state) + '/' + C.PREF_COUNT + ' ・ 兵 ' + C.totalTroops(state) + ' ・ ' : '') +
-      '小判 ' + Math.floor(state.merit);
-    if (realmEls.sub.textContent !== text) realmEls.sub.textContent = text;
+    const coin = Math.floor(state.merit);
+    const key = (has ? C.ownedCount(state) + '|' + C.totalTroops(state) : '-') + '|' + coin;
+    if (realmEls.sub.dataset.key !== key) {
+      realmEls.sub.dataset.key = key;
+      realmEls.sub.innerHTML = (has ? '<span>🏯 ' + C.ownedCount(state) + '/' + C.PREF_COUNT + '</span><i class="rs-sep"></i>' +
+        '<span>兵 ' + C.totalTroops(state) + '</span><i class="rs-sep"></i>' : '') +
+        '<span class="rs-coin"><img src="' + imgs['r-coin'].src + '" alt="">小判 ' + coin + '</span>';
+    }
+    realmEls.remain.hidden = !has;
+    if (has) {
+      const left = String(C.PREF_COUNT - C.ownedCount(state));
+      if (realmEls.left.textContent !== left) realmEls.left.textContent = left;
+    }
   }
 
-  function sheetButton(cls, text, fn) {
+  /** 案内の猫のひとこと (いまできることを、ひとことで) */
+  function guideText() {
+    if (!C.hasRealm(state)) return realm.sel ? '「' + C.prefOf(realm.sel).name + '」でいいかにゃ?' : '任される国を えらぶにゃ!';
+    if (state.realm.unified) return '天下統一にゃ! おめでとう!';
+    const sel = realm.sel;
+    if (!sel) return C.ownedCount(state) === 1 ? 'まずは近くの国から 攻めてみるにゃ!' : '赤い点線の国に 攻め込めるにゃ!';
+    if (C.isMine(state, sel)) return '兵を買って ここに置けるにゃ';
+    const src = C.attackSource(state, sel);
+    if (!src) return 'となりの国を 先にとるにゃ';
+    if (realm.send < C.TROOP_UNIT) return '兵がいないにゃ… 買って増やそう';
+    const plan = C.attackPlan(state, src, sel, realm.send);
+    if (plan.ratio >= 3) return 'この兵なら 楽勝にゃ!';
+    if (plan.ratio >= 1.5) return 'この兵なら いけるにゃ!';
+    if (plan.ratio >= 1) return '互角にゃ… 兵を増やすと 楽になるにゃ';
+    return '兵が足りないにゃ… 敵が強くなるにゃ';
+  }
+
+  function sheetButton(cls, html, fn) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = cls;
-    b.innerHTML = text;
+    b.innerHTML = html;
     b.addEventListener('click', fn);
     return b;
   }
+
+  const SWORDS_SVG = '<svg viewBox="0 0 48 48" aria-hidden="true"><g stroke-linecap="round">' +
+    '<path d="M8 40 L36 10" stroke="#8a6a3a" stroke-width="5"/><path d="M8 40 L36 10" stroke="#f3f0e6" stroke-width="2.6"/>' +
+    '<path d="M40 40 L12 10" stroke="#8a6a3a" stroke-width="5"/><path d="M40 40 L12 10" stroke="#f3f0e6" stroke-width="2.6"/>' +
+    '<path d="M5 35 L13 43 M43 35 L35 43" stroke="#3a2a1c" stroke-width="4"/>' +
+    '<path d="M4 44 L9 39 M44 44 L39 39" stroke="#b98b34" stroke-width="5"/></g></svg>';
 
   /** 札を作る。選んだ県や、国を任されたかが変わったときだけ作り直す (数字は updateRealmSheet で書き換える) */
   function renderRealmSheet() {
@@ -2301,39 +2515,49 @@
     box.innerHTML = '';
     box.dataset.mode = mode;
     const pref = sel ? C.prefOf(sel) : null;
-    const add = function (html, cls) { const d = document.createElement('div'); d.className = cls; d.innerHTML = html; box.appendChild(d); return d; };
+    const add = function (html, cls, tag) { const d = document.createElement(tag || 'div'); d.className = cls; d.innerHTML = html; box.appendChild(d); return d; };
+    const castleImg = '<img src="' + imgs['b-castle'].src + '" alt="">';
+    const head = function (img, name, note) { add(img + '<div><div class="sheet-name">' + name + '</div><div class="sheet-note">' + note + '</div></div>', 'rs-head'); };
 
     if (mode === 'choose') {
-      add('<div><div class="sheet-name">任される国を えらぶにゃ</div><div class="sheet-note">お殿様から 国をひとつ まかされた! 地図の国を押して えらんでね。<br>まわりの国には、それぞれ猫の大名がいる。はじめの国から遠いほど 強いにゃ</div></div>', 'sheet-title');
       if (pref) {
-        add('<span>' + pref.name + '</span><span>' + C.REGIONS[pref.region] + '</span><span>となり ' + pref.nb.length + ' 国</span>', 'sheet-stats');
-        const b = sheetButton('btn-gold btn-big btn-wide', '「' + pref.name + '」から はじめる', function () { doStartRealm(sel); });
+        head(castleImg, pref.name + ' <i>🐾</i>', pref.kuni + 'の国 ・ ' + C.REGIONS[pref.region]);
+        add(pref.desc, 'rs-desc', 'p');
+        const b = sheetButton('btn-start', '<span><b>この国から はじめる</b></span>', function () { doStartRealm(sel); });
         b.dataset.act = 'start';
         box.appendChild(b);
+      } else {
+        head('<img class="face" src="' + imgs['face-smile'].src + '" alt="">', '国を えらぶ', 'お殿様から 国をひとつ まかされた!');
+        add('地図の国を押して えらんでね。まわりの国には、それぞれ猫の大名がいる。はじめの国から遠いほど 強いにゃ。', 'rs-desc', 'p');
       }
     } else if (mode === 'overview') {
-      add('<div><div class="sheet-name">天下統一まで あと <b data-v="left"></b> 国</div><div class="sheet-note">赤い点線の国に 攻め込めるにゃ。国を押してね。<br>兵が多いほど、合戦の敵が へって 弱くなる</div></div>', 'sheet-title');
+      head('<img src="' + imgs['stage3'].src + '" alt="" class="face">', '天下統一まで あと <b data-v="left"></b> 国', '現在の状況');
+      add('', 'rs-progress').dataset.v = 'progress';
       add('<span data-v="owned"></span><span data-v="troops"></span><span data-v="tax"></span>', 'sheet-stats');
+      add('赤い点線の国に 攻め込めるにゃ。国を押してね。兵が多いほど、合戦の敵が へって 弱くなる。', 'rs-desc', 'p');
     } else if (mode === 'mine') {
       const home = state.realm.home === sel;
-      add('<img src="' + imgs['b-castle'].src + '" alt=""><div><div class="sheet-name">' + pref.name + (home ? ' 🏯' : '') + '</div><div class="sheet-note">自分の国' + (home ? ' (はじめに任された国)' : '') + '</div></div>', 'sheet-title');
+      head(castleImg, pref.name + ' <i>🐾</i>', pref.kuni + 'の国 (' + (home ? 'はじめに任された国' : '自分の国') + ')');
       add('<span data-v="here"></span><span data-v="troops"></span>', 'sheet-stats');
+      add(pref.desc, 'rs-desc', 'p');
       const row = add('', 'sheet-row');
       const buy = sheetButton('btn-gold', '', function () { doBuyTroops(sel); });
       buy.dataset.act = 'buy';
-      const gather = sheetButton('btn-paper', 'ここに 兵を集める', function () { doGather(sel); });
+      const gather = sheetButton('btn-paper', '🐾 ここに 兵を集める<br><small>つながった自分の国から ぜんぶ</small>', function () { doGather(sel); });
       gather.dataset.act = 'gather';
       row.appendChild(buy); row.appendChild(gather);
-      add('兵は 100 匹ずつ 買って、この国に置く。<br>集める: つながっている自分の国の兵を ぜんぶ ここへ', 'sheet-note');
     } else {
       const lv = state.realm.level[sel - 1];
-      add('<img src="' + imgs[pref.look].src + '" alt=""><div><div class="sheet-name">' + pref.name + '</div><div class="sheet-note">大名 「' + pref.daimyo + '」</div></div>', 'sheet-title');
-      add('<span class="stars">強さ ' + stars(lv) + '</span><span data-v="garrison"></span>', 'sheet-stats');
+      head('<img src="' + imgs[pref.look].src + '" alt="" class="face">', pref.name + ' <i>🐾</i>', pref.kuni + 'の国 ・ 大名「' + pref.daimyo + '」');
+      add('<img class="tag" src="' + imgs['r-tag-strength'].src + '" alt="敵の強さ"><img class="swords" src="' + imgs['r-swords'].src + '" alt=""><b data-v="garrison"></b><span class="stars">' + stars(lv) + '</span>', 'rs-row');
+      add(pref.desc, 'rs-desc flavor', 'p');
       const src = C.attackSource(state, sel);
       if (!src) {
-        add('となりの国を とってから 攻めよう。<br>自分の国のとなり (赤い点線) から 攻め込めるにゃ', 'sheet-note');
+        add('となりの国を とってから 攻めよう。自分の国のとなり (赤い点線) から 攻め込めるにゃ。', 'rs-desc', 'p');
       } else {
-        add(C.prefOf(src).name + 'から 連れて行く兵', 'send-label');
+        add('<img class="tag" src="' + imgs['r-tag-reward'].src + '" alt="主な報酬">' +
+          '<div class="tile"><img src="' + imgs['r-coin'].src + '" alt=""><span>小判<b data-v="rcoin"></b></span></div>' +
+          '<div class="tile"><img src="' + imgs['r-catcoin'].src + '" alt=""><span>経験値<b data-v="rexp"></b></span></div>', 'rs-rewards');
         const send = add('', 'send');
         const minus = sheetButton('btn-paper', '−', function () { changeSend(-C.TROOP_UNIT); });
         minus.dataset.act = 'minus';
@@ -2346,18 +2570,27 @@
         all.dataset.act = 'all';
         [minus, count, plus, all].forEach(function (el) { send.appendChild(el); });
         add('', 'preview').dataset.v = 'preview';
+        const go = sheetButton('btn-attack', SWORDS_SVG + '<span><b>この国を攻める</b><small data-v="use"></small></span>', function () { doAttack(); });
+        go.dataset.act = 'attack';
+        box.appendChild(go);
         const row = add('', 'sheet-row');
         const buy = sheetButton('btn-paper', '', function () { doBuyTroops(src); realm.send += C.TROOP_UNIT; updateRealmSheet(); });
         buy.dataset.act = 'buy';
-        const gather = sheetButton('btn-paper', C.prefOf(src).name + 'に 集める', function () { doGather(src); realm.send = C.troopsAt(state, src); updateRealmSheet(); });
+        const gather = sheetButton('btn-paper', '🐾 ' + C.prefOf(src).name + 'に 兵を集める', function () { doGather(src); realm.send = C.troopsAt(state, src); updateRealmSheet(); });
         gather.dataset.act = 'gather';
         row.appendChild(buy); row.appendChild(gather);
-        const go = sheetButton('btn-gold btn-big btn-wide', '出陣!', function () { doAttack(); });
-        go.dataset.act = 'attack';
-        box.appendChild(go);
       }
     }
     updateRealmSheet();
+    realmLayoutChanged();
+  }
+
+  /** 札の高さが変わったら、案内の猫を札の上に乗せ直し、見る範囲の真ん中も合わせる (縦画面) */
+  function realmLayoutChanged() {
+    const body = realmEls.content;
+    const sh = realmEls.sheet.getBoundingClientRect(), m = realmEls.map.getBoundingClientRect();
+    const cover = Math.max(0, m.bottom - sh.top);
+    body.style.setProperty('--sheet-cover', Math.round(cover) + 'px');
   }
 
   function changeSend(d) {
@@ -2373,6 +2606,8 @@
     const box = realmEls.sheet;
     const set = function (v, text) { const el = box.querySelector('[data-v="' + v + '"]'); if (el && el.textContent !== text) el.textContent = text; };
     const act = function (a) { return box.querySelector('[data-act="' + a + '"]'); };
+    const bubble = guideText();
+    if (realmEls.bubble.textContent !== bubble) realmEls.bubble.textContent = bubble;
     const has = C.hasRealm(state);
     if (!has) return;
     const sel = realm.sel;
@@ -2380,6 +2615,13 @@
     set('owned', '自分の国 ' + C.ownedCount(state));
     set('troops', '兵 ぜんぶで ' + C.totalTroops(state));
     set('tax', '年貢 +' + Math.round(C.ownedCount(state) * C.TAX_PER_PREF * 60) + ' 小判/分');
+    const prog = box.querySelector('[data-v="progress"]');
+    if (prog) {
+      // 地方ごとの丸: その地方をぜんぶ取ったら光る
+      const done = C.REGIONS.map(function (_, r) { return C.PREFS.filter(function (p) { return p.region === r; }).every(function (p) { return C.isMine(state, p.id); }); });
+      const html = done.map(function (d, r) { return '<i class="' + (d ? 'on' : '') + '" title="' + C.REGIONS[r] + '"></i>'; }).join('');
+      if (prog.innerHTML !== html) prog.innerHTML = html;
+    }
     const buyText = '兵を100 買う<br><small>小判 ' + C.TROOP_COST + '</small>';
     if (sel && C.isMine(state, sel)) {
       set('here', 'ここの兵 ' + C.troopsAt(state, sel));
@@ -2388,11 +2630,12 @@
       const g = act('gather');
       if (g) g.disabled = C.totalTroops(state) === C.troopsAt(state, sel);
     } else if (sel) {
-      set('garrison', '守りの兵 ' + C.troopsAt(state, sel));
+      set('garrison', String(C.troopsAt(state, sel)));
       const src = C.attackSource(state, sel);
       if (!src) return;
       realm.send = Math.max(0, Math.min(C.troopsAt(state, src), realm.send));
       set('send', String(realm.send));
+      set('use', C.prefOf(src).name + 'の兵を ' + realm.send + ' つかう');
       const buy = act('buy');
       if (buy) { if (buy.innerHTML !== buyText) buy.innerHTML = buyText; buy.disabled = !C.canBuyTroops(state, src); }
       const g = act('gather');
@@ -2401,6 +2644,7 @@
       act('plus').disabled = realm.send >= C.troopsAt(state, src);
       act('attack').disabled = !C.canAttack(state, src, sel, realm.send);
       let preview = '兵が いないと 攻められないにゃ。買うか 集めよう';
+      let rc = '-';
       if (realm.send >= C.TROOP_UNIT) {
         const plan = C.attackPlan(state, src, sel, realm.send);
         const times = plan.ratio >= 10 ? Math.round(plan.ratio) : Math.round(plan.ratio * 10) / 10;
@@ -2408,7 +2652,10 @@
         if (plan.ratio < 1) preview += '<br>敵より 少ないと 強くなるにゃ';
         else if (plan.ratio < 1.5) preview += '<br>1.5 倍で 敵が 1 匹へる';
         else if (plan.ratio < 3) preview += '<br>3 倍で もう 1 匹へる';
+        rc = String(C.conquestReward(state, plan));
       }
+      set('rcoin', rc);
+      set('rexp', rc);
       const pv = box.querySelector('[data-v="preview"]');
       if (pv && pv.innerHTML !== preview) pv.innerHTML = preview;
     }
@@ -2579,7 +2826,8 @@
     realmEls.canvas.addEventListener('pointermove', onRealmPointerMove);
     ['pointerup', 'pointercancel'].forEach(function (t) { realmEls.canvas.addEventListener(t, onRealmPointerUp); });
     blockLoupe(realmEls.canvas);
-    realmEls.all.addEventListener('click', function () { moveCamera({ x: JMAP.w / 2, y: JMAP.h / 2 + sheetCover() / 2 / realmFitK(), k: realmFitK() }); });
+    realmEls.all.addEventListener('click', function () { moveCamera(wholeCamera()); });
+    realmEls.back.addEventListener('click', function () { switchTab('battle'); });
     realmEls.unifyOk.addEventListener('click', function () { realmEls.unify.hidden = true; });
     els.btnOfferYes.addEventListener('click', acceptOffer);
     els.btnOfferNo.addEventListener('click', function () { pendingOffer = null; els.offer.hidden = true; });
@@ -2612,6 +2860,7 @@
     if (window.ResizeObserver) {
       new ResizeObserver(sizeField).observe(els.field);
       new ResizeObserver(function () { if (currentTab === 'realm') sizeRealm(); }).observe(realmEls.map);
+      new ResizeObserver(function () { if (currentTab === 'realm') realmLayoutChanged(); }).observe(realmEls.sheet);
     }
     window.addEventListener('resize', function () {
       sizeField();
@@ -2709,7 +2958,12 @@
       realmAnimating: function () { return !!realm.anim; },
       /** 地図を 47 県ぶん描き直した回数 (動かしている最中は増えないはず) */
       realmFullDraws: function () { return realm.fullDraws || 0; },
-      realmFitAll: function () { moveCamera({ x: JMAP.w / 2, y: JMAP.h / 2 + sheetCover() / 2 / realmFitK(), k: realmFitK() }, true); },
+      realmFitAll: function () { moveCamera(wholeCamera(), true); },
+      /** 地図のうち、飾りや札に隠れていない所 (画面の位置) */
+      realmFreeRect: function () {
+        const f = freeRect(), m = realmEls.map.getBoundingClientRect();
+        return { left: m.left + f.x0, top: m.top + f.y0, right: m.left + f.x1, bottom: m.top + f.y1 };
+      },
       /** 県の名前の点の、画面での位置 (指で押すテスト用) */
       prefPoint: function (id) {
         const p = prefShapes[id - 1];

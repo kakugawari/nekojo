@@ -134,20 +134,25 @@
     </div>
   </section>
 
-  <!-- ================================================= 天下 (日本地図の国とり) -->
+  <!-- ================================================= 天下 (日本地図の国とり)。見本の絵: art/realm-mock.png -->
   <section class="view realm-view" id="view-realm" data-view="realm" hidden>
-    <div class="page-head realm-head">
-      <h2 class="tag-title">天下</h2>
-      <div class="page-sub realm-sub" id="realmSub">小判 0</div>
-    </div>
     <p class="locked-note paper" id="realmLocked" hidden></p>
     <div class="realm-body" id="realmContent" hidden>
-      <div class="realm-map" id="realmMap">
-        <canvas id="realmCanvas"></canvas>
-        <button type="button" class="realm-zoom" id="btnRealmAll" aria-label="日本ぜんたいを見る">🗾 ぜんたい</button>
-        <p class="realm-credit">地図: 地球地図日本 (国土地理院)</p>
+      <!-- 地図は画面いっぱい。飾りと札は上に重ねる (押せる物のほかは指を通す) -->
+      <div class="realm-map" id="realmMap"><canvas id="realmCanvas"></canvas></div>
+      <img class="realm-title" id="realmTitle" src="./img/r-title.png" alt="天下統一 〜日本の国を ねこが制す〜" draggable="false">
+      <div class="realm-top" id="realmTop">
+        <div class="realm-sub" id="realmSub">小判 0</div>
+        <button type="button" class="realm-back" id="btnRealmBack">◀ もどる</button>
       </div>
-      <div class="realm-sheet paper" id="realmSheet"></div>
+      <button type="button" class="realm-zoom" id="btnRealmAll" aria-label="日本ぜんたいを見る">🗾 ぜんたい</button>
+      <div class="realm-remain" id="realmRemain" hidden><span>天下統一まであと <b id="realmLeft">47</b> 国</span></div>
+      <div class="realm-guide" id="realmGuide">
+        <img src="./img/stage2.png" alt="" draggable="false">
+        <p class="realm-bubble" id="realmBubble"></p>
+      </div>
+      <div class="realm-sheet" id="realmSheet"></div>
+      <p class="realm-credit">地図: 地球地図日本 (国土地理院)</p>
     </div>
   </section>
 

@@ -719,90 +719,252 @@ img { -webkit-user-drag: none; }
 .pop-label { font-weight: 800; font-size: 14px; }
 
 /* --------------------------------------------------------- 天下 (日本地図の国とり)
-   地図は残りの高さいっぱい。札 (買う・集める・攻める) は、縦では地図の下、横では右に置く。
-   地図はキャンバス 1 枚。変わったとき (国が増えた・選んだ・動かした) だけ描き直す */
+   見本の絵 (art/realm-mock.png) に合わせる: 地図は画面いっぱい、左上に墨の題字、上に紺の数の帯と「もどる」、
+   札は和紙に金の二重ぶち (縦は下・横は右)、左下に案内の猫と吹き出し、「天下統一まであと ○ 国」の墨の帯。
+   飾りは指を通す (pointer-events: none)。押せる物だけ受ける */
 
-.realm-view { padding: 10px 12px 10px; gap: 8px; }
-.realm-head { flex: none; }
-.realm-sub { font-size: 13px; }
-.realm-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.realm-view { position: relative; overflow: hidden; background: #3aa8c8; }
+.realm-body { position: absolute; inset: 0; }
 .realm-body[hidden] { display: none; }
-#realmLocked { white-space: pre-line; }
-.realm-map {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
-  border-radius: 18px;
-  overflow: hidden;
-  border: 3px solid var(--gold-edge);
-  box-shadow: 0 0 0 2px var(--gold-2) inset, 0 6px 16px rgba(58,42,28,.18);
-  background:
-    radial-gradient(ellipse at 30% 20%, rgba(255,255,255,.55), transparent 60%),
-    linear-gradient(#bfe0ee, #d8eef3 55%, #cde6ef);
-  touch-action: none;
-}
+#realmLocked { white-space: pre-line; margin: 30px 14px 0; }
+.realm-map { position: absolute; inset: 0; touch-action: none; background: linear-gradient(#2f9fc4, #4cbfd2); }
 .realm-map canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-.realm-zoom {
+
+.realm-title {
   position: absolute;
-  right: 8px;
+  left: 4px;
+  top: 2px;
+  width: 176px;
+  height: auto;
+  pointer-events: none;
+  filter: drop-shadow(0 3px 4px rgba(0,0,0,.25));
+}
+.realm-top {
+  position: absolute;
+  right: calc(8px + var(--safe-r));
   top: 8px;
-  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+.realm-top > * { pointer-events: auto; }
+.realm-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
   border-radius: 999px;
-  border: 2px solid var(--paper-edge);
-  background: rgba(251,246,236,.92);
-  font-weight: 800;
-  font-size: 12px;
+  background: linear-gradient(#26335a, #1b2442);
+  border: 2px solid #c9a24a;
+  box-shadow: 0 3px 8px rgba(0,0,0,.3), inset 0 0 0 1px rgba(255,255,255,.12);
+  color: #fff6dc;
+  font-weight: 900;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.realm-sub .rs-sep { width: 1px; height: 16px; background: rgba(255,246,220,.35); }
+.realm-sub img { width: 18px; height: 18px; object-fit: contain; vertical-align: middle; }
+.realm-sub .rs-coin { display: flex; align-items: center; gap: 4px; }
+.realm-back, .realm-zoom {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 2px solid #c9a24a;
+  background: linear-gradient(#fffaf0, #f3e6c8);
+  box-shadow: 0 3px 0 #b98b34, 0 4px 10px rgba(0,0,0,.2);
+  font-weight: 900;
+  font-size: 13px;
   color: var(--ink);
   cursor: pointer;
 }
-.realm-zoom[hidden] { display: none; }
-.realm-credit {
+.realm-back:active, .realm-zoom:active { transform: translateY(2px); box-shadow: 0 1px 0 #b98b34; }
+.realm-zoom {
   position: absolute;
-  left: 10px;
-  top: 6px;
-  margin: 0;
-  font-size: 9px;
-  color: rgba(58,42,28,.55);
-  pointer-events: none;
+  right: 10px;
+  top: 88px;
+  padding: 4px 10px;
+  font-size: 12px;
 }
-/* 縦: 札は地図の下の方に重ねる。札の高さが変わっても地図の大きさは変えない (変えると地図が上下にとぶ)。
-   見る範囲は、札に隠れていない所に合わせて決める (app.js の sheetCover) */
-.realm-sheet {
+
+/* 「天下統一まであと ○ 国」。見本の墨の帯 (字は消してある) に、数だけ重ねて書く */
+.realm-remain {
   position: absolute;
   left: 0;
-  right: 0;
-  bottom: 0;
-  max-height: 62%;
+  top: 54px;
+  width: 224px;
+  aspect-ratio: 526 / 132;
+  background: url("./img/r-remain.png") center / 100% 100% no-repeat;
+  pointer-events: none;
+  filter: drop-shadow(0 3px 4px rgba(0,0,0,.3));
+}
+.realm-remain[hidden] { display: none; }
+.realm-remain span {
+  position: absolute;
+  left: 30%;
+  right: 7%;
+  top: 30%;
+  height: 40%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 900;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.realm-remain b { font-size: 16px; margin: 0 2px; color: #fff6c8; }
+
+/* 案内の猫と吹き出し */
+.realm-guide {
+  position: absolute;
+  left: 4px;
+  bottom: calc(var(--sheet-cover, 0px) - 6px);   /* 縦: 札の上に乗る (札の高さは JS が入れる) */
+  display: flex;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.realm-guide img { width: 78px; height: auto; filter: drop-shadow(0 3px 3px rgba(0,0,0,.3)); }
+.realm-bubble {
+  position: relative;
+  margin: 0 0 40px -6px;
+  max-width: 190px;
+  padding: 7px 11px;
+  border-radius: 14px;
+  background: #fffdf6;
+  border: 2px solid #3a2a1c;
+  box-shadow: 0 3px 6px rgba(0,0,0,.2);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.realm-bubble:empty { display: none; }
+.realm-bubble::before {
+  content: "";
+  position: absolute;
+  left: -9px;
+  bottom: 10px;
+  border: 7px solid transparent;
+  border-right-color: #3a2a1c;
+  border-left: 0;
+}
+.realm-credit {
+  position: absolute;
+  left: 6px;
+  bottom: 2px;
+  margin: 0;
+  font-size: 8px;
+  color: rgba(255,255,255,.75);
+  pointer-events: none;
+}
+
+/* 札: 和紙に金の二重ぶち (見本の右の札) */
+.realm-sheet {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  max-height: 60%;
   overflow-y: auto;
-  padding: 10px 12px;
+  padding: 10px 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  box-shadow: 0 -4px 14px rgba(58,42,28,.16);
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(255,255,255,.7), transparent 55%),
+    linear-gradient(#fffaf0, #f6ecd6);
+  border: 3px solid #c9a24a;
+  box-shadow: inset 0 0 0 2px #fff7e0, inset 0 0 0 3px rgba(201,162,74,.6), 0 6px 18px rgba(0,0,0,.3);
 }
-.realm-sheet .sheet-title { display: flex; align-items: center; gap: 10px; }
-.realm-sheet .sheet-title img { width: 46px; height: 54px; object-fit: contain; flex: none; }
-.realm-sheet .sheet-name { font-weight: 900; font-size: 17px; line-height: 1.2; }
-.realm-sheet .sheet-note { font-size: 12px; color: var(--ink-2); line-height: 1.5; }
+.realm-sheet .rs-head { display: flex; align-items: center; gap: 10px; }
+.realm-sheet .rs-head > img { width: 58px; height: 50px; object-fit: contain; flex: none; filter: drop-shadow(0 2px 2px rgba(0,0,0,.2)); }
+.realm-sheet .rs-head .face { width: 42px; height: 50px; }
+.realm-sheet .sheet-name { font-weight: 900; font-size: 20px; line-height: 1.15; letter-spacing: .1em; color: #2a1e12; }
+.realm-sheet .sheet-name i { font-style: normal; font-size: 16px; color: #d9892a; letter-spacing: 0; }
+.realm-sheet .sheet-note { font-size: 11px; color: var(--ink-2); line-height: 1.5; }
+.realm-sheet .rs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px 3px 0;
+  border-radius: 10px;
+  background: rgba(233,211,160,.28);
+}
+.realm-sheet .rs-row .tag { height: 24px; width: auto; }
+.realm-sheet .rs-row .swords { width: 22px; height: 22px; }
+.realm-sheet .rs-row b { font-size: 18px; font-weight: 900; color: #2a1e12; }
+.realm-sheet .rs-row .stars { margin-left: auto; color: var(--red); font-size: 12px; letter-spacing: -.05em; }
+.realm-sheet .rs-desc { margin: 0; font-size: 12px; line-height: 1.5; color: #3a2a1c; }
+/* 攻める札では、ひとことは縦横とも隠す (札を低くして地図を広く見せる) */
+.realm-sheet[data-mode="enemy"] .rs-desc.flavor { display: none; }
+.realm-sheet .rs-rewards { display: flex; gap: 8px; align-items: center; }
+.realm-sheet .rs-rewards .tag { height: 22px; width: auto; flex: none; }
+.realm-sheet .tile {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: rgba(233,211,160,.3);
+  border: 1px solid rgba(201,162,74,.35);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: #3a2a1c;
+}
+.realm-sheet .tile img { width: 24px; height: 24px; object-fit: contain; }
+.realm-sheet .tile b { font-size: 14px; margin-left: 4px; }
 .realm-sheet .sheet-stats { display: flex; flex-wrap: wrap; gap: 6px; }
 .realm-sheet .sheet-stats span {
   font-size: 12px;
   font-weight: 800;
   padding: 3px 10px;
   border-radius: 999px;
-  background: var(--gold-2);
-  border: 1.5px solid var(--paper-edge);
+  background: rgba(233,211,160,.45);
+  border: 1.5px solid rgba(201,162,74,.5);
 }
-.realm-sheet .sheet-stats .stars { color: var(--red); letter-spacing: -.05em; }
 .realm-sheet .sheet-row { display: flex; gap: 8px; }
-.realm-sheet .sheet-row > button { flex: 1 1 0; padding: 9px 8px; font-size: 14px; }
-.realm-sheet .send { display: flex; align-items: center; gap: 8px; margin-top: -4px; }
-.realm-sheet .send-label { font-size: 12px; font-weight: 800; color: var(--ink-2); }
-.realm-sheet .send-count { min-width: 70px; text-align: center; font-weight: 900; font-size: 20px; }
-.realm-sheet .send button { width: 44px; height: 40px; padding: 0; font-size: 20px; flex: none; }
-.realm-sheet .send .send-all { width: auto; padding: 0 12px; font-size: 13px; margin-left: auto; }
-.realm-sheet .preview { font-size: 12px; font-weight: 800; color: var(--navy); line-height: 1.5; }
-.realm-sheet .btn-big { padding: 10px 20px; font-size: 19px; }
+.realm-sheet .sheet-row > button { flex: 1 1 0; padding: 7px 8px; font-size: 13px; line-height: 1.25; border-radius: 14px; }
+.realm-sheet .sheet-row small { font-size: 10px; font-weight: 700; }
+.realm-sheet .send { display: flex; align-items: center; gap: 8px; }
+.realm-sheet .send-label { font-size: 11px; font-weight: 800; color: var(--ink-2); line-height: 1.1; flex: none; }
+.realm-sheet .send-count { min-width: 64px; text-align: center; font-weight: 900; font-size: 20px; }
+.realm-sheet .send button { width: 40px; height: 34px; padding: 0; font-size: 18px; flex: none; }
+.realm-sheet .send .send-all { width: auto; padding: 0 12px; font-size: 12px; margin-left: auto; }
+.realm-sheet .preview { font-size: 11px; font-weight: 800; color: var(--navy); line-height: 1.5; }
+/* 大きな金のボタン (見本の「この国を攻める」) */
+.realm-sheet .btn-attack, .realm-sheet .btn-start {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 3px solid #b98b34;
+  background: linear-gradient(#fff3c4, #f6cf62 55%, #e9b23c);
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.55), 0 4px 0 #9a6f22, 0 6px 12px rgba(0,0,0,.2);
+  color: #2a1e12;
+  cursor: pointer;
+}
+.realm-sheet .btn-attack:active, .realm-sheet .btn-start:active { transform: translateY(3px); box-shadow: inset 0 0 0 2px rgba(255,255,255,.55), 0 1px 0 #9a6f22; }
+.realm-sheet .btn-attack:disabled, .realm-sheet .btn-start:disabled { opacity: .5; transform: none; }
+.realm-sheet .btn-attack svg { width: 30px; height: 30px; flex: none; }
+.realm-sheet .btn-attack span, .realm-sheet .btn-start span { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2; }
+.realm-sheet .btn-attack b, .realm-sheet .btn-start b { font-size: 18px; font-weight: 900; letter-spacing: .06em; }
+.realm-sheet .btn-attack small { font-size: 12px; font-weight: 800; }
+.realm-sheet .rs-progress { display: flex; align-items: center; gap: 4px; }
+.realm-sheet .rs-progress i {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #a88a64; border: 2px solid #fff6dc; box-shadow: 0 0 0 1px #8a6a48;
+  flex: none;
+}
+.realm-sheet .rs-progress i.on { background: #f0b83a; box-shadow: 0 0 0 1px #b98b34, 0 0 6px #ffd35a; }
+.realm-sheet .rs-progress i + i { margin-left: 8px; position: relative; }
+.realm-sheet .rs-progress i + i::before { content: ""; position: absolute; right: 100%; top: 3px; width: 10px; height: 2px; background: #a88a64; }
 .unify-card .rank-up-name { font-size: 34px; }
 
 /* --------------------------------------------------------- タブ */
@@ -976,13 +1138,24 @@ img { -webkit-user-drag: none; }
   .town-map { max-width: 460px; margin: 0 auto; }
 
   /* 天下: 地図を左いっぱい、札を右に */
-  /* 見出しは地図の左上に重ねて、地図を上下いっぱいに使う */
-  .realm-view { position: relative; padding: calc(8px + var(--safe-t)) calc(10px + var(--safe-r)) calc(8px + var(--safe-b)) 10px; }
-  .realm-head { position: absolute; left: 20px; top: calc(16px + var(--safe-t)); z-index: 2; pointer-events: none; }
-  .realm-head .tag-title { font-size: 15px; padding: 3px 12px; }
-  .realm-head .realm-sub { background: rgba(251,246,236,.9); border: 1.5px solid var(--paper-edge); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
-  .realm-body { flex-direction: row; }
-  .realm-sheet { position: static; width: 270px; max-height: none; flex: none; align-self: stretch; box-shadow: none; }
+  /* 天下: 札は右 (見本と同じ)。「あと ○ 国」の帯は札の下、案内の猫は左下 */
+  .realm-title { top: 4px; width: 190px; }
+  .realm-top { top: 6px; right: calc(6px + var(--safe-r)); flex-direction: row; align-items: center; }
+  .realm-zoom { top: 66px; left: 12px; right: auto; }
+  .realm-sheet {
+    left: auto;
+    right: calc(6px + var(--safe-r));
+    top: 48px;
+    bottom: auto;
+    width: 276px;
+    max-height: calc(100% - 52px - var(--safe-b));
+    gap: 6px;
+    padding: 8px 10px 10px;
+  }
+  .realm-remain { left: auto; top: auto; right: calc(290px + var(--safe-r)); bottom: calc(2px + var(--safe-b)); width: 210px; }
+  .realm-guide { bottom: calc(4px + var(--safe-b)); }
+  .realm-guide img { width: 70px; }
+  .realm-credit { left: auto; right: calc(292px + var(--safe-r)); bottom: calc(2px + var(--safe-b)); }
 
   /* 物語・出世の札: 絵を左、文を右に並べて、低い画面に収める */
   .modal-card {

@@ -788,8 +788,16 @@ async function run() {
       // 地図と札が画面に収まる (縦: 地図の下に札 / 横: 右に札)
       const map = await rect('#realmMap'), sheet = await rect('#realmSheet'), tabs = await rect('#tabbar');
       ok(map.height >= (vw < vh ? 420 : 380) && map.width >= (vw < vh ? 400 : 440), `${tag}: 地図が大きく出る (${Math.round(map.width)}x${Math.round(map.height)})`);
-      if (vw < vh) ok(sheet.bottom <= tabs.top + 1 && sheet.bottom >= map.bottom - 1, `${tag}: 札は地図の下の方に重なり、タブより上`);
-      else ok(sheet.left >= map.right - 1 && sheet.right <= vw - 59 + 1 && sheet.bottom <= vh - 21 + 1, `${tag}: 札は地図の右、安全域の内側`);
+      if (vw < vh) ok(sheet.bottom <= tabs.top + 1 && sheet.top > map.top + map.height * 0.3, `${tag}: 札は地図の下の方に重なり、タブより上`);
+      else ok(sheet.left > map.left + map.width * 0.5 && sheet.right <= vw - 59 + 1 && sheet.bottom <= vh - 21 + 1, `${tag}: 札は地図の右に重なり、安全域の内側`);
+      // 見本 (art/realm-mock.png) の飾りがそろっていて、地図を押す指をさえぎらない
+      const deco = await rp.evaluate(() => ['realmTitle', 'realmGuide', 'realmRemain'].map((id) => {
+        const el = document.getElementById(id); return { id, pe: getComputedStyle(el).pointerEvents, img: el.tagName !== 'IMG' || el.naturalWidth > 0 };
+      }));
+      ok(deco.every((d) => d.pe === 'none' && d.img), `${tag}: 題字・案内の猫・「あと ○ 国」の帯は、指を通す (${deco.map((d) => d.id + ':' + d.pe).join(', ')})`);
+      const inView = (r) => r.left >= -1 && r.top >= -1 && r.right <= vw + 1 && r.bottom <= vh + 1;
+      const top = await rect('#realmTop'), title = await rect('#realmTitle');
+      ok(inView(top) && inView(title) && (title.right <= top.left + 1 || title.bottom <= top.top + 1), `${tag}: 題字と上の帯が画面に収まり、重ならない`);
 
       // 任される国を指で選ぶ
       await tapPref(23); await settle();
@@ -798,11 +806,12 @@ async function run() {
       await rp.waitForTimeout(100);
       const st0 = await rp.evaluate(() => { const s = window.__app.state(); return { home: s.realm && s.realm.home, sub: document.getElementById('realmSub').textContent }; });
       ok(st0.home === 23 && st0.sub.includes('1/47'), `${tag}: 「はじめる」で愛知を任される (${st0.sub})`);
+      const chrome = await rp.evaluate(() => ({ left: document.getElementById('realmLeft').textContent, remain: !document.getElementById('realmRemain').hidden, bubble: document.getElementById('realmBubble').textContent }));
+      ok(chrome.remain && chrome.left === '46' && chrome.bubble.length > 0, `${tag}: 「天下統一まであと 46 国」の帯と、案内の猫のひとことが出る (${chrome.bubble})`);
 
       // 47 都道府県ぜんぶ、指で選べる (小さな県は、1 回目で寄り、2 回目で選べる)
       if (vw < vh) {
         const miss = [], small = [], hidden = [];
-        const sheetTop = async () => (await rect('#realmSheet')).top;
         for (let id = 1; id <= 47; id++) {
           await rp.evaluate(() => window.__app.realmFitAll());
           let got = null;
@@ -811,11 +820,12 @@ async function run() {
           // 選んだあとは、その県が指で押せる大きさまで寄っていて (ふちから 10px 以上の所がある)、札に隠れていない
           const pt = await rp.evaluate((i) => window.__app.prefPoint(i), id);
           if (pt.room < 10) small.push(id + ':' + pt.room.toFixed(1));
-          if (pt.y > await sheetTop() || pt.y < map.top) hidden.push(id);
+          const fr = await rp.evaluate(() => window.__app.realmFreeRect());
+          if (pt.y > fr.bottom || pt.y < fr.top || pt.x < fr.left || pt.x > fr.right) hidden.push(id);
         }
         ok(miss.length === 0, `${tag}: 日本全体の地図から、47 都道府県ぜんぶを指 2 回以内で選べる${miss.length ? ' (だめ: ' + miss.join(',') + ')' : ''}`);
         ok(small.length === 0, `${tag}: 選ぶと、小さな県 (東京・大阪・香川など) も指で押せる大きさまで寄る${small.length ? ' (だめ: ' + small.join(',') + ')' : ''}`);
-        ok(hidden.length === 0, `${tag}: 選んだ県は、下の札に隠れない${hidden.length ? ' (だめ: ' + hidden.join(',') + ')' : ''}`);
+        ok(hidden.length === 0, `${tag}: 選んだ県は、札や題字に隠れない${hidden.length ? ' (だめ: ' + hidden.join(',') + ')' : ''}`);
       }
 
       // 指で地図を動かしている最中は、47 県を塗り直さない (描いておいた絵をずらして貼るだけ。
@@ -891,6 +901,11 @@ async function run() {
       await rp.waitForTimeout(300);
       const after = await rp.evaluate(() => ({ tab: window.__app.tab(), t: window.Core.troopsAt(window.__app.state(), 22) }));
       ok(rt.includes('半分') && after.tab === 'realm' && after.t === 200, `${tag}: 退却すると兵が半分 (400 → ${after.t}) になって地図へ戻る。退却のボタンにもそう書いてある`);
+
+      // 「もどる」で合戦へ
+      await rp.locator('#btnRealmBack').tap();
+      ok(await rp.evaluate(() => window.__app.tab()) === 'battle', `${tag}: 「もどる」を押すと合戦の画面へ戻る`);
+      await rp.evaluate(() => window.__app.setTab('realm'));
 
       // 最後の 1 国を取ると天下統一
       await rp.evaluate(() => window.__app.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.mine = r.mine.map((m, i) => i !== 13); r.troops[21] = 3000; return Object.assign({}, s, { realm: r }); }));
