@@ -362,28 +362,37 @@
     return Math.min(5, 3 + Math.floor(rankIndex / 3));
   }
 
-  function createBattle(state, rng) {
+  /**
+   * 合戦を始める。plan (attackPlan) を渡すと国とりの合戦: 敵の強さは攻め込む県の大名で決まり、
+   * 兵の比で敵の数と強さが変わる。最後に出てくるのはその県の大名。
+   * こちらの強さ (体力・パンチ・覚えた技) は、いつも自分の段位で決まる。
+   */
+  function createBattle(state, rng, plan) {
     const random = rng || Math.random;
     const r = rankIndexOf(state);
-    const count = battleSize(r);
-    const pool = enemyPool(r);
+    const er = plan ? plan.level : r;          // 敵の強さを決める段
+    const count = plan ? plan.count : battleSize(r);
+    const mul = plan ? plan.strength : 1;
+    const pool = enemyPool(er);
     const fx = townEffects(state);
-    const baseHp = 50 + 28 * r;
-    const baseAtk = 5 + 1.8 * r;
+    const baseHp = (50 + 28 * er) * mul;
+    const baseAtk = (5 + 1.8 * er) * mul;
     const enemies = [];
     for (let i = 0; i < count; i++) {
       // いちばん最初の戦 (村の子猫) だけは大将を出さない。パンチだけでも勝てるように
-      const kind = (i === count - 1 && r > 0) ? 'boss' : pool[Math.floor(random() * pool.length)];
+      const kind = (i === count - 1 && er > 0) ? 'boss' : pool[Math.floor(random() * pool.length)];
       const k = ENEMY_KINDS[kind];
       const leader = i === count - 1;
       const hp = Math.round(baseHp * k.hp * (leader && !k.boss ? 1.6 : 1));
+      let name = leader && !k.boss ? k.name + 'の親分' : k.name;
+      if (plan && leader) name = plan.daimyo;
       enemies.push({
-        id: i + 1, kind: kind, look: k.look, name: leader && !k.boss ? k.name + 'の親分' : k.name, boss: leader,
+        id: i + 1, kind: kind, look: plan && leader ? plan.look : k.look, name: name, boss: leader, daimyo: !!(plan && leader),
         hp: hp, maxHp: hp, atk: Math.round(baseAtk * k.atk), interval: k.interval,
         state: 'wait', timer: 0, cd: k.interval, age: 0, x: ENTER_X,
         muchu: 0, muchuIdle: 0, charm: 0, charmTime: 0, wary: 0, knockTime: 0, knockDist: 0, open: false,
         rushNext: true, lured: false, rushTo: null, dizzy: false,
-        alive: true, reward: Math.round(enemyReward(r, leader) * fx.meritMul)
+        alive: true, reward: Math.round(enemyReward(Math.min(er, r), leader) * fx.meritMul)
       });
     }
     const allies = state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, MAX_BATTLE_VASSALS)
@@ -403,6 +412,7 @@
       items: { fish: items.fish || 0, matatabi: items.matatabi || 0 },
       used: { fish: 0, matatabi: 0 },
       merit: 0, bonus: 0, materials: 0, loot: { fish: 0, matatabi: 0 },
+      conquest: plan ? Object.assign({}, plan) : null,
       events: []
     };
     enter(b);
@@ -821,8 +831,50 @@
     return b.merit + partial;
   }
 
-  /** 合戦の結果を state に反映する。勝てば手柄・資材、負けても出世は下がらない。 */
+  /**
+   * 国とりの合戦の結果を国に反映する。
+   * 勝ち: 攻め込んだ県が自分の国になり、生き残った兵がそこに入る。
+   * 負け・退却: 連れて行った兵の半分が戻らない。そのかわり、倒した敵のぶん守りの兵も減る (挑み直すと楽になる)。
+   * 合戦の最中に兵を動かしていても、元の国にいる数より多くは減らさない。
+   */
+  function applyConquest(state, b) {
+    const c = b.conquest;
+    if (!c || !hasRealm(state) || !isMine(state, c.from) || isMine(state, c.to)) return { state: state, conquest: null };
+    const sent = Math.min(c.sent, troopsAt(state, c.from));
+    const out = { to: c.to, from: c.from, sent: sent, captured: false, lost: 0, cut: 0, unified: false };
+    if (b.phase === 'won') {
+      const lost = Math.min(conquestLosses(Object.assign({}, c, { sent: Math.max(TROOP_UNIT, sent) })), Math.max(0, sent - TROOP_UNIT));
+      out.captured = true;
+      out.lost = lost;
+      const next = withRealm(state, function (r) {
+        r.troops[c.from - 1] -= sent;
+        r.mine[c.to - 1] = true;
+        r.troops[c.to - 1] = Math.max(TROOP_UNIT, sent - lost);
+        if (!r.unified && r.mine.every(Boolean)) { r.unified = true; out.unified = true; }
+      });
+      return { state: next, conquest: out };
+    }
+    const downs = b.enemies.filter(function (e) { return !e.alive; }).length;
+    out.lost = roundTroops(sent / 2);
+    out.cut = Math.min(roundTroops(c.garrison * 0.5 * downs / b.enemies.length), Math.max(0, troopsAt(state, c.to) - TROOP_UNIT));
+    const next = withRealm(state, function (r) {
+      r.troops[c.from - 1] -= out.lost;
+      r.troops[c.to - 1] -= out.cut;
+    });
+    return { state: next, conquest: out };
+  }
+
+  /** 合戦の結果を state に反映する。勝てば手柄・資材、負けても出世は下がらない。国とりなら国も */
   function applyBattleResult(state, b) {
+    const res = applyBattleRewards(state, b);
+    if (!b.conquest) return res;
+    const c = applyConquest(res.state, b);
+    res.state = c.state;
+    res.conquest = c.conquest;
+    return res;
+  }
+
+  function applyBattleRewards(state, b) {
     // 使ったアイテムは、勝っても負けても減る
     const items = {
       fish: Math.max(0, (state.items.fish || 0) - b.used.fish),
@@ -981,6 +1033,230 @@
     return countBuildings(state, 'keep') >= 1;
   }
 
+  // ---------------------------------------------------------- 天下 (日本地図の国とり)
+  //
+  // 侍になると、お殿様から小さな国 (県) をひとつ任される。となりの県には、それぞれ猫の大名がいる。
+  // 兵 (家来の猫) を 100 匹ずつ小判で買って国に置き、となりの県へ攻め込む。
+  // 攻め込むと合戦になる。最後に出てくるのがその県の大名。勝てばその県が自分の国になる。
+  // 兵の数は合戦の手ごたえに効く: 敵より多く連れて行くほど、出てくる敵が減り、弱くなる。
+  // 47 の都道府県をすべて取ったら天下統一。
+  //
+  // 県の番号は JIS の都道府県コード (1 北海道 〜 47 沖縄)。形は japan-map.js (tools/build-japan.js で作る)。
+  // 隣り合うかは、地図の形で境を持っているか。海をはさむ所は、橋や海峡でつながる道を足した。
+
+  const REALM_UNLOCK_RANK = 4;     // 侍
+  const TROOP_UNIT = 100;          // 兵は 100 匹ずつ
+  const TROOP_COST = 50;           // 100 匹の値段 (小判)
+  const START_TROOPS = 500;        // 任された国に、はじめからいる兵
+  const TAX_PER_PREF = 0.02;       // 取った国から入る年貢 (1 国・1 秒あたりの小判)
+
+  const REGIONS = ['北海道', '東北', '関東', '中部', '近畿', '中国', '四国', '九州'];
+  // [名前, 地方, 大名 (戦国の大名をもじった猫), となり]
+  const PREF_TABLE = [
+    ['北海道', 0, 'まつにゃえ 慶広', [2]],
+    ['青森', 1, 'つがにゃ 為信', [1, 3, 5]],
+    ['岩手', 1, 'にゃんぶ 信直', [2, 4, 5]],
+    ['宮城', 1, '伊達 にゃさむね', [3, 5, 6, 7]],
+    ['秋田', 1, 'あんどう にゃすえ', [2, 3, 4, 6]],
+    ['山形', 1, 'もがにゃ 義光', [4, 5, 7, 15]],
+    ['福島', 1, 'あしにゃ 盛氏', [4, 6, 8, 9, 10, 15]],
+    ['茨城', 2, 'さたけ にゃしげ', [7, 9, 11, 12]],
+    ['栃木', 2, 'うつにゃみや 国綱', [7, 8, 10, 11]],
+    ['群馬', 2, 'にゃがの 業正', [7, 9, 11, 15, 20]],
+    ['埼玉', 2, 'にゃりた 氏長', [8, 9, 10, 12, 13, 19, 20]],
+    ['千葉', 2, 'さとにゃ 義堯', [8, 11, 13]],
+    ['東京', 2, 'おおた にゃんかん', [11, 12, 14, 19]],
+    ['神奈川', 2, 'ほうじょう にゃうじやす', [13, 19, 22]],
+    ['新潟', 3, 'うえすぎ にゃんしん', [6, 7, 10, 16, 20]],
+    ['富山', 3, 'さっさ にゃりまさ', [15, 17, 20, 21]],
+    ['石川', 3, 'まえにゃ 利家', [16, 18, 21]],
+    ['福井', 3, 'あさくにゃ 義景', [17, 21, 25, 26]],
+    ['山梨', 3, 'たけにゃ 信玄', [11, 13, 14, 20, 22]],
+    ['長野', 3, 'むらかみ にゃしきよ', [10, 11, 15, 16, 19, 21, 22, 23]],
+    ['岐阜', 3, 'さいとう にゃんさん', [16, 17, 18, 20, 23, 24, 25]],
+    ['静岡', 3, 'いまがわ にゃしもと', [14, 19, 20, 23]],
+    ['愛知', 3, '織田 にゃぶなが', [20, 21, 22, 24]],
+    ['三重', 4, 'きたばたけ にゃものり', [21, 23, 25, 26, 29, 30]],
+    ['滋賀', 4, 'あざい にゃがまさ', [18, 21, 24, 26]],
+    ['京都', 4, 'あしかが にゃしあき', [18, 24, 25, 27, 28, 29]],
+    ['大阪', 4, 'とよとみ にゃでよし', [26, 28, 29, 30]],
+    ['兵庫', 4, 'べっしょ にゃがはる', [26, 27, 31, 33, 36]],
+    ['奈良', 4, 'まつにゃが 久秀', [24, 26, 27, 30]],
+    ['和歌山', 4, 'さいか にゃごいち', [24, 27, 29]],
+    ['鳥取', 5, 'やまにゃ 豊国', [28, 32, 33, 34]],
+    ['島根', 5, 'あまにゃ 経久', [31, 34, 35]],
+    ['岡山', 5, 'うきた にゃおいえ', [28, 31, 34, 37]],
+    ['広島', 5, 'もうり にゃとなり', [31, 32, 33, 35, 38]],
+    ['山口', 5, 'おおうち にゃしたか', [32, 34, 40]],
+    ['徳島', 6, 'みよし にゃがよし', [28, 37, 38, 39]],
+    ['香川', 6, 'そごう にゃずまさ', [33, 36, 38]],
+    ['愛媛', 6, 'こうの にゃちなお', [34, 36, 37, 39]],
+    ['高知', 6, 'ちょうそかべ にゃとちか', [36, 38]],
+    ['福岡', 7, 'たちばな にゃんせつ', [35, 41, 43, 44]],
+    ['佐賀', 7, 'りゅうぞうじ にゃかのぶ', [40, 42]],
+    ['長崎', 7, 'おおむら にゃみただ', [41]],
+    ['熊本', 7, 'かとう にゃよまさ', [40, 44, 45, 46]],
+    ['大分', 7, 'おおとも にゃんりん', [40, 43, 45]],
+    ['宮崎', 7, 'いとう にゃしすけ', [43, 44, 46]],
+    ['鹿児島', 7, 'しまづ にゃしひろ', [43, 45, 47]],
+    ['沖縄', 7, 'しょう にゃい王', [46]]
+  ];
+  const PREFS = PREF_TABLE.map(function (p, i) {
+    // 大名の絵はあとで 1 匹ずつもらう。それまでは大きなボス猫の絵
+    return { id: i + 1, name: p[0], region: p[1], daimyo: p[2], look: 'cat-red', nb: p[3] };
+  });
+  const PREF_COUNT = PREFS.length;
+
+  function prefOf(id) { return PREFS[id - 1] || null; }
+  function isNeighbor(a, b) { const p = prefOf(a); return !!p && p.nb.indexOf(b) >= 0; }
+  function isRealmUnlocked(state) { return rankIndexOf(state) >= REALM_UNLOCK_RANK; }
+  function hasRealm(state) { return !!(state.realm && state.realm.home); }
+  function isMine(state, id) { return hasRealm(state) && state.realm.mine[id - 1] === true; }
+  function ownedCount(state) { return hasRealm(state) ? state.realm.mine.filter(Boolean).length : 0; }
+  function troopsAt(state, id) { return hasRealm(state) ? state.realm.troops[id - 1] : 0; }
+  function totalTroops(state) {
+    if (!hasRealm(state)) return 0;
+    let n = 0;
+    state.realm.mine.forEach(function (m, i) { if (m) n += state.realm.troops[i]; });
+    return n;
+  }
+  function roundTroops(n) { return Math.max(0, Math.floor(n / TROOP_UNIT) * TROOP_UNIT); }
+
+  /** はじめの国からの距離 (県をいくつまたぐか) */
+  function prefDistances(home) {
+    const d = new Array(PREF_COUNT + 1).fill(Infinity);
+    d[home] = 0;
+    const q = [home];
+    while (q.length) {
+      const a = q.shift();
+      prefOf(a).nb.forEach(function (b) { if (d[b] === Infinity) { d[b] = d[a] + 1; q.push(b); } });
+    }
+    return d;
+  }
+
+  /**
+   * 大名の強さ (合戦の敵の強さを、何段目の相手と同じにするか)。はじめの国から遠いほど強い。
+   * いちばん遠い国が 18 になるように、遠さを割合にして決める (端の国から始めても、真ん中から始めても同じ)
+   */
+  const PREF_LEVEL_MIN = 4;
+  const PREF_LEVEL_SPAN = 14;
+  function prefLevelFor(dist, maxDist) {
+    return PREF_LEVEL_MIN + Math.round(PREF_LEVEL_SPAN * Math.max(1, dist) / Math.max(1, maxDist));
+  }
+  /** 守りの兵。強い大名ほど多い (いちばん近くで 300〜500、いちばん遠くで 1 万ほど) */
+  function garrisonFor(level, random) {
+    return TROOP_UNIT * Math.round(3 * Math.pow(1.28, level - PREF_LEVEL_MIN) + random() * 2);
+  }
+
+  /** 任される国を選ぶ。ほかの県には大名と兵を置く (強さは、はじめの国からの距離で決まる) */
+  function startRealm(state, homeId, rng) {
+    if (hasRealm(state) || !isRealmUnlocked(state) || !prefOf(homeId)) return { ok: false, state: state };
+    const random = rng || Math.random;
+    const dist = prefDistances(homeId);
+    const maxDist = Math.max.apply(null, dist.slice(1));
+    const mine = new Array(PREF_COUNT).fill(false);
+    const troops = new Array(PREF_COUNT).fill(0);
+    const level = new Array(PREF_COUNT).fill(0);
+    for (let id = 1; id <= PREF_COUNT; id++) {
+      if (id === homeId) { mine[id - 1] = true; troops[id - 1] = START_TROOPS; continue; }
+      level[id - 1] = prefLevelFor(dist[id], maxDist);
+      troops[id - 1] = garrisonFor(level[id - 1], random);
+    }
+    const realm = { home: homeId, mine: mine, troops: troops, level: level, unified: false };
+    return { ok: true, state: Object.assign({}, state, { realm: realm }) };
+  }
+
+  function withRealm(state, fn) {
+    const realm = Object.assign({}, state.realm, { mine: state.realm.mine.slice(), troops: state.realm.troops.slice() });
+    fn(realm);
+    return Object.assign({}, state, { realm: realm });
+  }
+
+  function troopCost(count) { return TROOP_COST * Math.max(1, Math.round((count || TROOP_UNIT) / TROOP_UNIT)); }
+  function canBuyTroops(state, id) { return isMine(state, id) && state.merit >= TROOP_COST; }
+  /** 兵を 100 匹買って、その国に置く */
+  function buyTroops(state, id) {
+    if (!canBuyTroops(state, id)) return { ok: false, state: state };
+    const next = withRealm(state, function (r) { r.troops[id - 1] += TROOP_UNIT; });
+    next.merit = state.merit - TROOP_COST;
+    return { ok: true, state: next };
+  }
+
+  /**
+   * 自分の国から自分の国へ兵を移す (100 匹ずつ)。自分の国どうしがつながっていれば、遠くへも移せる
+   * (敵の国をはさむと移せない。いまは敵が攻めてこないので、自分の国はいつもひとつながり)
+   */
+  function ownReach(state, from) {
+    const seen = {};
+    seen[from] = true;
+    const q = [from];
+    while (q.length) {
+      const a = q.shift();
+      prefOf(a).nb.forEach(function (b) { if (!seen[b] && isMine(state, b)) { seen[b] = true; q.push(b); } });
+    }
+    return seen;
+  }
+  function canMoveTroops(state, from, to, count) {
+    return from !== to && isMine(state, from) && isMine(state, to) && !!ownReach(state, from)[to] &&
+      count >= TROOP_UNIT && count % TROOP_UNIT === 0 && troopsAt(state, from) >= count;
+  }
+  function moveTroops(state, from, to, count) {
+    if (!canMoveTroops(state, from, to, count)) return { ok: false, state: state };
+    return { ok: true, state: withRealm(state, function (r) { r.troops[from - 1] -= count; r.troops[to - 1] += count; }) };
+  }
+  /** つながっている自分の国の兵を、ぜんぶ 1 か所に集める */
+  function gatherTroops(state, to) {
+    if (!isMine(state, to)) return { ok: false, state: state, moved: 0 };
+    const reach = ownReach(state, to);
+    let moved = 0;
+    const next = withRealm(state, function (r) {
+      for (let id = 1; id <= PREF_COUNT; id++) {
+        if (id === to || !reach[id]) continue;
+        moved += r.troops[id - 1];
+        r.troops[to - 1] += r.troops[id - 1];
+        r.troops[id - 1] = 0;
+      }
+    });
+    return moved > 0 ? { ok: true, state: next, moved: moved } : { ok: false, state: state, moved: 0 };
+  }
+
+  /** 攻める県のとなりにある自分の国のうち、兵がいちばん多い所 (無ければ null) */
+  function attackSource(state, to) {
+    const p = prefOf(to);
+    if (!p || !hasRealm(state) || isMine(state, to)) return null;
+    let best = null;
+    p.nb.forEach(function (id) {
+      if (isMine(state, id) && (best === null || troopsAt(state, id) > troopsAt(state, best))) best = id;
+    });
+    return best;
+  }
+
+  function canAttack(state, from, to, sent) {
+    return isMine(state, from) && !isMine(state, to) && isNeighbor(from, to) &&
+      sent >= TROOP_UNIT && sent % TROOP_UNIT === 0 && troopsAt(state, from) >= sent;
+  }
+
+  /** 兵の数の比 (連れて行った兵 / 守りの兵) が、合戦の敵の数と強さに効く */
+  function attackPlan(state, from, to, sent) {
+    const p = prefOf(to);
+    const garrison = troopsAt(state, to);
+    const level = state.realm.level[to - 1];
+    const ratio = sent / Math.max(TROOP_UNIT, garrison);
+    const base = battleSize(level);
+    const count = Math.max(2, base - (ratio >= 1.5 ? 1 : 0) - (ratio >= 3 ? 1 : 0));
+    const strength = Math.min(1.5, Math.max(0.7, Math.sqrt(1 / ratio)));
+    return {
+      from: from, to: to, sent: sent, garrison: garrison, ratio: ratio, level: level,
+      count: count, strength: strength, daimyo: p.daimyo, look: p.look, name: p.name
+    };
+  }
+
+  /** 勝ったときに減る兵。守りが多いほど、こちらが少ないほど減る。1 回で 100 匹は必ず残る */
+  function conquestLosses(plan) {
+    const lost = roundTroops(plan.garrison * 0.6 / Math.sqrt(plan.ratio));
+    return Math.min(lost, plan.sent - TROOP_UNIT);
+  }
+
   // ---------------------------------------------------------- 時の流れ (放置成長)
 
   function tick(state, dt) {
@@ -1005,8 +1281,11 @@
       village = Object.assign({}, state.village, { population: population });
     }
 
+    // 取った国からの年貢 (小判だけ。経験値にはならない)
+    const tax = ownedCount(state) * TAX_PER_PREF;
+
     return Object.assign({}, state, {
-      merit: state.merit + meritGain * dt,
+      merit: state.merit + (meritGain + tax) * dt,
       totalMerit: state.totalMerit + meritGain * dt,
       materials: state.materials + materialGain * fx.matMul * dt,
       village: village
@@ -1028,7 +1307,24 @@
       items: { fish: 2, matatabi: 1 },
       hero: { hp: 0, atk: 0 },
       village: { population: 0, cells: new Array(MAP_CELLS).fill(null) },
-      castle: { cells: new Array(MAP_CELLS).fill(null) }
+      castle: { cells: new Array(MAP_CELLS).fill(null) },
+      realm: null
+    };
+  }
+
+  /** 保存データの国を確かめる。おかしければ、まだ国を任されていないことにする */
+  function sanitizeRealm(raw) {
+    if (!raw || typeof raw !== 'object' || !prefOf(raw.home)) return null;
+    const ok = function (a) { return Array.isArray(a) && a.length === PREF_COUNT; };
+    if (!ok(raw.mine) || !ok(raw.troops) || !ok(raw.level)) return null;
+    const mine = raw.mine.map(function (m) { return m === true; });
+    mine[raw.home - 1] = mine[raw.home - 1] || !mine.some(Boolean);
+    return {
+      home: raw.home,
+      mine: mine,
+      troops: raw.troops.map(function (t) { return Number.isFinite(t) ? roundTroops(t) : 0; }),
+      level: raw.level.map(function (l) { return Number.isInteger(l) ? Math.min(PREF_LEVEL_MIN + PREF_LEVEL_SPAN, Math.max(0, l)) : PREF_LEVEL_MIN; }),
+      unified: raw.unified === true
     };
   }
 
@@ -1093,6 +1389,7 @@
       for (let i = 0; i < Math.min(raw.village.houses, MAP_CELLS); i++) put('village', 'house');
     }
     out.village.population = Math.min(out.village.population, villageCapacity(out));
+    out.realm = sanitizeRealm(raw.realm);
     return out;
   }
 
@@ -1165,6 +1462,38 @@
     isCastleComplete: isCastleComplete,
 
     tick: tick,
+
+    REALM_UNLOCK_RANK: REALM_UNLOCK_RANK,
+    TROOP_UNIT: TROOP_UNIT,
+    TROOP_COST: TROOP_COST,
+    START_TROOPS: START_TROOPS,
+    TAX_PER_PREF: TAX_PER_PREF,
+    REGIONS: REGIONS,
+    PREFS: PREFS,
+    PREF_COUNT: PREF_COUNT,
+    prefOf: prefOf,
+    isNeighbor: isNeighbor,
+    isRealmUnlocked: isRealmUnlocked,
+    hasRealm: hasRealm,
+    isMine: isMine,
+    ownedCount: ownedCount,
+    troopsAt: troopsAt,
+    totalTroops: totalTroops,
+    prefDistances: prefDistances,
+    prefLevelFor: prefLevelFor,
+    startRealm: startRealm,
+    troopCost: troopCost,
+    canBuyTroops: canBuyTroops,
+    buyTroops: buyTroops,
+    canMoveTroops: canMoveTroops,
+    moveTroops: moveTroops,
+    gatherTroops: gatherTroops,
+    attackSource: attackSource,
+    PREF_LEVEL_MIN: PREF_LEVEL_MIN,
+    PREF_LEVEL_SPAN: PREF_LEVEL_SPAN,
+    canAttack: canAttack,
+    attackPlan: attackPlan,
+    conquestLosses: conquestLosses,
 
     SCENE_W: SCENE_W,
     PLAYER_X: PLAYER_X,

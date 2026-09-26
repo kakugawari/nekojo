@@ -1012,3 +1012,256 @@ test('前の版の保存データ (城4x4・家の数) は、新しいマスへ�
   const again = Core.sanitizeState(JSON.parse(JSON.stringify(s)));
   assert.deepStrictEqual(again, s, '新しい形は読み直しても変わらない');
 });
+
+// ---------------------------------------------------------- 天下 (日本地図の国とり)
+
+const JAPAN_MAP = require('./japan-map.js');
+
+function realmState(home, extra) {
+  const s = stateAtRank(Core.REALM_UNLOCK_RANK, extra);
+  return Core.startRealm(s, home || 23, Core.mulberry32(7)).state;
+}
+
+test('天下: 47 の都道府県。となりどうしは両方向で、ぜんぶがつながっている。大名がいる', () => {
+  assert.strictEqual(Core.PREFS.length, 47);
+  Core.PREFS.forEach((p, i) => {
+    assert.strictEqual(p.id, i + 1);
+    assert.ok(p.daimyo && p.name, p.id + ' に名前と大名');
+    assert.ok(p.nb.length >= 1, p.name + ' にとなりがある');
+    p.nb.forEach((n) => assert.ok(Core.prefOf(n).nb.includes(p.id), `${p.name} と ${Core.prefOf(n).name} は両方向`));
+  });
+  const d = Core.prefDistances(1);
+  assert.ok(d.slice(1).every(Number.isFinite), '北海道から沖縄まで、どこへでも行ける');
+  assert.strictEqual(d[47], Math.max(...d.slice(1)), '北海道からいちばん遠いのは沖縄');
+});
+
+test('天下: 地図の形は 47 県ぶん。名前を置く点は、その県の形の中にある', () => {
+  assert.strictEqual(JAPAN_MAP.prefs.length, 47);
+  const inside = (rings, x, y) => {
+    let c = false;
+    for (const r of rings) {
+      for (let i = 0, j = r.length - 2; i < r.length; j = i, i += 2) {
+        const xi = r[i], yi = r[i + 1], xj = r[j], yj = r[j + 1];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+      }
+    }
+    return c;
+  };
+  JAPAN_MAP.prefs.forEach((p, i) => {
+    assert.strictEqual(p.id, i + 1);
+    assert.ok(p.rings.length >= 1 && p.rings.every((r) => r.length >= 6 && r.length % 2 === 0), p.id + ' の形');
+    assert.ok(inside(p.rings, p.lx, p.ly), Core.prefOf(p.id).name + ' の名前の点が形の中');
+  });
+});
+
+test('天下: 侍になると国をひとつ任される。それより前は始められない', () => {
+  const early = stateAtRank(Core.REALM_UNLOCK_RANK - 1);
+  assert.strictEqual(Core.startRealm(early, 23).ok, false);
+  const s = realmState(23);
+  assert.ok(Core.isMine(s, 23));
+  assert.strictEqual(Core.ownedCount(s), 1);
+  assert.strictEqual(Core.troopsAt(s, 23), Core.START_TROOPS);
+  assert.strictEqual(Core.startRealm(s, 13).ok, false, '2 回は始められない');
+});
+
+test('天下: 大名は、はじめの国から遠いほど強く、守りの兵も多い。いちばん遠い国の強さは、どこから始めても同じ', () => {
+  for (const home of [1, 13, 23, 47]) {
+    const s = realmState(home);
+    const d = Core.prefDistances(home);
+    const maxD = Math.max(...d.slice(1));
+    const far = [], near = [];
+    for (let id = 1; id <= 47; id++) {
+      if (id === home) continue;
+      const lv = s.realm.level[id - 1];
+      if (d[id] === 1) near.push(lv);
+      if (d[id] === maxD) far.push(lv);
+    }
+    assert.strictEqual(Math.max(...far), Core.PREF_LEVEL_MIN + Core.PREF_LEVEL_SPAN, `いちばん遠い国 (${Core.prefOf(home).name}から)`);
+    assert.ok(Math.max(...near) <= 7, `となりの国は弱い (${Core.prefOf(home).name}から ${near})`);
+    const nb = Core.prefOf(home).nb;
+    assert.ok(nb.every((id) => Core.troopsAt(s, id) <= 600), 'となりの守りは 600 以下 (はじめの兵 500 で攻められる)');
+  }
+});
+
+test('天下: 兵は 100 匹ずつ小判で買う。自分の国にしか置けない', () => {
+  let s = realmState(23, { merit: 120 });
+  assert.strictEqual(Core.canBuyTroops(s, 22), false, '敵の国には置けない');
+  let r = Core.buyTroops(s, 23);
+  assert.ok(r.ok);
+  assert.strictEqual(Core.troopsAt(r.state, 23), Core.START_TROOPS + 100);
+  assert.strictEqual(r.state.merit, 120 - Core.TROOP_COST);
+  r = Core.buyTroops(r.state, 23);
+  assert.strictEqual(r.state.merit, 120 - 2 * Core.TROOP_COST);
+  assert.strictEqual(Core.buyTroops(r.state, 23).ok, false, '小判が足りないと買えない');
+  assert.strictEqual(Core.rankIndexOf(r.state), Core.rankIndexOf(s), '小判を使っても出世は下がらない');
+});
+
+test('天下: 兵は自分の国どうしで移せる (100 匹ずつ)。集めると 1 か所にまとまる', () => {
+  let s = realmState(23);
+  s = JSON.parse(JSON.stringify(s));
+  [22, 21, 16].forEach((id) => { s.realm.mine[id - 1] = true; s.realm.troops[id - 1] = 300; });
+  assert.strictEqual(Core.moveTroops(s, 23, 21, 250).ok, false, '100 匹ずつ');
+  assert.strictEqual(Core.moveTroops(s, 23, 21, 600).ok, false, 'いる数より多くは移せない');
+  assert.strictEqual(Core.moveTroops(s, 23, 24, 100).ok, false, '敵の国へは移せない');
+  const m = Core.moveTroops(s, 23, 16, 200);
+  assert.ok(m.ok, 'つながっていれば、となりでなくても移せる (愛知 → 岐阜 → 富山)');
+  assert.strictEqual(Core.troopsAt(m.state, 16), 500);
+  const g = Core.gatherTroops(s, 21);
+  assert.ok(g.ok);
+  assert.strictEqual(Core.troopsAt(g.state, 21), 500 + 300 * 3);
+  assert.strictEqual(Core.totalTroops(g.state), Core.totalTroops(s), '集めても数は変わらない');
+});
+
+test('天下: 攻めるのは、となりの自分の国から。兵が多いほど、合戦の敵が減って弱くなる', () => {
+  let s = realmState(23, { merit: 100000 });
+  assert.strictEqual(Core.attackSource(s, 22), 23, '静岡のとなりの自分の国は愛知');
+  assert.strictEqual(Core.attackSource(s, 1), null, '北海道はとなりではない');
+  assert.strictEqual(Core.canAttack(s, 23, 1, 100), false);
+  for (let i = 0; i < 60; i++) s = Core.buyTroops(s, 23).state;
+  const g = Core.troopsAt(s, 22);
+  const few = Core.attackPlan(s, 23, 22, 100 * Math.ceil(g / 200));
+  const same = Core.attackPlan(s, 23, 22, g);
+  const many = Core.attackPlan(s, 23, 22, g * 3);
+  assert.ok(few.strength > same.strength && same.strength > many.strength, `兵が多いほど弱い (${few.strength}, ${same.strength}, ${many.strength})`);
+  assert.ok(many.count <= same.count - 2, `3 倍連れて行くと、敵が 2 匹へる (${same.count} → ${many.count})`);
+  const b = Core.createBattle(s, Core.mulberry32(1), same);
+  const last = b.enemies[b.enemies.length - 1];
+  assert.strictEqual(last.name, Core.prefOf(22).daimyo, '最後に出てくるのは、その県の大名');
+  assert.ok(last.daimyo && last.boss);
+  assert.strictEqual(b.player.atk, Core.createBattle(s, Core.mulberry32(1)).player.atk, 'こちらの強さは、いつもの合戦と同じ (自分の段位で決まる)');
+});
+
+test('天下: 勝つとその県が自分の国になり、生き残った兵が入る。小判と経験値も入る', () => {
+  const s = realmState(23, { merit: 0 });
+  const plan = Core.attackPlan(s, 23, 22, 500);
+  const b = Core.createBattle(s, Core.mulberry32(3), plan);
+  b.enemies.forEach((e) => { e.alive = false; e.hp = 0; });
+  b.phase = 'won'; b.merit = 100; b.bonus = 30;
+  const res = Core.applyBattleResult(s, b);
+  assert.ok(res.conquest.captured);
+  assert.ok(Core.isMine(res.state, 22));
+  assert.strictEqual(Core.troopsAt(res.state, 23), 0, '連れて行った兵は元の国から出ていく');
+  assert.strictEqual(Core.troopsAt(res.state, 22), 500 - res.conquest.lost, '生き残った兵が新しい国に入る');
+  assert.ok(Core.troopsAt(res.state, 22) >= 100, '少なくとも 100 匹は残る');
+  assert.strictEqual(res.state.merit, 130);
+  assert.strictEqual(res.state.totalMerit, s.totalMerit + 130);
+});
+
+test('天下: 負け・退却では連れて行った兵の半分が戻らない。そのかわり、倒したぶん敵の守りも減る', () => {
+  const s = realmState(23);
+  const g = Core.troopsAt(s, 22);
+  const b = Core.createBattle(s, Core.mulberry32(3), Core.attackPlan(s, 23, 22, 500));
+  b.enemies[0].alive = false; b.enemies[1].alive = false;
+  b.phase = 'lost';
+  const res = Core.applyBattleResult(s, b);
+  assert.strictEqual(res.conquest.captured, false);
+  assert.strictEqual(Core.isMine(res.state, 22), false);
+  assert.strictEqual(Core.troopsAt(res.state, 23), 500 - 200, '500 のうち半分 (100 匹ずつに切り下げ) が戻らない');
+  assert.ok(Core.troopsAt(res.state, 22) < g, `守りが減る (${g} → ${Core.troopsAt(res.state, 22)})`);
+  assert.ok(Core.troopsAt(res.state, 22) >= 100, '守りは 100 より減らない');
+});
+
+test('天下: 合戦の最中に兵を動かしても、元の国にいる数より多くは減らない', () => {
+  let s = realmState(23);
+  const b = Core.createBattle(s, Core.mulberry32(3), Core.attackPlan(s, 23, 22, 500));
+  s = JSON.parse(JSON.stringify(s));
+  s.realm.troops[22] = 200; // 合戦の最中に愛知の兵が 200 に減った
+  b.phase = 'won'; b.enemies.forEach((e) => { e.alive = false; });
+  const res = Core.applyBattleResult(s, b);
+  assert.strictEqual(Core.troopsAt(res.state, 23), 0);
+  assert.ok(Core.troopsAt(res.state, 22) <= 200, '連れて行けたのは 200 まで');
+});
+
+test('天下: 47 すべて取ると天下統一。知らせは 1 回だけ', () => {
+  let s = realmState(23);
+  s = JSON.parse(JSON.stringify(s));
+  s.realm.mine = s.realm.mine.map((m, i) => i !== 21);
+  s.realm.troops[22] = 1000;
+  const win = (st) => {
+    const b = Core.createBattle(st, Core.mulberry32(3), Core.attackPlan(st, 23, 22, 1000));
+    b.phase = 'won'; b.enemies.forEach((e) => { e.alive = false; });
+    return Core.applyBattleResult(st, b);
+  };
+  const res = win(s);
+  assert.strictEqual(res.conquest.unified, true);
+  assert.strictEqual(res.state.realm.unified, true);
+  assert.strictEqual(Core.ownedCount(res.state), 47);
+});
+
+test('天下: 取った国から年貢 (小判) が入る。経験値にはならない', () => {
+  let s = realmState(23, { merit: 0 });
+  const one = Core.tick(s, 100).merit;
+  s = JSON.parse(JSON.stringify(s));
+  [22, 21, 24].forEach((id) => { s.realm.mine[id - 1] = true; });
+  const four = Core.tick(s, 100);
+  assert.ok(Math.abs(four.merit - 4 * one) < 1e-6, `国の数に比例 (${one} → ${four.merit})`);
+  assert.strictEqual(four.totalMerit, s.totalMerit, '経験値は増えない');
+});
+
+test('天下: 保存して読み込むと国も戻る。壊れた国のデータは「まだ任されていない」にする', () => {
+  const s = realmState(13);
+  assert.deepStrictEqual(Core.deserialize(Core.serialize(s)).realm, s.realm);
+  const bad = JSON.parse(Core.serialize(s));
+  bad.realm.mine = [true];
+  assert.strictEqual(Core.sanitizeState(bad).realm, null);
+  const old = JSON.parse(Core.serialize(stateAtRank(5)));
+  delete old.realm;
+  assert.strictEqual(Core.sanitizeState(old).realm, null, '前の版の保存データには国が無い');
+});
+
+/** 天下統一まで自動で遊ばせる。攻めるのは守りのいちばん少ないとなりの国。兵は集めて、決めた倍率まで買う */
+function campaign(home, ratio, bot, seed, trainShare) {
+  const rng = Core.mulberry32(seed);
+  let s = Core.startRealm(stateAtRank(Core.REALM_UNLOCK_RANK), home, rng).state;
+  let battles = 0, losses = 0;
+  const hp = [];
+  const trainSome = (st, budget) => {
+    for (;;) {
+      const k = Core.heroTrainCost(st, 'hp') <= Core.heroTrainCost(st, 'atk') ? 'hp' : 'atk';
+      const cost = Core.heroTrainCost(st, k);
+      if (cost > budget || !Core.canTrainHero(st, k)) return st;
+      budget -= cost; st = Core.trainHero(st, k).state;
+    }
+  };
+  while (!s.realm.unified && battles < 300) {
+    let to = null;
+    for (let id = 1; id <= 47; id++) {
+      if (!Core.isMine(s, id) && Core.attackSource(s, id) && (to === null || Core.troopsAt(s, id) < Core.troopsAt(s, to))) to = id;
+    }
+    const from = Core.attackSource(s, to);
+    s = Core.gatherTroops(s, from).state;
+    s = trainSome(s, s.merit * (trainShare || 0.3));
+    const g = Core.troopsAt(s, to);
+    while (Core.troopsAt(s, from) < g * ratio && Core.canBuyTroops(s, from)) s = Core.buyTroops(s, from).state;
+    battles++;
+    const sent = Core.troopsAt(s, from);
+    if (sent < 100) { const b = runBattle(s, bot, seed * 1000 + battles); s = Core.applyBattleResult(s, b).state; continue; }
+    const b = Core.createBattle(s, Core.mulberry32(seed * 1000 + battles), Core.attackPlan(s, from, to, sent));
+    let next = 0;
+    for (let i = 0; i < 60 * 300 && b.phase === 'fight'; i++) {
+      if (b.charge.on && bot.release(b)) Core.punchRelease(b);
+      if (b.t >= next && bot.press(b)) next = b.t + 0.2 + b.rng() * 0.1;
+      Core.stepBattle(b, 1 / 60);
+      b.events.length = 0;
+    }
+    if (b.phase !== 'won') losses++;
+    hp.push(b.phase === 'won' ? b.player.hp / b.player.maxHp : 0);
+    s = Core.tick(Core.applyBattleResult(s, b).state, b.t + 30);
+  }
+  hp.sort((a, b) => a - b);
+  return { unified: s.realm.unified, battles, losses, medHp: hp[hp.length >> 1] };
+}
+
+test('手ごたえ (天下): ふつうに遊べば天下統一できる。兵を多く連れて行くほど楽に勝てる', () => {
+  // 測った値 (5 つの国から): 敵と同じ数の兵で 46〜50 戦・残り体力の中央 58〜88%。2 倍なら 46〜47 戦・92〜94%
+  for (const home of [1, 23, 47]) {
+    const same = campaign(home, 1, casual, home);
+    const twice = campaign(home, 2, casual, home);
+    assert.ok(same.unified && same.battles <= 60, `${Core.prefOf(home).name}から: 敵と同じ数でも天下統一 (${same.battles} 戦・負け ${same.losses})`);
+    assert.ok(twice.unified && twice.battles <= 55, `${Core.prefOf(home).name}から: 2 倍でも天下統一 (${twice.battles} 戦)`);
+    assert.ok(twice.medHp > same.medHp + 0.05, `2 倍連れて行くと楽 (残り体力 ${Math.round(same.medHp * 100)}% → ${Math.round(twice.medHp * 100)}%)`);
+  }
+  // 溜めない子でも、小判を先に修行に使い、兵を 2 倍連れて行けば天下統一できる (測った値 59〜63 戦)
+  const tap = campaign(23, 2, tapper, 23, 1);
+  assert.ok(tap.unified && tap.battles <= 80, `溜めない子も、修行して兵を 2 倍にすれば天下統一 (${tap.battles} 戦・負け ${tap.losses})`);
+});

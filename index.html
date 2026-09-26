@@ -134,6 +134,23 @@
     </div>
   </section>
 
+  <!-- ================================================= 天下 (日本地図の国とり) -->
+  <section class="view realm-view" id="view-realm" data-view="realm" hidden>
+    <div class="page-head realm-head">
+      <h2 class="tag-title">天下</h2>
+      <div class="page-sub realm-sub" id="realmSub">小判 0</div>
+    </div>
+    <p class="locked-note paper" id="realmLocked" hidden></p>
+    <div class="realm-body" id="realmContent" hidden>
+      <div class="realm-map" id="realmMap">
+        <canvas id="realmCanvas"></canvas>
+        <button type="button" class="realm-zoom" id="btnRealmAll" aria-label="日本ぜんたいを見る">🗾 ぜんたい</button>
+        <p class="realm-credit">地図: 地球地図日本 (国土地理院)</p>
+      </div>
+      <div class="realm-sheet paper" id="realmSheet"></div>
+    </div>
+  </section>
+
   <!-- ================================================= 家臣 -->
   <section class="view view-page" id="view-vassals" data-view="vassals" hidden>
     <div class="page-head">
@@ -191,6 +208,7 @@
 
   <nav id="tabbar">
     <button type="button" class="tab" id="tab-battle" data-tab="battle"><span class="tab-icon">⚔️</span><span class="tab-label">合戦</span></button>
+    <button type="button" class="tab" id="tab-realm" data-tab="realm"><span class="tab-icon">🗾</span><span class="tab-label">天下</span></button>
     <button type="button" class="tab" id="tab-vassals" data-tab="vassals"><span class="tab-icon">🐾</span><span class="tab-label">家臣</span></button>
     <button type="button" class="tab" id="tab-castle" data-tab="castle"><span class="tab-icon">🏯</span><span class="tab-label">城</span></button>
     <button type="button" class="tab" id="tab-village" data-tab="village"><span class="tab-icon">🏘️</span><span class="tab-label">村</span></button>
@@ -227,6 +245,17 @@
   </div>
 </div>
 
+<div class="modal" id="unifyModal" hidden>
+  <div class="modal-card paper unify-card">
+    <div class="rank-up-label">天下統一!</div>
+    <div class="rank-up-name">にゃんか統一</div>
+    <img class="modal-art" src="./img/stage3.png" alt="">
+    <p class="modal-text" id="unifyText">47 の国を すべて 手に入れた!<br>ねこ将軍の 天下にゃ!</p>
+    <button type="button" class="btn-gold btn-big" id="btnUnifyOk">やったにゃ!</button>
+  </div>
+</div>
+
+<script src="./japan-map.js"></script>
 <script src="./core.js"></script>
 <script src="./app.js"></script>
 </body>

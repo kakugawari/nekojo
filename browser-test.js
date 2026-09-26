@@ -762,6 +762,151 @@ async function run() {
       await yc.close();
     }
 
+    // ------------------------------------------------ 天下 (日本地図の国とり)
+    section('天下 (日本地図で、となりの大名を倒して天下統一)');
+    for (const [vw, vh, safe] of [[430, 932, ':root{--safe-t:59px;--safe-b:34px}'], [932, 430, ':root{--safe-l:59px;--safe-r:59px;--safe-b:21px}']]) {
+      const rc = await browser.newContext({ ...device, viewport: { width: vw, height: vh } });
+      const rp = await rc.newPage();
+      rp.on('pageerror', (e) => errors.push('天下: ' + e.message));
+      rp.on('console', (m) => { if (m.type() === 'error') errors.push('天下: ' + m.text()); });
+      await rp.bringToFront();
+      await rp.goto(URL);
+      await rp.waitForFunction(() => window.__app);
+      await rp.addStyleTag({ content: safe });
+      const tag = `${vw}x${vh}`;
+      const tapPref = async (id) => { const pt = await rp.evaluate((i) => window.__app.prefPoint(i), id); await rp.touchscreen.tap(pt.x, pt.y); };
+      const settle = () => rp.waitForFunction(() => !window.__app.realmAnimating(), null, { timeout: 3000 });
+      const rect = (sel) => rp.evaluate((q) => { const r = document.querySelector(q).getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; }, sel);
+
+      await rp.evaluate(() => { const a = window.__app; a.start(); a.closeStory(); });
+      await rp.locator('#tab-realm').tap();
+      const locked = await rp.evaluate(() => ({ tab: document.querySelector('#tab-realm .tab-label').textContent, note: !document.getElementById('realmLocked').hidden }));
+      ok(locked.tab.includes('🔒') && locked.note, `${tag}: 侍になるまでは、天下の地図は鍵つき`);
+      await rp.evaluate(() => { const a = window.__app; a.debugAddMerit(window.Core.RANKS[window.Core.REALM_UNLOCK_RANK].threshold); a.closeModals(); a.setTab('realm'); });
+      await rp.waitForTimeout(200);
+
+      // 地図と札が画面に収まる (縦: 地図の下に札 / 横: 右に札)
+      const map = await rect('#realmMap'), sheet = await rect('#realmSheet'), tabs = await rect('#tabbar');
+      ok(map.height >= (vw < vh ? 420 : 380) && map.width >= (vw < vh ? 400 : 440), `${tag}: 地図が大きく出る (${Math.round(map.width)}x${Math.round(map.height)})`);
+      if (vw < vh) ok(sheet.bottom <= tabs.top + 1 && sheet.bottom >= map.bottom - 1, `${tag}: 札は地図の下の方に重なり、タブより上`);
+      else ok(sheet.left >= map.right - 1 && sheet.right <= vw - 59 + 1 && sheet.bottom <= vh - 21 + 1, `${tag}: 札は地図の右、安全域の内側`);
+
+      // 任される国を指で選ぶ
+      await tapPref(23); await settle();
+      ok(await rp.evaluate(() => window.__app.selectedPref()) === 23, `${tag}: 地図の愛知を指で押すと選べる`);
+      await rp.locator('[data-act="start"]').tap();
+      await rp.waitForTimeout(100);
+      const st0 = await rp.evaluate(() => { const s = window.__app.state(); return { home: s.realm && s.realm.home, sub: document.getElementById('realmSub').textContent }; });
+      ok(st0.home === 23 && st0.sub.includes('1/47'), `${tag}: 「はじめる」で愛知を任される (${st0.sub})`);
+
+      // 47 都道府県ぜんぶ、指で選べる (小さな県は、1 回目で寄り、2 回目で選べる)
+      if (vw < vh) {
+        const miss = [], small = [], hidden = [];
+        const sheetTop = async () => (await rect('#realmSheet')).top;
+        for (let id = 1; id <= 47; id++) {
+          await rp.evaluate(() => window.__app.realmFitAll());
+          let got = null;
+          for (let n = 0; n < 2 && got !== id; n++) { await tapPref(id); await settle(); got = await rp.evaluate(() => window.__app.selectedPref()); }
+          if (got !== id) miss.push(id + '→' + got);
+          // 選んだあとは、その県が指で押せる大きさまで寄っていて (ふちから 10px 以上の所がある)、札に隠れていない
+          const pt = await rp.evaluate((i) => window.__app.prefPoint(i), id);
+          if (pt.room < 10) small.push(id + ':' + pt.room.toFixed(1));
+          if (pt.y > await sheetTop() || pt.y < map.top) hidden.push(id);
+        }
+        ok(miss.length === 0, `${tag}: 日本全体の地図から、47 都道府県ぜんぶを指 2 回以内で選べる${miss.length ? ' (だめ: ' + miss.join(',') + ')' : ''}`);
+        ok(small.length === 0, `${tag}: 選ぶと、小さな県 (東京・大阪・香川など) も指で押せる大きさまで寄る${small.length ? ' (だめ: ' + small.join(',') + ')' : ''}`);
+        ok(hidden.length === 0, `${tag}: 選んだ県は、下の札に隠れない${hidden.length ? ' (だめ: ' + hidden.join(',') + ')' : ''}`);
+      }
+
+      // 指で地図を動かしている最中は、47 県を塗り直さない (描いておいた絵をずらして貼るだけ。
+      // 塗り直すと CPU4倍遅で 1コマ 33ms だった)。離したら 1 回だけ描き直す
+      {
+        const cdp = await rc.newCDPSession(rp);
+        const c = await rect('#realmCanvas');
+        const x0 = c.left + c.width / 2, y0 = c.top + 150;
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0 }] });
+        await rp.waitForTimeout(50);
+        const d0 = await rp.evaluate(() => window.__app.realmFullDraws());
+        const cam0 = await rp.evaluate(() => window.__app.realmCam());
+        for (let i = 1; i <= 20; i++) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + i * 4, y: y0 + i * 3 }] });
+          await rp.waitForTimeout(16);
+        }
+        const d1 = await rp.evaluate(() => window.__app.realmFullDraws());
+        const cam1 = await rp.evaluate(() => window.__app.realmCam());
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await rp.waitForTimeout(100);
+        const d2 = await rp.evaluate(() => window.__app.realmFullDraws());
+        ok(Math.hypot(cam1.x - cam0.x, cam1.y - cam0.y) > 20 / cam0.k, `${tag}: 指 1 本で地図を動かせる`);
+        ok(d1 - d0 <= 1 && d2 - d1 === 1, `${tag}: 動かしている最中は塗り直さず、離したら 1 回だけ描き直す (最中 ${d1 - d0} 回・離して ${d2 - d1} 回)`);
+        await cdp.detach();
+      }
+
+      // 兵を指で買う
+      await rp.evaluate(() => { window.__app.debugSetState((s) => Object.assign({}, s, { merit: 175 })); window.__app.realmFitAll(); });
+      await tapPref(22); await settle();
+      const sel22 = await rp.evaluate(() => window.__app.selectedPref());
+      if (sel22 !== 22) { await tapPref(22); await settle(); }
+      ok(await rp.evaluate(() => window.__app.selectedPref()) === 22, `${tag}: となりの静岡を指で選べる`);
+      const buyBtn = await rp.evaluate(() => { window.__buy = document.querySelector('[data-act="buy"]'); return !!window.__buy; });
+      await rp.locator('[data-act="buy"]').tap();
+      await rp.locator('[data-act="buy"]').tap();
+      const bought = await rp.evaluate(() => ({ t: window.Core.troopsAt(window.__app.state(), 23), m: window.__app.state().merit, send: document.querySelector('[data-v="send"]').textContent, same: window.__buy === document.querySelector('[data-act="buy"]') }));
+      // 小判は年貢で少しずつ増えるので、切り捨てで見る
+      ok(buyBtn && bought.t === 700 && Math.floor(bought.m) === 75 && bought.send === '700', `${tag}: 「兵を100 買う」を 2 回押すと、愛知の兵が 700・小判が 100 減る (連れて行く兵も 700) (${bought.t}, ${bought.m.toFixed(2)}, ${bought.send})`);
+      ok(bought.same, `${tag}: 買っても札のボタンは作り直さない (押している最中に入れ替わらない)`);
+      await rp.evaluate(() => window.__app.debugAddCoins(1000));
+      await rp.waitForTimeout(400);
+      const grown = await rp.evaluate(() => ({ same: window.__buy === document.querySelector('[data-act="buy"]'), sub: document.getElementById('realmSub').textContent }));
+      ok(grown.same && /小判 107\d/.test(grown.sub), `${tag}: 開いたまま小判が増えると上の数字が変わり、ボタンは同じもの (${grown.sub})`);
+
+      // 出陣 → 大名との合戦 → 勝つと国が増える
+      await rp.locator('[data-act="attack"]').tap();
+      await rp.waitForTimeout(150);
+      const cb = await rp.evaluate(() => { const b = window.__app.battle(); return { tab: window.__app.tab(), cq: b && b.conquest && b.conquest.to, last: b && b.enemies[b.enemies.length - 1].name, mission: document.getElementById('missionText').textContent }; });
+      ok(cb.tab === 'battle' && cb.cq === 22 && cb.last === 'いまがわ にゃしもと', `${tag}: 「出陣!」で合戦になり、最後の敵は静岡の大名 (${cb.last})`);
+      ok(cb.mission.includes('静岡'), `${tag}: お題が「静岡の大名を倒す」になる (${cb.mission})`);
+      await rp.evaluate(() => { const b = window.__app.battle(); b.enemies.forEach((e, i) => { if (i < b.enemies.length - 1) { e.alive = false; e.hp = 0; e.state = 'down'; e.timer = 0.01; } }); b.current = b.enemies.length - 2; });
+      await rp.waitForFunction(() => { const b = window.__app.battle(); const e = b && b.enemies[b.current]; return e && b.current === b.enemies.length - 1 && e.state === 'idle'; }, null, { timeout: 8000 });
+      ok(await rp.evaluate(() => document.getElementById('enemyName').textContent === window.Core.prefOf(22).daimyo), `${tag}: 上の札に大名の名前が出る`);
+      await rp.evaluate(() => { const b = window.__app.battle(); b.enemies[b.current].hp = 1; window.__app.punch(); });
+      await rp.waitForFunction(() => !document.getElementById('resultPanel').hidden, null, { timeout: 6000 });
+      const won = await rp.evaluate(() => ({ title: document.getElementById('resultTitle').textContent, next: document.getElementById('btnNext').textContent, mine: window.Core.isMine(window.__app.state(), 22) }));
+      ok(won.title.includes('静岡') && won.mine, `${tag}: 大名を倒すと静岡が自分の国になる (${won.title})`);
+      await rp.locator('#btnNext').tap();
+      await rp.waitForTimeout(300);
+      const back = await rp.evaluate(() => ({ tab: window.__app.tab(), sub: document.getElementById('realmSub').textContent, sel: window.__app.selectedPref() }));
+      ok(back.tab === 'realm' && back.sub.includes('2/47') && back.sel === 22, `${tag}: 「${won.next}」で地図へ戻り、国が 2 つになっている (${back.sub})`);
+
+      // 退却すると、連れて行った兵の半分が戻らない
+      await rp.evaluate(() => window.__app.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.troops[21] = 400; r.troops[22] = 0; return Object.assign({}, s, { realm: r }); }));
+      await rp.evaluate(() => window.__app.realmFitAll());
+      await tapPref(14); await settle();
+      if (await rp.evaluate(() => window.__app.selectedPref()) !== 14) { await tapPref(14); await settle(); }
+      await rp.locator('[data-act="attack"]').tap();
+      await rp.waitForTimeout(150);
+      await rp.locator('#btnPause').tap();
+      const rt = await rp.evaluate(() => document.getElementById('btnRetreat').textContent);
+      await rp.locator('#btnRetreat').tap();
+      await rp.waitForTimeout(300);
+      const after = await rp.evaluate(() => ({ tab: window.__app.tab(), t: window.Core.troopsAt(window.__app.state(), 22) }));
+      ok(rt.includes('半分') && after.tab === 'realm' && after.t === 200, `${tag}: 退却すると兵が半分 (400 → ${after.t}) になって地図へ戻る。退却のボタンにもそう書いてある`);
+
+      // 最後の 1 国を取ると天下統一
+      await rp.evaluate(() => window.__app.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.mine = r.mine.map((m, i) => i !== 13); r.troops[21] = 3000; return Object.assign({}, s, { realm: r }); }));
+      await rp.evaluate(() => window.__app.selectPref(14));
+      await rp.locator('[data-act="attack"]').tap();
+      await rp.evaluate(() => { const b = window.__app.battle(); b.enemies.forEach((e, i) => { if (i < b.enemies.length - 1) { e.alive = false; e.hp = 0; e.state = 'down'; e.timer = 0.01; } }); b.current = b.enemies.length - 2; });
+      await rp.waitForFunction(() => { const b = window.__app.battle(); const e = b && b.enemies[b.current]; return e && b.current === b.enemies.length - 1 && e.state === 'idle'; }, null, { timeout: 8000 });
+      await rp.evaluate(() => { const b = window.__app.battle(); b.enemies[b.current].hp = 1; window.__app.punch(); });
+      await rp.waitForFunction(() => !document.getElementById('unifyModal').hidden, null, { timeout: 6000 }).catch(() => {});
+      const uni = await rp.evaluate(() => ({ shown: !document.getElementById('unifyModal').hidden, all: window.Core.ownedCount(window.__app.state()) }));
+      ok(uni.shown && uni.all === 47, `${tag}: 47 国そろうと「天下統一!」の札が出る`);
+      const card = await rect('#unifyModal .modal-card');
+      ok(card.top >= -1 && card.bottom <= vh + 1, `${tag}: 天下統一の札が画面に収まる`);
+      await rc.close();
+    }
+
     // ------------------------------------------------ 留守の間の進み (保存 → 再読み込み)
     section('留守の間も育つ (保存と再読み込み)');
     await phone.evaluate(() => {
