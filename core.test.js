@@ -1274,3 +1274,164 @@ test('天下: 県ごとに昔の国の名前とひとことがある。取った
   const merit = b.enemies.reduce((n, e) => n + e.reward, 0);
   assert.strictEqual(Core.conquestReward(s, plan), merit + Math.round(merit * 0.3));
 });
+
+// ---------------------------------------------------------- 敵の大名が攻めてくる
+
+/** 愛知から始めて、となりを 2 つ取った (国が 3 つ) ことにする */
+function threeLands(extra) {
+  const s = JSON.parse(JSON.stringify(realmState(23, extra)));
+  [22, 21].forEach((id) => { s.realm.mine[id - 1] = true; s.realm.troops[id - 1] = 300; });
+  return s;
+}
+function untilInvade(s, seed) {
+  const rng = Core.mulberry32(seed || 5);
+  for (let t = 0; t < 400; t++) {
+    const r = Core.stepRealm(s, 1, rng); s = r.state;
+    const ev = r.events.find((e) => e.type === 'invade');
+    if (ev) return { s, inv: ev.invasion, t };
+  }
+  throw new Error('攻めてこない');
+}
+
+test('攻めてくる: 自分の国が 3 つになるまでは攻めてこない。3 つになると 2.5〜5 分で攻めてくる', () => {
+  let s = realmState(23);
+  const rng = Core.mulberry32(1);
+  for (let t = 0; t < 600; t++) s = Core.stepRealm(s, 1, rng).state;
+  assert.strictEqual(s.realm.invasion, null, '国がひとつでは攻めてこない');
+  const r = untilInvade(threeLands());
+  assert.ok(r.t >= Core.INVASION_GAP[0] - 1 && r.t <= Core.INVASION_GAP[1] + 1, `${r.t} 秒で攻めてきた`);
+  assert.ok(Core.isMine(r.s, r.inv.to) && !Core.isMine(r.s, r.inv.from) && Core.isNeighbor(r.inv.from, r.inv.to), 'となりの敵の国から、自分の国へ');
+  assert.strictEqual(r.inv.left, Core.INVASION_WARN, `着くまで ${Core.INVASION_WARN} 秒`);
+  assert.ok(r.inv.troops >= 100 && r.inv.troops % 100 === 0);
+  assert.strictEqual(Core.stepRealm(r.s, 0).state, r.s, 'dt が 0 以下なら何もしない');
+});
+
+test('攻めてくる: 攻めてきた大名の国は、そのぶん兵が減っている (攻め返す好機)', () => {
+  const s0 = threeLands();
+  const r = untilInvade(s0);
+  assert.strictEqual(Core.troopsAt(r.s, r.inv.from), Core.troopsAt(s0, r.inv.from) - r.inv.troops);
+});
+
+test('攻めてくる: 何もしなければ兵の数で決まる。守りが多ければ追い返し、少なければ取られる', () => {
+  const r = untilInvade(threeLands());
+  const rng = Core.mulberry32(9);
+  const wait = (st) => { let out = null; for (let t = 0; t <= Core.INVASION_WARN + 1 && !out; t++) { const x = Core.stepRealm(st, 1, rng); st = x.state; const ev = x.events.find((e) => e.type === 'invasionResolved'); if (ev) out = { st, res: ev.result }; } return out; };
+  // 守りを厚くして待つ
+  const strong = JSON.parse(JSON.stringify(r.s));
+  strong.realm.troops[r.inv.to - 1] = r.inv.troops + 300;
+  const a = wait(strong);
+  assert.ok(a.res.repelled && !a.res.fell && Core.isMine(a.st, r.inv.to), '追い返した');
+  assert.ok(Core.troopsAt(a.st, r.inv.to) < r.inv.troops + 300 && Core.troopsAt(a.st, r.inv.to) >= 100, '守りの兵も少し減る');
+  assert.strictEqual(a.st.realm.invasion, null);
+  // 守りが薄い (はじめの国でなければ取られる)
+  const weak = JSON.parse(JSON.stringify(r.s));
+  weak.realm.troops[r.inv.to - 1] = 0;
+  const b = wait(weak);
+  if (r.inv.to !== 23) {
+    assert.ok(b.res.fell && !Core.isMine(b.st, r.inv.to), '取られた');
+    assert.strictEqual(Core.lordOf(b.st, r.inv.to).id, Core.lordOf(r.s, r.inv.from).id, '攻めてきた大名の国になる');
+    assert.ok(Core.troopsAt(b.st, r.inv.to) >= 100);
+  }
+});
+
+test('攻めてくる: はじめに任された国は取られない (負けても守りの兵が半分になるだけ)', () => {
+  const r = untilInvade(threeLands());
+  const s = JSON.parse(JSON.stringify(r.s));
+  s.realm.invasion = Object.assign({}, s.realm.invasion, { to: 23, from: 24, left: 1, troops: 5000, lord: 24 });
+  s.realm.troops[22] = 400;
+  const out = Core.stepRealm(s, 2, Core.mulberry32(1));
+  const res = out.events[0].result;
+  assert.ok(!res.fell && !res.repelled, '取られない');
+  assert.ok(Core.isMine(out.state, 23));
+  assert.strictEqual(Core.troopsAt(out.state, 23), 200);
+});
+
+test('攻めてくる: 迎え撃つ合戦。最後は攻めてきた大名。勝てば追い返し、負けると取られる', () => {
+  const r = untilInvade(threeLands({ merit: 0 }));
+  const plan = Core.defensePlan(r.s);
+  assert.ok(plan.defense && plan.to === r.inv.to && plan.attackers === r.inv.troops);
+  const b = Core.createBattle(r.s, Core.mulberry32(2), plan);
+  assert.strictEqual(b.enemies[b.enemies.length - 1].name, Core.lordOf(r.s, r.inv.from).daimyo);
+  // 守りが多いほど楽
+  const more = JSON.parse(JSON.stringify(r.s)); more.realm.troops[r.inv.to - 1] = r.inv.troops * 3;
+  const p2 = Core.defensePlan(more);
+  assert.ok(p2.strength < plan.strength && p2.count < plan.count, `守りが多いと敵が減って弱い (${plan.count}→${p2.count}, ${plan.strength}→${p2.strength})`);
+  // 勝つ
+  const won = Core.createBattle(r.s, Core.mulberry32(2), plan);
+  won.phase = 'won'; won.enemies.forEach((e) => { e.alive = false; });
+  const w = Core.applyBattleResult(r.s, won);
+  assert.ok(w.defense.repelled && Core.isMine(w.state, r.inv.to) && w.state.realm.invasion === null, '追い返した');
+  // 負ける
+  const lost = Core.createBattle(r.s, Core.mulberry32(2), plan);
+  lost.phase = 'lost';
+  const l = Core.applyBattleResult(r.s, lost);
+  assert.ok(!l.defense.repelled && l.state.realm.invasion === null);
+  if (r.inv.to !== 23) assert.ok(l.defense.fell && !Core.isMine(l.state, r.inv.to), '負けると取られる');
+});
+
+test('攻めてくる: 取られた県は、攻めてきた大名が守る。攻め返すと、その大名が出てくる', () => {
+  const r = untilInvade(threeLands());
+  if (r.inv.to === 23) return;
+  const s = JSON.parse(JSON.stringify(r.s));
+  s.realm.troops[r.inv.to - 1] = 0;
+  const fell = Core.stepRealm(Object.assign({}, s, { realm: Object.assign({}, s.realm, { invasion: Object.assign({}, s.realm.invasion, { left: 0.5 }) }) }), 1).state;
+  const src = Core.attackSource(fell, r.inv.to);
+  assert.ok(src, '取り返しに行ける');
+  const plan = Core.attackPlan(fell, src, r.inv.to, 100);
+  assert.strictEqual(plan.daimyo, Core.lordOf(r.s, r.inv.from).daimyo);
+});
+
+test('攻めてくる: 天下統一したら、もう攻めてこない。保存して読み込むと秒読みも戻る', () => {
+  const r = untilInvade(threeLands());
+  const back = Core.deserialize(Core.serialize(r.s));
+  assert.deepStrictEqual(back.realm.invasion, r.s.realm.invasion);
+  const bad = JSON.parse(Core.serialize(r.s)); bad.realm.invasion.to = 99;
+  assert.strictEqual(Core.sanitizeState(bad).realm.invasion, null, 'おかしな知らせは捨てる');
+  const done = JSON.parse(JSON.stringify(threeLands()));
+  done.realm.unified = true; done.realm.nextInvasion = 1;
+  assert.strictEqual(Core.stepRealm(done, 500, Core.mulberry32(1)).state.realm.invasion, null);
+});
+
+test('手ごたえ (攻めてくる): 攻めてきたら迎え撃つ子は、天下統一までに何度も攻められても、ほとんど追い返す', () => {
+  // 測った値 (4 つの国から、敵と同じ数の兵): 攻めてきた 12〜13 回、追い返した 11〜13 回、58〜65 戦で天下統一
+  const run = (s, b) => {
+    let next = 0;
+    for (let i = 0; i < 60 * 300 && b.phase === 'fight'; i++) {
+      if (b.charge.on && casual.release(b)) Core.punchRelease(b);
+      if (b.t >= next && casual.press(b)) next = b.t + 0.2 + b.rng() * 0.1;
+      Core.stepBattle(b, 1 / 60); b.events.length = 0;
+    }
+    return b;
+  };
+  for (const home of [23, 1]) {
+    const rng = Core.mulberry32(home);
+    let s = Core.startRealm(stateAtRank(Core.REALM_UNLOCK_RANK), home, rng).state;
+    let battles = 0, inv = 0, rep = 0;
+    const advance = (sec) => {
+      for (; sec > 0; sec -= 5) {
+        s = Core.tick(s, 5);
+        const r = Core.stepRealm(s, 5, rng); s = r.state;
+        if (r.events.some((e) => e.type === 'invade')) {
+          inv++; battles++;
+          const res = Core.applyBattleResult(s, run(s, Core.createBattle(s, rng, Core.defensePlan(s))));
+          s = res.state; if (res.defense.repelled) rep++;
+        }
+      }
+    };
+    while (!s.realm.unified && battles < 200) {
+      let to = null;
+      for (let id = 1; id <= 47; id++) if (!Core.isMine(s, id) && Core.attackSource(s, id) && (to === null || Core.troopsAt(s, id) < Core.troopsAt(s, to))) to = id;
+      const from = Core.attackSource(s, to);
+      s = Core.gatherTroops(s, from).state;
+      for (;;) { const k = Core.heroTrainCost(s, 'hp') <= Core.heroTrainCost(s, 'atk') ? 'hp' : 'atk'; if (Core.heroTrainCost(s, k) > s.merit * 0.3 || !Core.canTrainHero(s, k)) break; s = Core.trainHero(s, k).state; }
+      while (Core.troopsAt(s, from) < Core.troopsAt(s, to) && Core.canBuyTroops(s, from)) s = Core.buyTroops(s, from).state;
+      battles++;
+      const sent = Core.troopsAt(s, from);
+      const b = run(s, sent >= 100 ? Core.createBattle(s, rng, Core.attackPlan(s, from, to, sent)) : Core.createBattle(s, rng));
+      s = Core.applyBattleResult(s, b).state;
+      advance(b.t + 30);
+    }
+    assert.ok(s.realm.unified && battles <= 80, `${Core.prefOf(home).name}から: 攻められながらも天下統一 (${battles} 戦)`);
+    assert.ok(inv >= 5 && rep >= inv - 3, `${Core.prefOf(home).name}から: 攻めてきた ${inv} 回、追い返した ${rep} 回`);
+  }
+});

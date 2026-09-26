@@ -907,6 +907,67 @@ async function run() {
       ok(await rp.evaluate(() => window.__app.tab()) === 'battle', `${tag}: 「もどる」を押すと合戦の画面へ戻る`);
       await rp.evaluate(() => window.__app.setTab('realm'));
 
+      // 敵の大名が攻めてくる: 知らせ・秒読み・迎え撃つ・何もしないと取られる
+      {
+        await rp.evaluate(() => window.__app.debugSetState((s) => {
+          const r = JSON.parse(JSON.stringify(s.realm));
+          [21, 20].forEach((id) => { r.mine[id - 1] = true; r.troops[id - 1] = 300; });
+          r.invasion = null; r.nextInvasion = 1;
+          return Object.assign({}, s, { realm: r });
+        }));
+        await rp.evaluate(() => window.__app.realmStep(2));
+        const inv = await rp.evaluate(() => window.__app.state().realm.invasion);
+        ok(!!inv && inv.left > 0, `${tag}: 自分の国が 3 つ以上になると、敵の大名が攻めてくる (${inv && inv.from}→${inv && inv.to})`);
+        // ほかの画面にいても、下の知らせで分かる。押すと天下の地図の、攻められている国へ
+        await rp.evaluate(() => window.__app.setTab('vassals'));
+        await rp.waitForTimeout(100);
+        const bar = await rp.evaluate(() => ({ shown: !document.getElementById('invasionBar').hidden, text: document.getElementById('invasionBar').textContent }));
+        ok(bar.shown && /あと \d+ 秒/.test(bar.text), `${tag}: ほかの画面では、下に知らせの帯が出る (${bar.text})`);
+        await rp.locator('#invasionBar').tap();
+        await rp.waitForTimeout(200);
+        const there = await rp.evaluate(() => ({ tab: window.__app.tab(), sel: window.__app.selectedPref(), bar: !document.getElementById('invasionBar').hidden }));
+        ok(there.tab === 'realm' && there.sel === inv.to && !there.bar, `${tag}: 帯を押すと、天下の地図の攻められている国が選ばれる`);
+        const alarm = await rp.evaluate(() => ({ left: document.querySelector('[data-v="invLeft"]')?.textContent, btn: !!document.querySelector('[data-act="defend"]') }));
+        ok(alarm.btn && Number(alarm.left) > 0, `${tag}: 札に秒読みと「迎え撃つ!」が出る (あと ${alarm.left} 秒)`);
+        // 秒読みは進む
+        const l0 = await rp.evaluate(() => window.__app.state().realm.invasion.left);
+        await rp.evaluate(() => window.__app.realmStep(5));
+        await rp.waitForTimeout(350);
+        const l1 = await rp.evaluate(() => ({ left: window.__app.state().realm.invasion.left, shown: document.querySelector('[data-v="invLeft"]').textContent }));
+        ok(l1.left <= l0 - 4.9 && l1.shown === String(Math.ceil(l1.left)), `${tag}: 秒読みが進み、札の数も書き変わる (${Math.ceil(l0)} → ${l1.shown})`);
+        // 画面を開いているだけでも秒読みは進む (毎コマ)。合戦の最中は止まる
+        const l2 = await rp.evaluate(() => window.__app.state().realm.invasion.left);
+        await rp.waitForTimeout(1200);
+        const l3 = await rp.evaluate(() => window.__app.state().realm.invasion.left);
+        ok(l2 - l3 > 0.8 && l2 - l3 < 1.6, `${tag}: 地図を開いているだけで秒読みが進む (1.2 秒で ${(l2 - l3).toFixed(2)} 秒)`);
+        // 迎え撃つ → 大名を倒すと追い返す
+        await rp.locator('[data-act="defend"]').tap();
+        await rp.waitForTimeout(150);
+        const l4 = await rp.evaluate(() => window.__app.state().realm.invasion.left);
+        await rp.waitForTimeout(800);
+        ok(await rp.evaluate(() => window.__app.state().realm.invasion.left) === l4, `${tag}: 合戦の最中は秒読みが止まる`);
+        const db = await rp.evaluate(() => { const b = window.__app.battle(); return { def: b && b.conquest && b.conquest.defense, mission: document.getElementById('missionText').textContent }; });
+        ok(db.def && db.mission.includes('を守る'), `${tag}: 「迎え撃つ!」で守りの合戦になる (${db.mission})`);
+        await rp.evaluate(() => { const b = window.__app.battle(); b.enemies.forEach((e, i) => { if (i < b.enemies.length - 1) { e.alive = false; e.hp = 0; e.state = 'down'; e.timer = 0.01; } }); b.current = b.enemies.length - 2; });
+        await rp.waitForFunction(() => { const b = window.__app.battle(); const e = b && b.enemies[b.current]; return e && b.current === b.enemies.length - 1 && e.state === 'idle'; }, null, { timeout: 8000 });
+        await rp.evaluate(() => { const b = window.__app.battle(); b.enemies[b.current].hp = 1; window.__app.punch(); });
+        await rp.waitForFunction(() => !document.getElementById('resultPanel').hidden, null, { timeout: 6000 });
+        const rep = await rp.evaluate(() => ({ title: document.getElementById('resultTitle').textContent, inv: window.__app.state().realm.invasion }));
+        ok(rep.title.includes('守りきった') && rep.inv === null, `${tag}: 勝つと追い返す (${rep.title})`);
+        await rp.locator('#btnNext').tap();
+        await rp.waitForTimeout(200);
+        ok(await rp.evaluate(() => window.__app.tab()) === 'realm', `${tag}: 「天下の地図へ」で地図へ戻る`);
+        // もう一度攻めてこさせて、何もしないと取られる (はじめの国でなければ)
+        await rp.evaluate(() => window.__app.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.nextInvasion = 1; return Object.assign({}, s, { realm: r }); }));
+        await rp.evaluate(() => window.__app.realmStep(2));
+        const inv2 = await rp.evaluate(() => window.__app.state().realm.invasion);
+        await rp.evaluate((to) => window.__app.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.troops[to - 1] = 0; return Object.assign({}, s, { realm: r }); }), inv2.to);
+        await rp.evaluate(() => { for (let i = 0; i < 70; i++) window.__app.realmStep(1); });
+        await rp.waitForTimeout(100);
+        const after2 = await rp.evaluate((to) => ({ mine: window.Core.isMine(window.__app.state(), to), inv: window.__app.state().realm.invasion, home: window.__app.state().realm.home }), inv2.to);
+        ok(after2.inv === null && (after2.home === inv2.to ? after2.mine : !after2.mine), `${tag}: 守りの兵がいないまま 60 秒たつと取られる (${inv2.to}: ${after2.mine ? '自分の国のまま' : '取られた'})`);
+      }
+
       // 最後の 1 国を取ると天下統一
       await rp.evaluate(() => window.__app.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.mine = r.mine.map((m, i) => i !== 13); r.troops[21] = 3000; return Object.assign({}, s, { realm: r }); }));
       await rp.evaluate(() => window.__app.selectPref(14));

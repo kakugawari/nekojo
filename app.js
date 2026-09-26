@@ -37,7 +37,7 @@
     castleBanner: $('castleBanner'),
     materialCountVillage: $('materialCountVillage'), villageLocked: $('villageLocked'), villageContent: $('villageContent'),
     popLabel: $('popLabel'), popFill: $('popFill'),
-    toast: $('toast'), cutin: $('cutin'),
+    toast: $('toast'), cutin: $('cutin'), invasionBar: $('invasionBar'),
     storyModal: $('storyModal'), btnStory: $('btnStory'),
     rankModal: $('rankModal'), rankUpName: $('rankUpName'), rankUpArt: $('rankUpArt'), rankUpText: $('rankUpText'), btnRankOk: $('btnRankOk')
   };
@@ -173,6 +173,7 @@
     renderTabs();
     renderActiveView();
     if (name === 'battle') sizeField();
+    updateInvasionBar();
   }
 
   function renderActiveView() {
@@ -205,7 +206,7 @@
     setText(els.lvText, 'lv', 'Lv.' + (r + 1));
     setText(els.rankTag, 'rank', C.RANKS[r].name);
     const cq = battle ? battle.conquest : (lastBattle && lastBattle.conquest);
-    setText(els.missionText, 'mission', cq ? cq.name + 'の大名を倒す' : (MISSIONS[r] || MISSIONS[0]));
+    setText(els.missionText, 'mission', cq ? (cq.defense ? cq.name + 'を守る' : cq.name + 'の大名を倒す') : (MISSIONS[r] || MISSIONS[0]));
     const next = C.RANKS[r + 1];
     setWidth(els.nextFill, 'exp', next
       ? Math.max(0, Math.min(100, (state.totalMerit - C.RANKS[r].threshold) / (next.threshold - C.RANKS[r].threshold) * 100))
@@ -1246,6 +1247,8 @@
     state = res.state;
     saveSoon();
     const cq = res.conquest;
+    const df = res.defense;
+    if (df) { realm.dirty = true; realm.sheetKey = ''; }
     if (b.phase === 'won') {
       pendingOffer = C.rollRecruitOffer(state, b);
       setFace('smile', 2.5);
@@ -1253,12 +1256,13 @@
       const gain = b.merit + b.bonus;
       let rows = '';
       if (cq) rows += row('🏯 手に入れた国', C.prefOf(cq.to).name) + row('入った兵', C.troopsAt(state, cq.to) + ' 匹') + row('失った兵', cq.lost + ' 匹');
+      if (df) rows += row('🛡 守った国', C.prefOf(df.to).name) + row('追い返した兵', df.attackers + ' 匹') + row('へった守りの兵', df.lost + ' 匹');
       rows += row('倒した敵', b.enemies.length + ' 匹') + row('小判', '+' + gain) + row('経験値', '+' + gain) + row('資材', '+' + b.materials);
       if (b.loot.fish) rows += row('🐟 魚', '+' + b.loot.fish);
       if (b.loot.matatabi) rows += row('🌿 またたび', '+' + b.loot.matatabi);
-      els.resultTitle.textContent = cq ? C.prefOf(cq.to).name + 'を 手に入れた!' : '勝利!';
+      els.resultTitle.textContent = cq ? C.prefOf(cq.to).name + 'を 手に入れた!' : df ? C.prefOf(df.to).name + 'を 守りきった!' : '勝利!';
       els.resultRows.innerHTML = rows;
-      els.btnNext.textContent = cq ? '天下の地図へ' : 'つぎの戦へ';
+      els.btnNext.textContent = cq || df ? '天下の地図へ' : 'つぎの戦へ';
       if (pendingOffer) {
         els.offer.hidden = false;
         els.offerImg.src = imgs[pendingOffer.look].src;
@@ -1279,14 +1283,17 @@
       const downs = b.enemies.filter(function (e) { return !e.alive; }).length;
       let rows = '';
       if (cq) rows += row('戻らなかった兵', cq.lost + ' 匹') + row(C.prefOf(cq.to).name + 'の守り', '−' + cq.cut + ' 匹');
+      if (df) rows += df.fell ? row('とられた国', C.prefOf(df.to).name) : row('へった守りの兵', df.lost + ' 匹');
       rows += row('倒した敵', downs + ' 匹') + row('持ち帰った小判', '+' + got);
       rows += cq ? '<p class="panel-text">兵を ふやして、もう一度!<br>兵が多いほど 敵が弱くなるにゃ。</p>'
+        : df ? '<p class="panel-text">' + (df.fell ? '兵を集めて、取り返しに行こう!' : 'はじめの国は とられないにゃ。') + '<br>攻めてきた大名の国は、兵がへっているにゃ。</p>'
         : '<p class="panel-text">小判で 修行して、もう一度!<br>MAX で ためて なぐると 強いにゃ。</p>';
+      if (df) els.resultTitle.textContent = df.fell ? C.prefOf(df.to).name + 'を とられた…' : C.prefOf(df.to).name + 'は 守ったが…';
       els.resultRows.innerHTML = rows;
       els.offer.hidden = true;
       els.resultTrain.hidden = false;
       renderTrain();
-      els.btnNext.textContent = cq ? '天下の地図へ' : 'もう一度';
+      els.btnNext.textContent = cq || df ? '天下の地図へ' : 'もう一度';
       setTimeout(function () { els.resultPanel.hidden = false; }, 600);
     }
     renderHud(true);
@@ -1325,7 +1332,7 @@
 
   function pauseBattle() {
     if (!battle || battle.phase !== 'fight') return;
-    els.btnRetreat.textContent = battle.conquest ? '退却する (連れて行った兵の半分が戻らない)' : '退却する (何も減らない)';
+    els.btnRetreat.textContent = battle.conquest ? (battle.conquest.defense ? '退却する (' + battle.conquest.name + 'を とられる)' : '退却する (連れて行った兵の半分が戻らない)') : '退却する (何も減らない)';
     battle.charge = { on: false, t: 0 }; // 溜めは捨てる (止めている間にたまらないように)
     els.btnPunch.classList.remove('charging');
     paused = true;
@@ -1346,6 +1353,7 @@
       state = res.state;
       saveSoon();
       if (res.conquest) showToast('退却… 兵が ' + res.conquest.lost + ' 匹 戻らなかった', 2400);
+      if (res.defense) { realm.dirty = true; showToast(res.defense.fell ? C.prefOf(res.defense.to).name + 'を とられた…' : '退却… 守りの兵が へった', 2400); }
     }
     showReady();
     if (cq) backToRealm(cq.to);
@@ -2270,6 +2278,15 @@
       });
     }
 
+    // 攻めてくる大名: 攻められている県を赤く光らせ、攻めてくる県から矢印を引く
+    const inv = has ? state.realm.invasion : null;
+    if (inv) {
+      const tp = prefShapes[inv.to - 1].path;
+      [[12, 'rgba(230,40,30,.25)'], [6, 'rgba(230,40,30,.5)'], [2.6, '#e8281e']].forEach(function (s) {
+        ctx.lineWidth = s[0] * px; ctx.strokeStyle = s[1]; ctx.stroke(tp);
+      });
+    }
+
     // ---- ここから先は画面の大きさで描く (地図を広げても城や字は太らない)
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.textAlign = 'center';
@@ -2356,6 +2373,34 @@
         ctx.fillText((mine ? '🚩' : '⚔') + num, tx, showName ? at.y + 8 : at.y + 0.5);
       }
     });
+    if (inv) {
+      // 矢印 (攻めてくる県 → 攻められる県) と、攻めてくる兵の数
+      const a = toS(prefShapes[inv.from - 1].lx, prefShapes[inv.from - 1].ly), b = toS(prefShapes[inv.to - 1].lx, prefShapes[inv.to - 1].ly);
+      const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+      const sx = a.x + ux * Math.min(22, len * 0.2), sy = a.y + uy * Math.min(22, len * 0.2);
+      const ex = b.x - ux * Math.min(26, len * 0.25), ey = b.y - uy * Math.min(26, len * 0.25);
+      const mx = (sx + ex) / 2 - uy * len * 0.18, my = (sy + ey) / 2 + ux * len * 0.18;   // 少し弧を描く
+      ctx.lineCap = 'round';
+      [[9, 'rgba(90,10,5,.45)'], [5.5, '#e8281e']].forEach(function (st) {
+        ctx.lineWidth = st[0]; ctx.strokeStyle = st[1];
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(mx, my, ex, ey); ctx.stroke();
+      });
+      const ang = Math.atan2(ey - my, ex - mx);
+      ctx.fillStyle = '#e8281e'; ctx.strokeStyle = 'rgba(90,10,5,.6)'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(ex + Math.cos(ang) * 10, ey + Math.sin(ang) * 10);
+      ctx.lineTo(ex + Math.cos(ang + 2.4) * 13, ey + Math.sin(ang + 2.4) * 13);
+      ctx.lineTo(ex + Math.cos(ang - 2.4) * 13, ey + Math.sin(ang - 2.4) * 13);
+      ctx.closePath(); ctx.stroke(); ctx.fill();
+      const lx = (sx + 2 * mx + ex) / 4, ly = (sy + 2 * my + ey) / 4;
+      ctx.font = font(900, 12);
+      const txt = '⚔ ' + inv.troops;
+      const tw = ctx.measureText(txt).width + 14;
+      ctx.fillStyle = '#e8281e';
+      roundRect(ctx, lx - tw / 2, ly - 10, tw, 20, 10); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(txt, lx, ly + 0.5);
+    }
   }
 
   // ---- さわる
@@ -2420,6 +2465,7 @@
 
   /** 県を選ぶ。小さな県でも押せるように、その県ととなりが入るまで寄る */
   function selectPref(id) {
+    realm.news = '';
     if (!id) { realm.sel = null; realm.dirty = true; renderRealmSheet(); return; }
     realm.sel = id;
     const pref = C.prefOf(id);
@@ -2475,6 +2521,12 @@
   function guideText() {
     if (!C.hasRealm(state)) return realm.sel ? '「' + C.prefOf(realm.sel).name + '」でいいかにゃ?' : '任される国を えらぶにゃ!';
     if (state.realm.unified) return '天下統一にゃ! おめでとう!';
+    const inv = state.realm.invasion;
+    if (inv) {
+      if (realm.sel === inv.to) return C.troopsAt(state, inv.to) >= inv.troops ? '守りは十分にゃ! 迎え撃ってもいいにゃ' : '兵を集めるか、迎え撃つにゃ!';
+      return C.prefOf(inv.to).name + 'に 敵が攻めてくるにゃ!';
+    }
+    if (realm.news) return realm.news;
     const sel = realm.sel;
     if (!sel) return C.ownedCount(state) === 1 ? 'まずは近くの国から 攻めてみるにゃ!' : '赤い点線の国に 攻め込めるにゃ!';
     if (C.isMine(state, sel)) return '兵を買って ここに置けるにゃ';
@@ -2508,16 +2560,35 @@
     const has = C.hasRealm(state);
     const sel = realm.sel;
     const mode = !has ? 'choose' : !sel ? 'overview' : C.isMine(state, sel) ? 'mine' : 'enemy';
-    const key = mode + '|' + (sel || 0) + '|' + (has && sel ? String(C.attackSource(state, sel)) : '');
+    const inv = has ? state.realm.invasion : null;
+    const key = mode + '|' + (sel || 0) + '|' + (has && sel ? String(C.attackSource(state, sel)) : '') + '|' + (inv ? inv.from + '>' + inv.to : '');
     if (key === realm.sheetKey) { updateRealmSheet(); return; }
     realm.sheetKey = key;
     const box = realmEls.sheet;
     box.innerHTML = '';
     box.dataset.mode = mode;
+    box.dataset.inv = inv ? (inv.to === sel ? 'here' : 'other') : '';
     const pref = sel ? C.prefOf(sel) : null;
     const add = function (html, cls, tag) { const d = document.createElement(tag || 'div'); d.className = cls; d.innerHTML = html; box.appendChild(d); return d; };
     const castleImg = '<img src="' + imgs['b-castle'].src + '" alt="">';
     const head = function (img, name, note) { add(img + '<div><div class="sheet-name">' + name + '</div><div class="sheet-note">' + note + '</div></div>', 'rs-head'); };
+    // 敵が攻めてくる知らせ。攻められている国を見ているときは「迎え撃つ」、ほかは「見に行く」
+    if (inv) {
+      const lord = C.prefOf(inv.lord) || C.prefOf(inv.from);
+      const here = sel === inv.to;
+      const alarm = add('<b>⚔ ' + C.prefOf(inv.from).name + 'の 「' + lord.daimyo + '」が ' + C.prefOf(inv.to).name + 'に 攻めてくる!</b>' +
+        '<span>あと <b data-v="invLeft"></b> 秒 ・ 攻めてくる兵 <b>' + inv.troops + '</b> ・ 守りの兵 <b data-v="invDef"></b></span>' +
+        (here ? '<span class="inv-guess" data-v="invGuess"></span>' : ''), 'rs-alarm');
+      if (here) {
+        const d = sheetButton('btn-defend', SWORDS_SVG + '<span><b>迎え撃つ!</b><small data-v="invPlan"></small></span>', function () { doDefend(); });
+        d.dataset.act = 'defend';
+        alarm.appendChild(d);
+      } else {
+        const go = sheetButton('btn-paper', '見に行く ▶', function () { selectPref(inv.to); });
+        go.dataset.act = 'goto-inv';
+        alarm.appendChild(go);
+      }
+    }
 
     if (mode === 'choose') {
       if (pref) {
@@ -2539,7 +2610,7 @@
       const home = state.realm.home === sel;
       head(castleImg, pref.name + ' <i>🐾</i>', pref.kuni + 'の国 (' + (home ? 'はじめに任された国' : '自分の国') + ')');
       add('<span data-v="here"></span><span data-v="troops"></span>', 'sheet-stats');
-      add(pref.desc, 'rs-desc', 'p');
+      add(pref.desc, 'rs-desc flavor', 'p');
       const row = add('', 'sheet-row');
       const buy = sheetButton('btn-gold', '', function () { doBuyTroops(sel); });
       buy.dataset.act = 'buy';
@@ -2611,6 +2682,16 @@
     const has = C.hasRealm(state);
     if (!has) return;
     const sel = realm.sel;
+    const inv = state.realm.invasion;
+    if (inv) {
+      set('invLeft', String(Math.ceil(inv.left)));
+      const d = C.troopsAt(state, inv.to);
+      set('invDef', String(d));
+      const home = state.realm.home === inv.to;
+      set('invGuess', d >= inv.troops ? 'このままでも 追い返せるにゃ (守りの兵が多い)' : home ? 'このままだと 兵が半分になるにゃ' : 'このままだと とられるにゃ! 兵を集めるか、迎え撃とう');
+      const plan = C.defensePlan(state);
+      if (plan) set('invPlan', '敵 ' + plan.count + ' 匹 ・ 強さ ' + Math.round(plan.strength * 100) + '%');
+    }
     set('left', String(C.PREF_COUNT - C.ownedCount(state)));
     set('owned', '自分の国 ' + C.ownedCount(state));
     set('troops', '兵 ぜんぶで ' + C.totalTroops(state));
@@ -2659,6 +2740,58 @@
       const pv = box.querySelector('[data-v="preview"]');
       if (pv && pv.innerHTML !== preview) pv.innerHTML = preview;
     }
+  }
+
+  /** 天下の時を進める (攻めてくる知らせ・秒読み)。合戦の最中は呼ばない */
+  function realmStep(dt) {
+    const r = C.stepRealm(state, dt, rng);
+    if (r.state === state) return;
+    state = r.state;
+    r.events.forEach(function (ev) {
+      realm.dirty = true;
+      realm.sheetKey = '';
+      if (ev.type === 'invade') {
+        const inv = ev.invasion, lord = C.prefOf(inv.lord) || C.prefOf(inv.from);
+        realm.news = '';
+        showToast('⚔ ' + lord.daimyo + 'が ' + C.prefOf(inv.to).name + 'に 攻めてくる! (あと ' + C.INVASION_WARN + ' 秒)', 3200);
+        saveSoon();
+      } else if (ev.type === 'invasionResolved') {
+        const res = ev.result, name = C.prefOf(res.to).name;
+        realm.news = res.repelled ? name + 'を 守りきったにゃ!' : res.fell ? name + 'を とられたにゃ… 取り返そう!' : name + 'は 守ったけど、兵がへったにゃ';
+        showToast(res.repelled ? '🛡 ' + name + 'は 守りきった! (敵の兵 ' + res.attackers + ' を追い返した)' : res.fell ? name + 'が とられた…' : name + 'は 守ったが、兵が ' + res.lost + ' へった', 3200);
+        saveSoon();
+      }
+    });
+    updateInvasionBar();
+  }
+
+  /** ほかの画面にいても分かるように、攻めてくる知らせを下に出す (押すと天下の地図へ) */
+  function updateInvasionBar() {
+    const inv = C.hasRealm(state) ? state.realm.invasion : null;
+    const show = !!inv && currentTab !== 'realm' && !titleShown && !(battle && battle.phase === 'fight');
+    if (els.invasionBar.hidden === !show && !show) return;
+    els.invasionBar.hidden = !show;
+    if (!show) return;
+    const text = '⚔ ' + C.prefOf(inv.to).name + 'に 敵が攻めてくる! あと ' + Math.ceil(inv.left) + ' 秒 ▶';
+    if (els.invasionBar.textContent !== text) els.invasionBar.textContent = text;
+  }
+
+  /** 迎え撃つ合戦を始める */
+  function doDefend() {
+    const plan = C.defensePlan(state);
+    if (!plan) return false;
+    switchTab('battle');
+    showReady();
+    battle = C.createBattle(state, rng, plan);
+    lastBattle = null;
+    paused = false;
+    effects = [];
+    els.readyPanel.hidden = true;
+    els.resultPanel.hidden = true;
+    renderHud(true);
+    updateInvasionBar();
+    showBanner(plan.name + 'を守れ!', 38);
+    return true;
   }
 
   function doStartRealm(id) {
@@ -2786,6 +2919,9 @@
       renderHud(false);
     }
 
+    // 攻めてくる大名の知らせと秒読み (合戦の最中・タイトルの間は止まる)
+    if (dt > 0 && !titleShown && !(battle && battle.phase === 'fight') && C.hasRealm(state)) realmStep(Math.min(dt, 1));
+
     if (currentTab === 'realm' && isUnlocked('realm')) realmFrame(Math.min(dt, 0.1));
 
     if ((currentTab === 'castle' || currentTab === 'village') && isUnlocked(currentTab)) {
@@ -2802,7 +2938,8 @@
         refreshSheet(currentTab);
       }
       if (currentTab === 'vassals') updateRecruitButton();
-      if (currentTab === 'realm' && isUnlocked('realm')) updateRealmSheet();
+      if (currentTab === 'realm' && isUnlocked('realm')) { renderRealmSheet(); }
+      updateInvasionBar();
     }
 
     requestAnimationFrame(frame);
@@ -2829,6 +2966,12 @@
     realmEls.all.addEventListener('click', function () { moveCamera(wholeCamera()); });
     realmEls.back.addEventListener('click', function () { switchTab('battle'); });
     realmEls.unifyOk.addEventListener('click', function () { realmEls.unify.hidden = true; });
+    els.invasionBar.addEventListener('click', function () {
+      const inv = C.hasRealm(state) && state.realm.invasion;
+      if (!inv) return;
+      switchTab('realm');
+      selectPref(inv.to);
+    });
     els.btnOfferYes.addEventListener('click', acceptOffer);
     els.btnOfferNo.addEventListener('click', function () { pendingOffer = null; els.offer.hidden = true; });
     onDown(els.btnLure, function () { unlockAudio(); doLure(); });
@@ -2972,6 +3115,9 @@
         return { x: r.left + s.x, y: r.top + s.y, room: p.lr * realm.cam.k };
       },
       /** 小判だけ増やす (年貢や自主練で裏で増えるのと同じ。画面は作り直さない) */
+      defend: doDefend,
+      /** 天下の時を進める (テストで秒読みを早送りする) */
+      realmStep: function (sec) { realmStep(sec); },
       debugAddCoins: function (n) { state = Object.assign({}, state, { merit: state.merit + n }); },
       debugSetState: function (fn) { state = fn(state); renderTabs(); renderActiveView(); renderHud(true); }
     };

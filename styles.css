@@ -899,6 +899,8 @@ img { -webkit-user-drag: none; }
 .realm-sheet .rs-desc { margin: 0; font-size: 12px; line-height: 1.5; color: #3a2a1c; }
 /* 攻める札では、ひとことは縦横とも隠す (札を低くして地図を広く見せる) */
 .realm-sheet[data-mode="enemy"] .rs-desc.flavor { display: none; }
+/* 攻めてくる知らせを出しているときは、ひとことを隠す (札を低くする) */
+.realm-sheet[data-inv="here"] .rs-desc, .realm-sheet[data-inv="other"] .rs-desc.flavor { display: none; }
 .realm-sheet .rs-rewards { display: flex; gap: 8px; align-items: center; }
 .realm-sheet .rs-rewards .tag { height: 22px; width: auto; flex: none; }
 .realm-sheet .tile {
@@ -966,6 +968,58 @@ img { -webkit-user-drag: none; }
 .realm-sheet .rs-progress i + i { margin-left: 8px; position: relative; }
 .realm-sheet .rs-progress i + i::before { content: ""; position: absolute; right: 100%; top: 3px; width: 10px; height: 2px; background: #a88a64; }
 .unify-card .rank-up-name { font-size: 34px; }
+
+/* 敵が攻めてくる */
+.realm-sheet .rs-alarm {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: linear-gradient(#fff0ec, #ffe0d8);
+  border: 2px solid #e8281e;
+  box-shadow: 0 0 0 3px rgba(232,40,30,.15);
+  font-size: 12px;
+  line-height: 1.45;
+  color: #5a1a10;
+}
+.realm-sheet .rs-alarm > b { font-size: 13px; color: #b3180e; }
+.realm-sheet .rs-alarm .inv-guess { font-weight: 800; color: #7a2a14; }
+.realm-sheet .rs-alarm > button { align-self: stretch; }
+.realm-sheet .btn-defend {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 6px 12px; border-radius: 14px;
+  border: 3px solid #8a1a10;
+  background: linear-gradient(#ff8a6a, #e8281e 60%, #b3180e);
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.35), 0 4px 0 #6a120a;
+  color: #fff; cursor: pointer;
+}
+.realm-sheet .btn-defend:active { transform: translateY(3px); box-shadow: inset 0 0 0 2px rgba(255,255,255,.35), 0 1px 0 #6a120a; }
+.realm-sheet .btn-defend svg { width: 28px; height: 28px; flex: none; }
+.realm-sheet .btn-defend span { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2; }
+.realm-sheet .btn-defend b { font-size: 18px; font-weight: 900; letter-spacing: .08em; }
+.realm-sheet .btn-defend small { font-size: 11px; font-weight: 800; }
+.invasion-bar {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--safe-b) + 66px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
+  z-index: 45;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 2px solid #fff3d6;
+  background: linear-gradient(#ff6a4a, #d6200f);
+  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+  color: #fff;
+  font-weight: 900;
+  font-size: 13px;
+  cursor: pointer;
+  animation: inv-pulse 1s ease-in-out infinite alternate;
+}
+.invasion-bar[hidden] { display: none; }
+@keyframes inv-pulse { from { opacity: .82; } to { opacity: 1; } }
 
 /* --------------------------------------------------------- タブ */
 
@@ -1156,6 +1210,7 @@ img { -webkit-user-drag: none; }
   .realm-guide { bottom: calc(4px + var(--safe-b)); }
   .realm-guide img { width: 70px; }
   .realm-credit { left: auto; right: calc(292px + var(--safe-r)); bottom: calc(2px + var(--safe-b)); }
+  .invasion-bar { left: calc(50% + 32px); bottom: calc(var(--safe-b) + 8px); }
 
   /* 物語・出世の札: 絵を左、文を右に並べて、低い画面に収める */
   .modal-card {

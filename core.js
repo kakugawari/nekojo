@@ -867,6 +867,16 @@
   /** 合戦の結果を state に反映する。勝てば手柄・資材、負けても出世は下がらない。国とりなら国も */
   function applyBattleResult(state, b) {
     const res = applyBattleRewards(state, b);
+    if (b.conquest && b.conquest.defense) {
+      // 迎え撃つ合戦: 勝てば追い返す、負け・退却なら取られる (はじめの国は兵が半分になるだけ)
+      const inv = hasRealm(res.state) && res.state.realm.invasion;
+      if (inv && inv.to === b.conquest.to && isMine(res.state, inv.to)) {
+        const d = settleInvasion(res.state, b.phase === 'won');
+        res.state = d.state;
+        res.defense = d.result;
+      }
+      return res;
+    }
     if (!b.conquest) return res;
     const c = applyConquest(res.state, b);
     res.state = c.state;
@@ -1049,6 +1059,11 @@
   const TROOP_COST = 50;           // 100 匹の値段 (小判)
   const START_TROOPS = 500;        // 任された国に、はじめからいる兵
   const TAX_PER_PREF = 0.02;       // 取った国から入る年貢 (1 国・1 秒あたりの小判)
+  // 敵の大名が攻めてくる (アプリを開いている間だけ。留守の間には攻めてこない)
+  const INVASION_MIN_OWNED = 3;    // 自分の国がこの数になってから
+  const INVASION_GAP = [150, 300]; // 次に攻めてくるまで (秒)。この間でばらつく
+  const INVASION_WARN = 60;        // 「攻めてくる」の知らせから、攻めてくるまで (秒)。この間に兵を集めて守る
+  const INVASION_SHARE = 0.6;      // 攻めてくる大名は、自分の国の兵のこれだけを連れてくる
 
   const REGIONS = ['北海道', '東北', '関東', '中部', '近畿', '中国', '四国', '九州'];
   // [名前, 地方, 大名 (戦国の大名をもじった猫), となり, 昔の国の名前, ひとこと]
@@ -1162,12 +1177,28 @@
       level[id - 1] = prefLevelFor(dist[id], maxDist);
       troops[id - 1] = garrisonFor(level[id - 1], random);
     }
-    const realm = { home: homeId, mine: mine, troops: troops, level: level, unified: false };
+    const lord = [];
+    for (let id = 1; id <= PREF_COUNT; id++) lord.push(id);
+    const realm = { home: homeId, mine: mine, troops: troops, level: level, lord: lord, unified: false,
+      invasion: null, nextInvasion: invasionGap(random) };
     return { ok: true, state: Object.assign({}, state, { realm: realm }) };
   }
 
+  function invasionGap(random) {
+    return INVASION_GAP[0] + (INVASION_GAP[1] - INVASION_GAP[0]) * random();
+  }
+
+  /** その県をいまおさめている大名 (最初はその県の大名。ほかの大名に取られると、取った大名になる) */
+  function lordOf(state, id) {
+    const l = hasRealm(state) && state.realm.lord ? state.realm.lord[id - 1] : id;
+    return prefOf(l) || prefOf(id);
+  }
+
   function withRealm(state, fn) {
-    const realm = Object.assign({}, state.realm, { mine: state.realm.mine.slice(), troops: state.realm.troops.slice() });
+    const realm = Object.assign({}, state.realm, {
+      mine: state.realm.mine.slice(), troops: state.realm.troops.slice(),
+      level: state.realm.level.slice(), lord: (state.realm.lord || []).slice()
+    });
     fn(realm);
     return Object.assign({}, state, { realm: realm });
   }
@@ -1238,7 +1269,7 @@
 
   /** 兵の数の比 (連れて行った兵 / 守りの兵) が、合戦の敵の数と強さに効く */
   function attackPlan(state, from, to, sent) {
-    const p = prefOf(to);
+    const p = prefOf(to), lord = lordOf(state, to);
     const garrison = troopsAt(state, to);
     const level = state.realm.level[to - 1];
     const ratio = sent / Math.max(TROOP_UNIT, garrison);
@@ -1247,8 +1278,122 @@
     const strength = Math.min(1.5, Math.max(0.7, Math.sqrt(1 / ratio)));
     return {
       from: from, to: to, sent: sent, garrison: garrison, ratio: ratio, level: level,
-      count: count, strength: strength, daimyo: p.daimyo, look: p.look, name: p.name
+      count: count, strength: strength, daimyo: lord.daimyo, look: lord.look, name: p.name
     };
+  }
+
+  // ---- 敵の大名が攻めてくる
+  //
+  // 自分の国が 3 つになると、ときどき (2.5〜5 分ごと) となりの大名が攻めてくる。
+  // 知らせから 60 秒で着く。その間に兵を集める・買う、または「迎え撃つ」(合戦) ができる。
+  // 何もしなければ兵の数で決まる: 守りの兵が攻めてきた兵以上なら追い返す。少なければ取られる。
+  // はじめに任された国は取られない (負けても兵が減るだけ)。攻めてきた兵は、追い返すと戻らない
+  // (攻めてきた大名の国は兵が減っているので、攻め返す好機)。
+
+  /** 攻めてくる大名と、攻められる自分の国を選ぶ。守りの薄い所がねらわれやすい */
+  function pickInvasion(state, random) {
+    const cands = [];
+    for (let to = 1; to <= PREF_COUNT; to++) {
+      if (!isMine(state, to)) continue;
+      prefOf(to).nb.forEach(function (from) {
+        if (isMine(state, from)) return;
+        const g = troopsAt(state, from);
+        if (g < 2 * TROOP_UNIT) return;
+        const army = Math.max(TROOP_UNIT, roundTroops(g * INVASION_SHARE));
+        // 守りが薄いほど重い (選ばれやすい)
+        const weight = (army + 100) / (troopsAt(state, to) + 100);
+        cands.push({ from: from, to: to, troops: army, w: weight * weight });
+      });
+    }
+    if (!cands.length) return null;
+    let sum = 0;
+    cands.forEach(function (c) { sum += c.w; });
+    let r = random() * sum;
+    for (let i = 0; i < cands.length; i++) { r -= cands[i].w; if (r <= 0) return cands[i]; }
+    return cands[cands.length - 1];
+  }
+
+  /**
+   * 天下の時を進める (攻めてくる知らせ・攻めてくるまでの秒読み)。アプリを開いていて、合戦をしていない間だけ呼ぶ。
+   * 返す events: { type: 'invade', invasion } / { type: 'invasionResolved', result }
+   */
+  function stepRealm(state, dt, rng) {
+    if (!(dt > 0) || !hasRealm(state) || state.realm.unified) return { state: state, events: [] };
+    const random = rng || Math.random;
+    const r0 = state.realm;
+    if (r0.invasion) {
+      const left = r0.invasion.left - dt;
+      if (left > 0) {
+        return { state: Object.assign({}, state, { realm: Object.assign({}, r0, { invasion: Object.assign({}, r0.invasion, { left: left }) }) }), events: [] };
+      }
+      const res = resolveInvasion(state, random);
+      return { state: res.state, events: [{ type: 'invasionResolved', result: res.result }] };
+    }
+    if (ownedCount(state) < INVASION_MIN_OWNED) return { state: state, events: [] };
+    const next = (Number.isFinite(r0.nextInvasion) ? r0.nextInvasion : invasionGap(random)) - dt;
+    if (next > 0) return { state: Object.assign({}, state, { realm: Object.assign({}, r0, { nextInvasion: next }) }), events: [] };
+    const inv = pickInvasion(state, random);
+    if (!inv) return { state: Object.assign({}, state, { realm: Object.assign({}, r0, { nextInvasion: invasionGap(random) }) }), events: [] };
+    const invasion = { from: inv.from, to: inv.to, troops: inv.troops, left: INVASION_WARN, lord: lordOf(state, inv.from).id };
+    const nextState = withRealm(state, function (r) {
+      r.troops[inv.from - 1] -= inv.troops; // 兵は国を出ている
+      r.invasion = invasion;
+      r.nextInvasion = invasionGap(random);
+    });
+    return { state: nextState, events: [{ type: 'invade', invasion: invasion }] };
+  }
+
+  /** 迎え撃つ合戦の中身 (攻めの合戦と同じく、兵の比で敵の数と強さが変わる。こちらは守りの兵) */
+  function defensePlan(state) {
+    const inv = hasRealm(state) && state.realm.invasion;
+    if (!inv) return null;
+    const lord = prefOf(inv.lord) || lordOf(state, inv.from);
+    const defenders = troopsAt(state, inv.to);
+    const level = state.realm.level[inv.from - 1] || PREF_LEVEL_MIN;
+    const ratio = Math.max(TROOP_UNIT, defenders) / inv.troops;
+    const base = battleSize(level);
+    return {
+      defense: true, from: inv.from, to: inv.to, attackers: inv.troops, defenders: defenders, ratio: ratio, level: level,
+      count: Math.max(2, base - (ratio >= 1.5 ? 1 : 0) - (ratio >= 3 ? 1 : 0)),
+      strength: Math.min(1.5, Math.max(0.7, Math.sqrt(1 / ratio))),
+      daimyo: lord.daimyo, look: lord.look, name: prefOf(inv.to).name, fromName: prefOf(inv.from).name
+    };
+  }
+
+  /**
+   * 攻めてきた結果を国に反映する。won: 追い返した (合戦に勝った・兵の数で勝った) か。
+   * 追い返すと、攻めてきた兵は戻らない。守りの兵も少し減る。
+   * 取られると、その県は攻めてきた大名の国になる (はじめの国は取られず、守りの兵が半分になるだけ)。
+   */
+  function settleInvasion(state, won) {
+    const inv = state.realm.invasion;
+    const d = troopsAt(state, inv.to);
+    const home = state.realm.home === inv.to;
+    const out = { from: inv.from, to: inv.to, attackers: inv.troops, defenders: d, repelled: !!won, fell: false, lost: 0 };
+    const next = withRealm(state, function (r) {
+      r.invasion = null;
+      if (won) {
+        out.lost = Math.min(roundTroops(inv.troops * 0.5 * Math.min(1, inv.troops / Math.max(TROOP_UNIT, d))), Math.max(0, d - TROOP_UNIT));
+        r.troops[inv.to - 1] = d - out.lost;
+      } else if (home) {
+        out.lost = roundTroops(d / 2);
+        r.troops[inv.to - 1] = d - out.lost;
+      } else {
+        out.fell = true;
+        out.lost = d;
+        r.mine[inv.to - 1] = false;
+        r.troops[inv.to - 1] = Math.max(TROOP_UNIT, roundTroops(inv.troops - d * 0.5));
+        r.lord[inv.to - 1] = inv.lord || r.lord[inv.from - 1];
+        r.level[inv.to - 1] = Math.max(r.level[inv.to - 1] || 0, r.level[inv.from - 1] || PREF_LEVEL_MIN);
+      }
+    });
+    return { state: next, result: out };
+  }
+
+  /** 秒読みが終わったとき (迎え撃たなかったとき): 兵の数で決まる */
+  function resolveInvasion(state) {
+    const inv = state.realm.invasion;
+    return settleInvasion(state, troopsAt(state, inv.to) >= inv.troops);
   }
 
   /** その県を取ったときにもらえる小判・経験値のめやす (勝ったときの上乗せ 3 割を含む) */
@@ -1328,7 +1473,17 @@
     if (!ok(raw.mine) || !ok(raw.troops) || !ok(raw.level)) return null;
     const mine = raw.mine.map(function (m) { return m === true; });
     mine[raw.home - 1] = mine[raw.home - 1] || !mine.some(Boolean);
+    const lord = Array.isArray(raw.lord) && raw.lord.length === PREF_COUNT
+      ? raw.lord.map(function (l, i) { return prefOf(l) ? l : i + 1; })
+      : PREFS.map(function (p) { return p.id; });
+    const iv = raw.invasion;
+    const invasion = iv && prefOf(iv.from) && prefOf(iv.to) && mine[iv.to - 1] && Number.isFinite(iv.troops) && Number.isFinite(iv.left)
+      ? { from: iv.from, to: iv.to, troops: Math.max(TROOP_UNIT, roundTroops(iv.troops)), left: Math.max(0, Math.min(INVASION_WARN, iv.left)), lord: prefOf(iv.lord) ? iv.lord : iv.from }
+      : null;
     return {
+      lord: lord,
+      invasion: invasion,
+      nextInvasion: Number.isFinite(raw.nextInvasion) ? Math.max(0, raw.nextInvasion) : INVASION_GAP[1],
       home: raw.home,
       mine: mine,
       troops: raw.troops.map(function (t) { return Number.isFinite(t) ? roundTroops(t) : 0; }),
@@ -1504,6 +1659,14 @@
     attackPlan: attackPlan,
     conquestLosses: conquestLosses,
     conquestReward: conquestReward,
+    INVASION_MIN_OWNED: INVASION_MIN_OWNED,
+    INVASION_GAP: INVASION_GAP,
+    INVASION_WARN: INVASION_WARN,
+    lordOf: lordOf,
+    pickInvasion: pickInvasion,
+    stepRealm: stepRealm,
+    defensePlan: defensePlan,
+    resolveInvasion: resolveInvasion,
 
     SCENE_W: SCENE_W,
     PLAYER_X: PLAYER_X,
