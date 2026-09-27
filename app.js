@@ -49,7 +49,8 @@
 
   const IMG_NAMES = ['stage0', 'stage1', 'stage2', 'stage3', 'cat-normal', 'cat-chatora', 'cat-kuro', 'cat-gray', 'cat-red',
     'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-special', 'pose-jarashi', 'pose-punch', 'b-villager',
-    'r-coin', 'r-catcoin', 'r-swords', 'r-tag-strength', 'r-tag-reward']
+    'r-coin', 'r-catcoin', 'r-swords', 'r-tag-strength', 'r-tag-reward',
+    'guide-main', 'guide-stand', 'guide-walk', 'guide-hello', 'guide-cheer', 'guide-worry']
     .concat(Object.keys(C.BUILDINGS).map(function (t) { return C.BUILDINGS[t].img; }));
   const imgs = {};
   IMG_NAMES.forEach(function (n) {
@@ -58,6 +59,42 @@
     imgs[n] = im;
   });
   const ready = (im) => im && im.complete && im.naturalWidth > 0;
+
+  // ---------------------------------------------------------- 案内猫 (art/guide-sheet.png から切り出した 6 つのポーズ)
+  // main=手を差し出す / stand=立ち絵 / walk=地図を見て歩く / hello=手を振る / cheer=杖をかかげる / worry=困り
+
+  /** 案内猫の絵を pose にする (同じなら何もしない)。hop なら、ぴょんと跳ねる */
+  function setNaviPose(img, pose, hop) {
+    if (img.dataset.pose !== pose) {
+      img.dataset.pose = pose;
+      img.src = imgs['guide-' + pose].src;
+    }
+    // 上下にゆれる動き (CSS の transform) とぶつからないように、跳ねるのは translate で動かす
+    if (hop && img.animate) img.animate([{ translate: '0 0' }, { translate: '0 -10px' }, { translate: '0 0' }], { duration: 320, easing: 'ease-out' });
+  }
+
+  // index.html の案内猫は data-pose だけを書いておき、絵はここで入れる (同じ絵の場所を HTML に何度も書かない)
+  document.querySelectorAll('img.navi-img[data-pose]').forEach(function (img) { img.src = imgs['guide-' + img.dataset.pose].src; });
+
+  /** 案内猫の入れ物 (.navi-say) の、絵と吹き出しを書き換える */
+  function naviSay(box, pose, text, asHtml) {
+    setNaviPose(box.querySelector('.navi-img'), pose);
+    const p = box.querySelector('.navi-bubble');
+    if (asHtml) p.innerHTML = text; else p.textContent = text;
+  }
+
+  /** 案内猫の入れ物を新しく作る (結果の札など、中身を作り直す所で使う) */
+  function makeNavi(pose, html, cls) {
+    const box = document.createElement('div');
+    box.className = 'navi-say' + (cls ? ' ' + cls : '');
+    const img = document.createElement('img');
+    img.className = 'navi-img'; img.alt = ''; img.draggable = false;
+    const p = document.createElement('p');
+    p.className = 'navi-bubble';
+    box.append(img, p);
+    naviSay(box, pose, html, true);
+    return box;
+  }
 
   /** 成長の過程: 村の子猫 → 旅立ち → 猫侍に仕える → お城を築く */
   function stageForRank(r) {
@@ -1199,6 +1236,8 @@
       'MAX の敵に 会心まで ためて、<br>特大 猫パンチ!'
     ];
     let html = tips[Math.min(r, tips.length - 1)];
+    // はじめての戦は手を振ってあいさつ、それからは手を差し出して教える
+    setNaviPose(els.readyPanel.querySelector('.navi-img'), (state.battlesWon || 0) === 0 ? 'hello' : 'main');
     const goers = state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, C.MAX_BATTLE_VASSALS);
     if (goers.length) {
       html += '<span class="ready-allies">いっしょに出陣: ' + goers.map(function (v) {
@@ -1285,11 +1324,12 @@
       if (cq) rows += row('戻らなかった兵', cq.lost + ' 匹') + row(C.prefOf(cq.to).name + 'の守り', '−' + cq.cut + ' 匹');
       if (df) rows += df.fell ? row('とられた国', C.prefOf(df.to).name) : row('へった守りの兵', df.lost + ' 匹');
       rows += row('倒した敵', downs + ' 匹') + row('持ち帰った小判', '+' + got);
-      rows += cq ? '<p class="panel-text">兵を ふやして、もう一度!<br>兵が多いほど 敵が弱くなるにゃ。</p>'
-        : df ? '<p class="panel-text">' + (df.fell ? '兵を集めて、取り返しに行こう!' : 'はじめの国は とられないにゃ。') + '<br>攻めてきた大名の国は、兵がへっているにゃ。</p>'
-        : '<p class="panel-text">小判で 修行して、もう一度!<br>MAX で ためて なぐると 強いにゃ。</p>';
+      const advice = cq ? '兵を ふやして、もう一度!<br>兵が多いほど 敵が弱くなるにゃ。'
+        : df ? (df.fell ? '兵を集めて、取り返しに行こう!' : 'はじめの国は とられないにゃ。') + '<br>攻めてきた大名の国は、兵がへっているにゃ。'
+        : '小判で 修行して、もう一度!<br>MAX で ためて なぐると 強いにゃ。';
       if (df) els.resultTitle.textContent = df.fell ? C.prefOf(df.to).name + 'を とられた…' : C.prefOf(df.to).name + 'は 守ったが…';
       els.resultRows.innerHTML = rows;
+      els.resultRows.appendChild(makeNavi('worry', advice, 'result-navi'));
       els.offer.hidden = true;
       els.resultTrain.hidden = false;
       renderTrain();
@@ -1317,13 +1357,18 @@
     els.rankUpName.textContent = rank.name;
     els.rankUpArt.src = (prev < C.CASTLE_UNLOCK_RANK && idx >= C.CASTLE_UNLOCK_RANK) ? imgs['b-castle'].src : imgs[stageForRank(idx)].src;
     let text = rank.story;
-    if (prev < C.VASSAL_UNLOCK_RANK && idx >= C.VASSAL_UNLOCK_RANK) text += '<br><b>家臣を持てるようになった!</b>';
-    if (prev < C.COUNTER_RANK && idx >= C.COUNTER_RANK) text += '<br><b>新しい技「カウンター」を覚えた!</b><br>ためて待って、赤い「!」で はなそう';
-    if (prev < C.YUDO_RANK && idx >= C.YUDO_RANK) text += '<br><b>新しい技「誘導」を覚えた!</b><br>ボス猫が「!!」で突進してきたら、猫じゃらしで 樽へ!';
-    if (prev < C.REALM_UNLOCK_RANK && idx >= C.REALM_UNLOCK_RANK) text += '<br><b>🗾 国をひとつ任された!</b><br>「天下」の地図から、天下統一をめざそう';
-    if (prev < C.CASTLE_UNLOCK_RANK && idx >= C.CASTLE_UNLOCK_RANK) text += '<br><b>城と村を持てるようになった!</b>';
     if (stageForRank(prev) !== stageForRank(idx)) text += '<br>見た目も りっぱになった!';
+    // 新しくできるようになったことは、案内猫が教える
+    const tips = [];
+    if (prev < C.VASSAL_UNLOCK_RANK && idx >= C.VASSAL_UNLOCK_RANK) tips.push('<b>家臣を持てるようになったにゃ!</b>');
+    if (prev < C.COUNTER_RANK && idx >= C.COUNTER_RANK) tips.push('<b>新しい技「カウンター」</b><br>ためて待って、赤い「!」で はなすにゃ');
+    if (prev < C.YUDO_RANK && idx >= C.YUDO_RANK) tips.push('<b>新しい技「誘導」</b><br>ボス猫が「!!」で突進してきたら、猫じゃらしで 樽へ!');
+    if (prev < C.REALM_UNLOCK_RANK && idx >= C.REALM_UNLOCK_RANK) tips.push('<b>🗾 国をひとつ任されたにゃ!</b><br>「天下」の地図で、天下統一をめざそう');
+    if (prev < C.CASTLE_UNLOCK_RANK && idx >= C.CASTLE_UNLOCK_RANK) tips.push('<b>城と村を持てるようになったにゃ!</b>');
     els.rankUpText.innerHTML = text;
+    const rankNavi = $('rankNavi');
+    rankNavi.hidden = !tips.length;
+    if (tips.length) naviSay(rankNavi, 'cheer', tips.join('<br>'), true);
     els.rankModal.hidden = false;
     els.rankModal.querySelector('.modal-card').animate([{ opacity: 0, transform: 'scale(.8)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 260, easing: 'ease-out' });
     renderTabs();
@@ -1389,7 +1434,7 @@
     const unlocked = isUnlocked('vassals');
     els.vassalsLocked.hidden = unlocked;
     els.vassalsContent.hidden = !unlocked;
-    if (!unlocked) { els.vassalsLocked.textContent = lockedMessage('vassals'); els.vassalSlotCount.textContent = ''; return; }
+    if (!unlocked) { naviSay(els.vassalsLocked, 'worry', lockedMessage('vassals')); els.vassalSlotCount.textContent = ''; return; }
 
     els.vassalSlotCount.textContent = state.vassals.length + ' / ' + C.vassalSlots(state) + ' 人';
     const inBattle = state.vassals.filter(function (v) { return v.job === 'battle'; }).length;
@@ -1719,7 +1764,7 @@
     const contentEl = zone === 'castle' ? els.castleContent : els.villageContent;
     lockedEl.hidden = unlocked;
     contentEl.hidden = !unlocked;
-    if (!unlocked) { lockedEl.querySelector('p').textContent = lockedMessage(zone); return; }
+    if (!unlocked) { naviSay(lockedEl, 'worry', lockedMessage(zone)); return; }
     sizeMap(townMaps[zone]);
     updateTownNumbers(zone);
     if (zone === 'castle') {
@@ -1899,7 +1944,7 @@
   const JMAP = window.JAPAN_MAP;
   const realmEls = {
     sub: $('realmSub'), title: $('realmTitle'), top: $('realmTop'), back: $('btnRealmBack'),
-    guide: $('realmGuide'), bubble: $('realmBubble'), remain: $('realmRemain'), left: $('realmLeft'),
+    guide: $('realmGuide'), guideImg: $('realmGuideImg'), bubble: $('realmBubble'), remain: $('realmRemain'), left: $('realmLeft'),
     locked: $('realmLocked'), content: $('realmContent'), map: $('realmMap'), canvas: $('realmCanvas'),
     sheet: $('realmSheet'), all: $('btnRealmAll'), unify: $('unifyModal'), unifyOk: $('btnUnifyOk')
   };
@@ -2492,7 +2537,7 @@
     realmEls.locked.hidden = unlocked;
     realmEls.content.hidden = !unlocked;
     updateRealmNumbers();
-    if (!unlocked) { realmEls.locked.textContent = lockedMessage('realm'); return; }
+    if (!unlocked) { naviSay(realmEls.locked, 'worry', lockedMessage('realm')); return; }
     sizeRealm();
     realm.sheetKey = '';
     renderRealmSheet();
@@ -2517,27 +2562,27 @@
     }
   }
 
-  /** 案内の猫のひとこと (いまできることを、ひとことで) */
+  /** 案内猫のひとこと (いまできることを、ひとことで) と、そのときのポーズ */
   function guideText() {
-    if (!C.hasRealm(state)) return realm.sel ? '「' + C.prefOf(realm.sel).name + '」でいいかにゃ?' : '任される国を えらぶにゃ!';
-    if (state.realm.unified) return '天下統一にゃ! おめでとう!';
+    if (!C.hasRealm(state)) return realm.sel ? ['「' + C.prefOf(realm.sel).name + '」でいいかにゃ?', 'main'] : ['ボクが案内するにゃ! 任される国を えらんでにゃ', 'hello'];
+    if (state.realm.unified) return ['天下統一にゃ! おめでとう!', 'cheer'];
     const inv = state.realm.invasion;
     if (inv) {
-      if (realm.sel === inv.to) return C.troopsAt(state, inv.to) >= inv.troops ? '守りは十分にゃ! 迎え撃ってもいいにゃ' : '兵を集めるか、迎え撃つにゃ!';
-      return C.prefOf(inv.to).name + 'に 敵が攻めてくるにゃ!';
+      if (realm.sel === inv.to) return C.troopsAt(state, inv.to) >= inv.troops ? ['守りは十分にゃ! 迎え撃ってもいいにゃ', 'cheer'] : ['兵を集めるか、迎え撃つにゃ!', 'worry'];
+      return [C.prefOf(inv.to).name + 'に 敵が攻めてくるにゃ!', 'worry'];
     }
-    if (realm.news) return realm.news;
+    if (realm.news) return [realm.news, realm.newsPose || 'stand'];
     const sel = realm.sel;
-    if (!sel) return C.ownedCount(state) === 1 ? 'まずは近くの国から 攻めてみるにゃ!' : '赤い点線の国に 攻め込めるにゃ!';
-    if (C.isMine(state, sel)) return '兵を買って ここに置けるにゃ';
+    if (!sel) return [C.ownedCount(state) === 1 ? 'まずは近くの国から 攻めてみるにゃ!' : '赤い点線の国に 攻め込めるにゃ!', 'walk'];
+    if (C.isMine(state, sel)) return ['兵を買って ここに置けるにゃ', 'main'];
     const src = C.attackSource(state, sel);
-    if (!src) return 'となりの国を 先にとるにゃ';
-    if (realm.send < C.TROOP_UNIT) return '兵がいないにゃ… 買って増やそう';
+    if (!src) return ['となりの国を 先にとるにゃ', 'walk'];
+    if (realm.send < C.TROOP_UNIT) return ['兵がいないにゃ… 買って増やそう', 'worry'];
     const plan = C.attackPlan(state, src, sel, realm.send);
-    if (plan.ratio >= 3) return 'この兵なら 楽勝にゃ!';
-    if (plan.ratio >= 1.5) return 'この兵なら いけるにゃ!';
-    if (plan.ratio >= 1) return '互角にゃ… 兵を増やすと 楽になるにゃ';
-    return '兵が足りないにゃ… 敵が強くなるにゃ';
+    if (plan.ratio >= 3) return ['この兵なら 楽勝にゃ!', 'cheer'];
+    if (plan.ratio >= 1.5) return ['この兵なら いけるにゃ!', 'cheer'];
+    if (plan.ratio >= 1) return ['互角にゃ… 兵を増やすと 楽になるにゃ', 'stand'];
+    return ['兵が足りないにゃ… 敵が強くなるにゃ', 'worry'];
   }
 
   function sheetButton(cls, html, fn) {
@@ -2677,8 +2722,11 @@
     const box = realmEls.sheet;
     const set = function (v, text) { const el = box.querySelector('[data-v="' + v + '"]'); if (el && el.textContent !== text) el.textContent = text; };
     const act = function (a) { return box.querySelector('[data-act="' + a + '"]'); };
-    const bubble = guideText();
-    if (realmEls.bubble.textContent !== bubble) realmEls.bubble.textContent = bubble;
+    const say = guideText();
+    if (realmEls.bubble.textContent !== say[0]) {
+      realmEls.bubble.textContent = say[0];
+      setNaviPose(realmEls.guideImg, say[1], true);   // 言うことが変わったら、ぴょんと跳ねて知らせる
+    }
     const has = C.hasRealm(state);
     if (!has) return;
     const sel = realm.sel;
@@ -2758,6 +2806,7 @@
       } else if (ev.type === 'invasionResolved') {
         const res = ev.result, name = C.prefOf(res.to).name;
         realm.news = res.repelled ? name + 'を 守りきったにゃ!' : res.fell ? name + 'を とられたにゃ… 取り返そう!' : name + 'は 守ったけど、兵がへったにゃ';
+        realm.newsPose = res.repelled ? 'cheer' : 'worry';
         showToast(res.repelled ? '🛡 ' + name + 'は 守りきった! (敵の兵 ' + res.attackers + ' を追い返した)' : res.fell ? name + 'が とられた…' : name + 'は 守ったが、兵が ' + res.lost + ' へった', 3200);
         saveSoon();
       }
@@ -2773,7 +2822,8 @@
     els.invasionBar.hidden = !show;
     if (!show) return;
     const text = '⚔ ' + C.prefOf(inv.to).name + 'に 敵が攻めてくる! あと ' + Math.ceil(inv.left) + ' 秒 ▶';
-    if (els.invasionBar.textContent !== text) els.invasionBar.textContent = text;
+    const span = els.invasionBar.lastElementChild;
+    if (span.textContent !== text) span.textContent = text;
   }
 
   /** 迎え撃つ合戦を始める */

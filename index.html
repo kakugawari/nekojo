@@ -54,7 +54,7 @@
 
       <div class="field-panel" id="readyPanel">
         <div class="panel-title" id="readyTitle">第一戦</div>
-        <p class="panel-text" id="readyText">猫じゃらしで すきを作って、猫パンチ!</p>
+        <div class="navi-say ready-navi"><img class="navi-img" data-pose="hello" alt="" draggable="false"><p class="panel-text navi-bubble" id="readyText">猫じゃらしで すきを作って、猫パンチ!</p></div>
         <!-- 修行: 小判で主人公を鍛える (出陣の前と、負けたあとに出す) -->
         <div class="train-box" id="readyTrain"></div>
         <button type="button" class="btn-gold btn-big" id="btnSortie">出陣!</button>
@@ -136,7 +136,7 @@
 
   <!-- ================================================= 天下 (日本地図の国とり)。見本の絵: art/realm-mock.png -->
   <section class="view realm-view" id="view-realm" data-view="realm" hidden>
-    <p class="locked-note paper" id="realmLocked" hidden></p>
+    <div class="locked-note paper" id="realmLocked" hidden><div class="navi-say"><img class="navi-img" data-pose="worry" alt="" draggable="false"><p class="navi-bubble"></p></div></div>
     <div class="realm-body" id="realmContent" hidden>
       <!-- 地図は画面いっぱい。飾りと札は上に重ねる (押せる物のほかは指を通す) -->
       <div class="realm-map" id="realmMap"><canvas id="realmCanvas"></canvas></div>
@@ -148,7 +148,7 @@
       <button type="button" class="realm-zoom" id="btnRealmAll" aria-label="日本ぜんたいを見る">🗾 ぜんたい</button>
       <div class="realm-remain" id="realmRemain" hidden><span>天下統一まであと <b id="realmLeft">47</b> 国</span></div>
       <div class="realm-guide" id="realmGuide">
-        <img src="./img/stage2.png" alt="" draggable="false">
+        <img class="navi-img" id="realmGuideImg" data-pose="hello" alt="" draggable="false">
         <p class="realm-bubble" id="realmBubble"></p>
       </div>
       <div class="realm-sheet" id="realmSheet"></div>
@@ -162,7 +162,7 @@
       <h2 class="tag-title">家臣</h2>
       <div class="page-sub"><span id="vassalSlotCount">0 / 0 人</span> ・ <i class="coin"></i> <b id="coinVassals">0</b></div>
     </div>
-    <p class="locked-note paper" id="vassalsLocked" hidden></p>
+    <div class="locked-note paper" id="vassalsLocked" hidden><div class="navi-say"><img class="navi-img" data-pose="worry" alt="" draggable="false"><p class="navi-bubble"></p></div></div>
     <div id="vassalsContent" class="page-body" hidden>
       <p class="page-note">役目: <b>自主練</b>=小判と経験値が増える / <b>普請</b>=資材が増える / <b>出陣</b>=合戦でいっしょに戦う (2人まで)。<br>家臣はそれぞれ<b>得意技</b>をひとつ持っていて、出陣すると効く。鍛えるほど強くなる</p>
       <ul class="vassal-list" id="vassalList"></ul>
@@ -178,12 +178,12 @@
     </div>
     <div class="locked-art paper" id="castleLocked" hidden>
       <img src="./img/b-castle.png" alt="">
-      <p></p>
+      <div class="navi-say"><img class="navi-img" data-pose="worry" alt="" draggable="false"><p class="navi-bubble"></p></div>
     </div>
     <div id="castleContent" class="page-body" hidden>
       <p class="castle-banner" id="castleBanner" hidden></p>
       <div class="town-map" id="castleMap"><canvas class="map-bg"></canvas><canvas class="map-fg"></canvas></div>
-      <p class="map-hint">マスを押すと、建てる物を選べるにゃ</p>
+      <div class="navi-say navi-small map-hint"><img class="navi-img" data-pose="walk" alt="" draggable="false"><p class="navi-bubble">マスを押すと、建てる物を選べるにゃ</p></div>
       <div class="town-effects" id="castleEffects"></div>
       <div class="build-sheet paper" id="castleSheet" hidden></div>
     </div>
@@ -197,7 +197,7 @@
     </div>
     <div class="locked-art paper" id="villageLocked" hidden>
       <img src="./img/b-village.png" alt="">
-      <p></p>
+      <div class="navi-say"><img class="navi-img" data-pose="worry" alt="" draggable="false"><p class="navi-bubble"></p></div>
     </div>
     <div id="villageContent" class="page-body" hidden>
       <div class="pop paper">
@@ -205,7 +205,7 @@
         <div class="next-bar"><div class="next-fill" id="popFill"></div></div>
       </div>
       <div class="town-map" id="villageMap"><canvas class="map-bg"></canvas><canvas class="map-fg"></canvas></div>
-      <p class="map-hint">マスを押すと、建てる物を選べるにゃ</p>
+      <div class="navi-say navi-small map-hint"><img class="navi-img" data-pose="walk" alt="" draggable="false"><p class="navi-bubble">マスを押すと、建てる物を選べるにゃ</p></div>
       <div class="town-effects" id="villageEffects"></div>
       <div class="build-sheet paper" id="villageSheet" hidden></div>
     </div>
@@ -221,7 +221,7 @@
 
   <div class="toast" id="toast" hidden></div>
   <!-- 敵が攻めてくる知らせ (天下の地図の外にいるとき)。押すと天下の地図へ -->
-  <button type="button" class="invasion-bar" id="invasionBar" hidden></button>
+  <button type="button" class="invasion-bar" id="invasionBar" hidden><img class="navi-img" data-pose="worry" alt="" draggable="false"><span id="invasionText"></span></button>
 </div>
 
 <!-- ================================================= 必殺技のカットイン -->
@@ -248,6 +248,7 @@
     <div class="rank-up-name" id="rankUpName">草履取り</div>
     <img class="modal-art" id="rankUpArt" src="./img/stage0.png" alt="">
     <p class="modal-text" id="rankUpText"></p>
+    <div class="navi-say rank-navi" id="rankNavi" hidden><img class="navi-img" data-pose="cheer" alt="" draggable="false"><p class="navi-bubble" id="rankTips"></p></div>
     <button type="button" class="btn-gold btn-big" id="btnRankOk">やったにゃ!</button>
   </div>
 </div>

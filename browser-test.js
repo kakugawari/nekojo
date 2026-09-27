@@ -934,7 +934,9 @@ async function run() {
         await rp.evaluate(() => window.__app.realmStep(5));
         await rp.waitForTimeout(350);
         const l1 = await rp.evaluate(() => ({ left: window.__app.state().realm.invasion.left, shown: document.querySelector('[data-v="invLeft"]').textContent }));
-        ok(l1.left <= l0 - 4.9 && l1.shown === String(Math.ceil(l1.left)), `${tag}: 秒読みが進み、札の数も書き変わる (${Math.ceil(l0)} → ${l1.shown})`);
+        // 札の字は 0.25 秒ごとにまとめて書き換えるので、読んだ瞬間の秒数より最大 0.25 秒 (と 1 コマ) 前の値でもよい
+        const shownOk = [Math.ceil(l1.left), Math.ceil(l1.left + 0.3)].map(String).includes(l1.shown);
+        ok(l1.left <= l0 - 4.9 && shownOk, `${tag}: 秒読みが進み、札の数も書き変わる (${Math.ceil(l0)} → ${l1.shown}、中の値 ${l1.left.toFixed(2)})`);
         // 画面を開いているだけでも秒読みは進む (毎コマ)。合戦の最中は止まる
         const l2 = await rp.evaluate(() => window.__app.state().realm.invasion.left);
         await rp.waitForTimeout(1200);
@@ -981,6 +983,87 @@ async function run() {
       const card = await rect('#unifyModal .modal-card');
       ok(card.top >= -1 && card.bottom <= vh + 1, `${tag}: 天下統一の札が画面に収まる`);
       await rc.close();
+    }
+
+    // ------------------------------------------------ 案内猫 (art/guide-sheet.png から切り出した img/guide-*.png)
+    section('案内猫 (天下の左下・まだ開いていない画面・コツ・助言・知らせ・出世の札)');
+    for (const [vw, vh, safe] of [[430, 932, ':root{--safe-t:59px;--safe-b:34px}'], [932, 430, ':root{--safe-l:59px;--safe-r:59px;--safe-b:21px}']]) {
+      const nc = await browser.newContext({ ...device, viewport: { width: vw, height: vh } });
+      const np = await nc.newPage();
+      np.on('pageerror', (e) => errors.push('案内猫: ' + e.message));
+      await np.bringToFront();
+      await np.goto(URL);
+      await np.waitForFunction(() => window.__app);
+      await np.addStyleTag({ content: safe });
+      const tag = `${vw}x${vh}`;
+      // 見えている案内猫: 絵が読めていて、吹き出しに字があり、画面の中 (タブの帯に隠れない) にあるか
+      const navi = (sel) => np.evaluate((q) => {
+        const box = document.querySelector(q);
+        const img = box && box.querySelector('.navi-img'), p = box && box.querySelector('.navi-bubble');
+        if (!img || !box.offsetParent) return null;
+        const b = p.getBoundingClientRect(), i = img.getBoundingClientRect(), tabs = document.getElementById('tabbar').getBoundingClientRect();
+        const underTabs = (r) => r.right > tabs.left && r.left < tabs.right && r.bottom > tabs.top && r.top < tabs.bottom;
+        return {
+          pose: img.dataset.pose, loaded: img.complete && img.naturalWidth > 0, text: p.textContent.trim(),
+          inView: [b, i].every((r) => r.left >= -1 && r.top >= -1 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1 && !underTabs(r)),
+          bottom: Math.round(b.bottom)
+        };
+      }, sel);
+      await np.evaluate(() => { const a = window.__app; a.start(); a.closeStory(); });
+      // まだ開いていない画面: 困り顔で、いつ開くかを教える (横の城・村は、絵の横に並べて画面の中に出す)
+      for (const [t, sel] of [['realm', '#realmLocked'], ['vassals', '#vassalsLocked'], ['castle', '#castleLocked'], ['village', '#villageLocked']]) {
+        await np.evaluate((x) => window.__app.setTab(x), t);
+        await np.waitForTimeout(80);
+        const n = await navi(sel);
+        ok(n && n.loaded && n.pose === 'worry' && n.text.includes('になると') && n.inView,
+          `${tag}: まだ開いていない「${t}」で、案内猫が開き方を教え、画面の中に見える (${n ? n.pose + ' 下端' + n.bottom : 'なし'})`);
+      }
+      // 出陣の前のコツ (はじめての戦は、手を振ってあいさつ)
+      await np.evaluate(() => window.__app.setTab('battle'));
+      await np.waitForTimeout(80);
+      const rd = await navi('#readyPanel .navi-say');
+      ok(rd && rd.loaded && rd.pose === 'hello' && rd.text.includes('猫じゃらし') && rd.inView, `${tag}: 出陣の札で、案内猫がコツを教える (${rd && rd.pose})`);
+      // 負けたときの助言 (困り顔)
+      await np.locator('#btnSortie').tap();
+      await np.evaluate(() => { window.__app.battle().player.hp = 0; });
+      await np.waitForFunction(() => !document.getElementById('resultPanel').hidden, null, { timeout: 4000 }).catch(() => {});
+      const ls = await navi('#resultRows .result-navi');
+      ok(ls && ls.loaded && ls.pose === 'worry' && ls.text.includes('修行') && ls.inView, `${tag}: 負けると、案内猫が困り顔で次の手を教える`);
+      // 出世の札: 新しくできることは、案内猫が杖をかかげて教える。札は画面に収まる
+      await np.evaluate(() => { const a = window.__app, R = window.Core.RANKS, k = window.Core.REALM_UNLOCK_RANK; a.debugAddMerit(R[k - 1].threshold - a.state().totalMerit); a.closeModals(); a.debugAddMerit(R[k].threshold - a.state().totalMerit); });
+      await np.waitForTimeout(350);
+      const rk = await navi('#rankNavi');
+      const card = await np.evaluate(() => { const r = document.querySelector('#rankModal .modal-card').getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; });
+      ok(rk && rk.loaded && rk.pose === 'cheer' && rk.text.includes('天下') && card.top >= -1 && card.bottom <= vh + 1,
+        `${tag}: 侍への出世で、案内猫が「天下」を教え、札は画面に収まる (${Math.round(card.top)}〜${Math.round(card.bottom)})`);
+      // 天下の左下: 場面でポーズが変わる (国を選ぶ前はあいさつ → 選ぶと手を差し出す → はじめると地図を見て歩く → 攻めてくると困る)
+      await np.evaluate(() => { const a = window.__app; a.closeModals(); a.setTab('realm'); });
+      await np.waitForTimeout(250);
+      const pose = () => np.evaluate(() => { const i = document.getElementById('realmGuideImg'); return i.dataset.pose + (i.complete && i.naturalWidth > 0 ? '' : '(読めていない)') + ' / ' + document.getElementById('realmBubble').textContent; });
+      const p0 = await pose();
+      await np.evaluate(() => window.__app.selectPref(23));
+      await np.waitForTimeout(250);
+      const p1 = await pose();
+      await np.evaluate(() => window.__app.startRealm(23));
+      await np.waitForTimeout(250);
+      const p2 = await pose();
+      await np.evaluate(() => window.__app.debugSetState((s) => {
+        const r = JSON.parse(JSON.stringify(s.realm));
+        [22, 21].forEach((id) => { r.mine[id - 1] = true; r.troops[id - 1] = 300; });
+        r.invasion = null; r.nextInvasion = 1;
+        return Object.assign({}, s, { realm: r });
+      }));
+      await np.evaluate(() => window.__app.realmStep(2));
+      await np.waitForTimeout(250);
+      const p3 = await pose();
+      ok(p0.startsWith('hello / ') && p1.startsWith('main / ') && p2.startsWith('walk / ') && p3.startsWith('worry / '),
+        `${tag}: 天下の左下の案内猫は、場面でポーズを変える (${[p0, p1, p2, p3].map((x) => x.split(' / ')[0]).join(' → ')})`);
+      // ほかの画面の、攻めてくる知らせ: 困り顔を添える (字はそのまま)
+      await np.evaluate(() => window.__app.setTab('vassals'));
+      await np.waitForTimeout(100);
+      const bar = await np.evaluate(() => { const b = document.getElementById('invasionBar'), i = b.querySelector('.navi-img'); return { shown: !b.hidden, img: !!i && i.naturalWidth > 0, text: b.textContent }; });
+      ok(bar.shown && bar.img && /あと \d+ 秒/.test(bar.text), `${tag}: 攻めてくる知らせの帯に、案内猫の困り顔が出る`);
+      await nc.close();
     }
 
     // ------------------------------------------------ 留守の間の進み (保存 → 再読み込み)
