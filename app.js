@@ -822,28 +822,28 @@
     b.events.length = 0;
   }
 
-  // 特大猫パンチのカットイン: 2.4 秒。飛びこんで (0.24 秒) 着いたら、止めて見せる (約 1.7 秒)。そのあと右へ抜ける。
-  // 前は 1.1 秒で、止まっているのが 0.5 秒ほどしかなく、すぐいなくなってさみしかった (いただいた声)。
+  // 特大猫パンチのカットイン: 2.0 秒。飛びこんで (0.22 秒) 着いたら、止めて見せる (約 1.4 秒)。そのあと右へ抜ける (0.33 秒)。
+  // 1.1 秒だと、止まっているのが 0.5 秒ほどしかなく、すぐいなくなってさみしかった。2.4 秒だと少し長く感じた (どちらもいただいた声)。
   // 見せている間は合戦も止める (見ている間に殴られないように)。画面を押すと、すぐ先へ進む
-  const CUTIN_MS = 2400;
+  const CUTIN_MS = 2000;
   let cutinAnims = null;
   function cutinOn() { return !!cutinAnims; }
   function startCutin() {
     els.cutin.hidden = false;
     const band = els.cutin.querySelector('.cutin-band');
     const art = els.cutin.querySelector('.cutin-art');
-    const a1 = band.animate([{ opacity: 0, transform: 'scaleY(0)' }, { opacity: 1, transform: 'scaleY(1)', offset: 0.07 }, { opacity: 1, transform: 'scaleY(1)', offset: 0.9 }, { opacity: 0, transform: 'scaleY(0)' }], { duration: CUTIN_MS });
+    const a1 = band.animate([{ opacity: 0, transform: 'scaleY(0)' }, { opacity: 1, transform: 'scaleY(1)', offset: 0.07 }, { opacity: 1, transform: 'scaleY(1)', offset: 0.88 }, { opacity: 0, transform: 'scaleY(0)' }], { duration: CUTIN_MS });
     // 左から飛びこみ、着いた瞬間に少し大きく (パンチの手ごたえ)、止まって見せてから右へ抜ける
     const a2 = art.animate([
       { transform: 'translateX(-110%) scale(1)', easing: 'ease-out' },
-      { transform: 'translateX(0) scale(1.12)', offset: 0.1 },
+      { transform: 'translateX(0) scale(1.12)', offset: 0.11 },
       { transform: 'translateX(0) scale(1)', offset: 0.15 },
-      { transform: 'translateX(2%) scale(1.02)', offset: 0.86, easing: 'ease-in' },
+      { transform: 'translateX(2%) scale(1.02)', offset: 0.835, easing: 'ease-in' },
       { transform: 'translateX(120%) scale(1)' }
     ], { duration: CUTIN_MS });
     cutinAnims = [a1, a2];
     a2.onfinish = endCutin;
-    setFace('smile', 2.4);
+    setFace('smile', 2.0);
   }
   function endCutin() {
     if (!cutinAnims) return;

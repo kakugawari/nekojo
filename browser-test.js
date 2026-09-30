@@ -1013,12 +1013,12 @@ async function run() {
       ok(ci.loaded && ci.words === '', `${tag}: カットインはもらった絵だけで、絵の上に字を重ねない (重ねた字: 「${ci.words}」)`);
       ok(ci.textL >= 0 && ci.textR <= vw, `${tag}: 絵の中の「特大猫パンチ!」が画面の中 (${Math.round(ci.textL)}〜${Math.round(ci.textR)})`);
       ok(Math.abs(ci.artMid - ci.bandMid) <= 4 && ci.artH >= ci.bandH * 0.7, `${tag}: 絵は虹色の帯の真ん中に大きく出る (帯 ${Math.round(ci.bandH)} / 絵 ${Math.round(ci.artH)})`);
-      // 止めて見せる: 出てから 1.6 秒たっても、まだ出ていて、絵は動いていない (前は 1.1 秒で消えていた)。その間、合戦は止まる
+      // 止めて見せる: 出てから 1.3 秒たっても、まだ出ていて、絵は動いていない (1.1 秒で消えていたころは、さみしかった)。その間、合戦は止まる
       const t0 = await cp.evaluate(() => window.__app.battle().t);
       const x0 = await cp.evaluate(() => document.querySelector('.cutin-art').getBoundingClientRect().left);
-      await cp.waitForTimeout(1100);   // 出てから 1.6 秒
+      await cp.waitForTimeout(800);   // 出てから 1.3 秒 (止めて見せるのは 0.3〜1.67 秒)
       const hold = await cp.evaluate(() => ({ shown: !document.getElementById('cutin').hidden, x: document.querySelector('.cutin-art').getBoundingClientRect().left, t: window.__app.battle().t }));
-      ok(hold.shown && Math.abs(hold.x - x0) <= 0.05 * vw, `${tag}: カットインは止めて見せる (1.6 秒たっても出ていて、絵は ${Math.round(Math.abs(hold.x - x0))}px しか動かない)`);
+      ok(hold.shown && Math.abs(hold.x - x0) <= 0.05 * vw, `${tag}: カットインは止めて見せる (1.3 秒たっても出ていて、絵は ${Math.round(Math.abs(hold.x - x0))}px しか動かない)`);
       ok(hold.t === t0, `${tag}: カットインを見せている間は、合戦が止まる (合戦の時間 ${t0.toFixed(2)} → ${hold.t.toFixed(2)})`);
       await cp.waitForFunction(() => document.getElementById('cutin').hidden, null, { timeout: 3000 }).catch(() => {});
       const after = await cp.evaluate(() => ({ hidden: document.getElementById('cutin').hidden, t: window.__app.battle().t }));
