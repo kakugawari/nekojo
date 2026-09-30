@@ -1092,19 +1092,19 @@ img { -webkit-user-drag: none; }
   border-top: 4px solid #fff;
   border-bottom: 4px solid #fff;
 }
-.cutin-art { position: absolute; left: 4%; top: 25%; width: 78%; height: auto; }
-.cutin-text {
+/* 絵を置く台は帯と同じ高さにして、絵の真ん中を帯の真ん中に合わせる (帯は縮む動きがあるので、絵は帯の中に入れない) */
+.cutin-stage {
   position: absolute;
-  right: 6%;
-  top: 52%;
-  font-size: 30px;
-  font-weight: 900;
-  line-height: 1.1;
-  text-align: right;
-  color: #fff;
-  -webkit-text-stroke: 3px var(--ink);
-  paint-order: stroke fill;
+  left: 0;
+  right: 0;
+  top: 30%;
+  height: 34%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+/* 縦: 幅の 110% (光のすじの端は切れてよい。字の帯 (絵の x260〜1100) は画面に収まる) */
+.cutin-art { flex: none; width: 110%; height: auto; }
 
 /* --------------------------------------------------------- 案内猫 (img/guide-*.png) と吹き出し
    天下の左下のほか、まだ開いていない画面・出陣前のコツ・負けたときの助言・攻めてくる知らせ・出世の札で案内する */
@@ -1290,9 +1290,10 @@ img { -webkit-user-drag: none; }
   .modal-card > * { grid-column: 2; }
   .modal-card > .modal-art { grid-column: 1; grid-row: 1 / span 5; width: 150px; }
 
-  .cutin-band { top: 24%; height: 52%; }
-  .cutin-art { left: 10%; top: 6%; width: auto; height: 88%; }
-  .cutin-text { right: 12%; top: 40%; font-size: 44px; }
+  /* 横: 帯を太くし (430 の 68% = 292)、絵はそれより少し大きく (360) 置く。光のすじだけが帯の上下にかかる */
+  .cutin-band { top: 16%; height: 68%; }
+  .cutin-stage { top: 16%; height: 68%; }
+  .cutin-art { width: auto; height: 360px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

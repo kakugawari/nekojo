@@ -48,7 +48,7 @@
   // ---------------------------------------------------------- 絵
 
   const IMG_NAMES = ['stage0', 'stage1', 'stage2', 'stage3', 'cat-normal', 'cat-chatora', 'cat-kuro', 'cat-gray', 'cat-red',
-    'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-special', 'pose-jarashi', 'pose-punch', 'b-villager',
+    'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-jarashi', 'pose-punch', 'b-villager',
     'r-coin', 'r-catcoin', 'r-swords', 'r-tag-strength', 'r-tag-reward',
     'guide-main', 'guide-stand', 'guide-walk', 'guide-hello', 'guide-cheer', 'guide-worry']
     .concat(Object.keys(C.BUILDINGS).map(function (t) { return C.BUILDINGS[t].img; }));
@@ -737,10 +737,15 @@
     els.cutin.hidden = false;
     const band = els.cutin.querySelector('.cutin-band');
     const art = els.cutin.querySelector('.cutin-art');
-    const text = els.cutin.querySelector('.cutin-text');
     band.animate([{ opacity: 0, transform: 'scaleY(0)' }, { opacity: 1, transform: 'scaleY(1)', offset: 0.15 }, { opacity: 1, transform: 'scaleY(1)', offset: 0.8 }, { opacity: 0, transform: 'scaleY(0)' }], { duration: 1000 });
-    art.animate([{ transform: 'translateX(-110%)' }, { transform: 'translateX(0)', offset: 0.25 }, { transform: 'translateX(4%)', offset: 0.8 }, { transform: 'translateX(120%)' }], { duration: 1000, easing: 'ease-out' });
-    const last = text.animate([{ opacity: 0, transform: 'scale(2)' }, { opacity: 1, transform: 'scale(1)', offset: 0.3 }, { opacity: 1, offset: 0.8 }, { opacity: 0 }], { duration: 1000 });
+    // 左から飛びこみ、着いた瞬間に少し大きく (パンチの手ごたえ)、止まって見せてから右へ抜ける
+    const last = art.animate([
+      { transform: 'translateX(-110%) scale(1)' },
+      { transform: 'translateX(0) scale(1.12)', offset: 0.2 },
+      { transform: 'translateX(0) scale(1)', offset: 0.3 },
+      { transform: 'translateX(3%) scale(1)', offset: 0.8 },
+      { transform: 'translateX(120%) scale(1)' }
+    ], { duration: 1100, easing: 'ease-out' });
     last.onfinish = function () { els.cutin.hidden = true; };
     setFace('smile', 1.4);
   }
@@ -3138,6 +3143,8 @@
         state = Object.assign({}, state, { materials: n });
         renderActiveView();
       },
+      /** 特大猫パンチのカットインだけを出す (見た目の確かめ用) */
+      cutin: startCutin,
       closeModals: function () { els.rankModal.hidden = true; els.storyModal.hidden = true; realmEls.unify.hidden = true; },
       // 天下
       startRealm: doStartRealm,

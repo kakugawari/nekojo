@@ -985,6 +985,41 @@ async function run() {
       await rc.close();
     }
 
+    // ------------------------------------------------ 特大猫パンチのカットイン (もらった絵 art/cutin-sheet.png)
+    section('特大猫パンチのカットイン (虹色の帯の上に、字まで描いてある絵)');
+    for (const [vw, vh, safe] of [[430, 932, ':root{--safe-t:59px;--safe-b:34px}'], [932, 430, ':root{--safe-l:59px;--safe-r:59px;--safe-b:21px}']]) {
+      const cc = await browser.newContext({ ...device, viewport: { width: vw, height: vh } });
+      const cp = await cc.newPage();
+      cp.on('pageerror', (e) => errors.push('カットイン: ' + e.message));
+      await cp.bringToFront();
+      await cp.goto(URL);
+      await cp.waitForFunction(() => window.__app);
+      await cp.addStyleTag({ content: safe });
+      const tag = `${vw}x${vh}`;
+      await cp.evaluate(() => { const a = window.__app; a.start(); a.closeStory(); a.sortie(); });
+      await cp.waitForFunction(() => { const i = document.querySelector('.cutin-art'); return i.complete && i.naturalWidth > 0; }, null, { timeout: 5000 }).catch(() => {});
+      await cp.evaluate(() => window.__app.cutin());
+      await cp.waitForTimeout(500);   // 飛びこんで止まっている間 (0.33〜0.88 秒)
+      const ci = await cp.evaluate(() => {
+        const cut = document.getElementById('cutin'), art = cut.querySelector('.cutin-art');
+        const a = art.getBoundingClientRect(), b = cut.querySelector('.cutin-band').getBoundingClientRect();
+        // 絵の中の字の帯は、元の絵 (1200 幅) の x260〜1100
+        const k = a.width / art.naturalWidth;
+        return {
+          loaded: art.naturalWidth > 0,
+          words: cut.textContent.trim(),   // 前は絵の上に字を重ねていて、主人公の上にかかった
+          textL: a.left + 260 * k, textR: a.left + 1100 * k,
+          artMid: (a.top + a.bottom) / 2, bandMid: (b.top + b.bottom) / 2, bandH: b.height, artH: a.height
+        };
+      });
+      ok(ci.loaded && ci.words === '', `${tag}: カットインはもらった絵だけで、絵の上に字を重ねない (重ねた字: 「${ci.words}」)`);
+      ok(ci.textL >= 0 && ci.textR <= vw, `${tag}: 絵の中の「特大猫パンチ!」が画面の中 (${Math.round(ci.textL)}〜${Math.round(ci.textR)})`);
+      ok(Math.abs(ci.artMid - ci.bandMid) <= 4 && ci.artH >= ci.bandH * 0.7, `${tag}: 絵は虹色の帯の真ん中に大きく出る (帯 ${Math.round(ci.bandH)} / 絵 ${Math.round(ci.artH)})`);
+      await cp.waitForTimeout(1000);
+      ok(await cp.evaluate(() => document.getElementById('cutin').hidden), `${tag}: カットインは終わると消える`);
+      await cc.close();
+    }
+
     // ------------------------------------------------ 案内猫 (art/guide-sheet.png から切り出した img/guide-*.png)
     section('案内猫 (天下の左下・まだ開いていない画面・コツ・助言・知らせ・出世の札)');
     for (const [vw, vh, safe] of [[430, 932, ':root{--safe-t:59px;--safe-b:34px}'], [932, 430, ':root{--safe-l:59px;--safe-r:59px;--safe-b:21px}']]) {
