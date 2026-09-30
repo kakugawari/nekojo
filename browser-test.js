@@ -255,7 +255,7 @@ async function run() {
     ok(await phone.evaluate(() => !!window.__app.battle() && document.getElementById('readyPanel').hidden), '「出陣!」で戦が始まる');
 
     // 下のボタンと一時停止が、札や重ねた層にふさがれていないか (指の下にボタンがあるか)
-    const under = await phone.evaluate(() => ['btnLure', 'btnPunch', 'btnItem', 'btnPause'].map((id) => {
+    const under = await phone.evaluate(() => ['btnLure', 'btnPunch', 'btnPause'].map((id) => {
       const r = document.getElementById(id).getBoundingClientRect();
       const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return el && el.closest('#' + id) ? 'ok' : id + '→' + (el ? el.id || el.className : 'none');
@@ -320,8 +320,7 @@ async function run() {
 
     // 会心まで溜めると「ポン!」が鳴り、離すと特大猫パンチ (カットイン)
     await phone.waitForTimeout(700);
-    await phone.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; e.wary = 0; b.items.matatabi = Math.max(1, b.items.matatabi); });
-    await phone.evaluate(() => window.__app.item('matatabi'));
+    await phone.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; e.wary = 0; window.__app.debugMax(); });
     const pon0 = await phone.evaluate(() => window.__app.sfx().pon);
     await touch('touchStart', pp);
     await phone.waitForTimeout(900); // MAX の敵なら 0.75 秒で会心
@@ -335,7 +334,7 @@ async function run() {
     const big = await phone.evaluate(() => { const b = window.__app.battle(); return { hp: b.enemies[b.current].hp, on: b.charge.on, cutin: !document.getElementById('cutin').hidden }; });
     ok(!big.on && hpBig - big.hp === Math.round(before.atk * 3.5 * 3), `指をずらしてから離しても、特大猫パンチが出る (${hpBig} → ${big.hp})`);
     ok(big.cutin, '特大猫パンチでカットインが出る');
-    await phone.waitForTimeout(1100);
+    await phone.waitForFunction(() => document.getElementById('cutin').hidden, null, { timeout: 4000 }).catch(() => {});
 
     // 長押しで iOS の虫眼鏡 (ルーペ) が出ないように: 指が触れた瞬間 (touchstart) を止めている。
     // chromium では虫眼鏡は出ないので、止めたかどうか (defaultPrevented) と、字を選べないことを見る
@@ -362,15 +361,8 @@ async function run() {
     ok(sel.every((v) => v === 'none'), `ボタンの字・戦場・ゲージの字は選べない (${sel.join(', ')})`);
     await phone.waitForTimeout(700);
 
-    // アイテム: 魚で体力が戻る
-    await phone.evaluate(() => { window.__app.battle().player.hp = 10; });
-    await phone.locator('#btnItem').tap();
-    await phone.waitForTimeout(60);
-    ok(await phone.evaluate(() => !document.getElementById('itemMenu').hidden), 'アイテムを押すと、魚とまたたびが選べる');
-    await phone.locator('#btnFish').tap();
-    await phone.waitForTimeout(60);
-    const fish = await phone.evaluate(() => ({ hp: window.__app.battle().player.hp, left: window.__app.battle().items.fish, menu: document.getElementById('itemMenu').hidden }));
-    ok(fish.hp > 10 && fish.left === 1 && fish.menu, `魚を使うと体力が戻り、1つ減る (体力 ${fish.hp}、残り ${fish.left})`);
+    // アイテム (魚・またたび) はやめた。ボタンも札も無い
+    ok(await phone.evaluate(() => !document.getElementById('btnItem') && !document.getElementById('itemMenu')), 'アイテムのボタンと札は無い');
 
     // 一時停止
     await phone.locator('#btnPause').tap();
@@ -631,7 +623,7 @@ async function run() {
       await lp.waitForFunction(() => { const b = window.__app.battle(); const e = b && b.enemies[b.current]; return e && e.state === 'idle'; }, null, { timeout: 8000 });
       await lp.waitForTimeout(100);
       const R = {};
-      for (const [k, q] of Object.entries({ player: '.unit-player', enemy: '#enemyUnit', pause: '#btnPause', mission: '#mission', charge: '#chargeGauge', item: '#btnItem', lure: '#btnLure', punch: '#btnPunch' })) R[k] = await rectOf(q);
+      for (const [k, q] of Object.entries({ player: '.unit-player', enemy: '#enemyUnit', pause: '#btnPause', mission: '#mission', charge: '#chargeGauge', lure: '#btnLure', punch: '#btnPunch' })) R[k] = await rectOf(q);
       ok(R.lure.left >= tab.right && R.lure.bottom <= LH - SAFE.b && R.punch.right <= LW - SAFE.r && R.punch.bottom <= LH - SAFE.b && R.pause.right <= LW - SAFE.r,
         '猫じゃらし・猫パンチ・一時停止は安全域の内側 (角の丸みや指の帯にかからない)');
       const names = Object.keys(R);
@@ -654,7 +646,7 @@ async function run() {
       {
         const top = L.ground - 150 * L.s - 70 * L.s - 24;
         const pop = { left: fl + L.enemyX - 100, right: fl + L.enemyX + 100, top: top, bottom: L.ground };
-        const cover = ['charge', 'mission', 'item', 'player'].filter((k) => { const a = R[k]; return a.left < pop.right && pop.left < a.right && a.top < pop.bottom && pop.top < a.bottom; });
+        const cover = ['charge', 'mission', 'player'].filter((k) => { const a = R[k]; return a.left < pop.right && pop.left < a.right && a.top < pop.bottom && pop.top < a.bottom; });
         ok(cover.length === 0, `敵の頭の上 (当たったときの字が出る所) を、札が隠さない${cover.length ? ' (' + cover.join(',') + ')' : ''}`);
       }
       ok(L.enterLeft >= L.w, `敵は画面の右の外から歩いてくる (ボス 9 匹も。出だしの左端 ${Math.round(L.enterLeft)} ≥ 幅 ${L.w})`);
@@ -670,10 +662,6 @@ async function run() {
       await lp.locator('#btnPunch').tap();
       await lp.waitForTimeout(60);
       ok(await lp.evaluate((h) => { const b = window.__app.battle(); return b.enemies[b.current].hp < h; }, hp0), '横でも猫パンチを指で押せる');
-      await lp.locator('#btnItem').tap();
-      const menu = await rectOf('#itemMenu');
-      ok(inside(menu), 'アイテムの一覧が画面に収まる');
-      await lp.locator('#btnItem').tap();
 
       // 回す: 横 → 縦 → 横。そのたびに戦場を組み直す
       // 回すと安全域も変わる (縦: 上 59pt・下 34pt、左右は無し)
@@ -749,7 +737,7 @@ async function run() {
       // 樽の山は、ボタンと重ならず、画面の中にある
       const L = await yp.evaluate(() => window.__app.layout());
       const fr = await yp.evaluate(() => { const r = document.getElementById('field').getBoundingClientRect(); return { left: r.left, top: r.top }; });
-      const btns = await yp.evaluate(() => ['btnLure', 'btnItem', 'btnPunch'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return { id, left: r.left, right: r.right, top: r.top, bottom: r.bottom }; }));
+      const btns = await yp.evaluate(() => ['btnLure', 'btnPunch'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return { id, left: r.left, right: r.right, top: r.top, bottom: r.bottom }; }));
       const ob = { left: L.obstacle.left + fr.left, right: L.obstacle.right + fr.left, top: L.obstacle.top + fr.top, bottom: L.obstacle.bottom + fr.top };
       const hit = btns.filter((r) => r.left < ob.right && ob.left < r.right && r.top < ob.bottom && ob.top < r.bottom).map((r) => r.id);
       ok(hit.length === 0 && ob.left >= fr.left - 1, `${tag}: 樽の山がボタンに重ならず、画面の中にある${hit.length ? ' (' + hit.join(',') + ')' : ''}`);
@@ -1017,8 +1005,27 @@ async function run() {
       ok(ci.loaded && ci.words === '', `${tag}: カットインはもらった絵だけで、絵の上に字を重ねない (重ねた字: 「${ci.words}」)`);
       ok(ci.textL >= 0 && ci.textR <= vw, `${tag}: 絵の中の「特大猫パンチ!」が画面の中 (${Math.round(ci.textL)}〜${Math.round(ci.textR)})`);
       ok(Math.abs(ci.artMid - ci.bandMid) <= 4 && ci.artH >= ci.bandH * 0.7, `${tag}: 絵は虹色の帯の真ん中に大きく出る (帯 ${Math.round(ci.bandH)} / 絵 ${Math.round(ci.artH)})`);
-      await cp.waitForTimeout(1000);
-      ok(await cp.evaluate(() => document.getElementById('cutin').hidden), `${tag}: カットインは終わると消える`);
+      // 止めて見せる: 出てから 1.6 秒たっても、まだ出ていて、絵は動いていない (前は 1.1 秒で消えていた)。その間、合戦は止まる
+      const t0 = await cp.evaluate(() => window.__app.battle().t);
+      const x0 = await cp.evaluate(() => document.querySelector('.cutin-art').getBoundingClientRect().left);
+      await cp.waitForTimeout(1100);   // 出てから 1.6 秒
+      const hold = await cp.evaluate(() => ({ shown: !document.getElementById('cutin').hidden, x: document.querySelector('.cutin-art').getBoundingClientRect().left, t: window.__app.battle().t }));
+      ok(hold.shown && Math.abs(hold.x - x0) <= 0.05 * vw, `${tag}: カットインは止めて見せる (1.6 秒たっても出ていて、絵は ${Math.round(Math.abs(hold.x - x0))}px しか動かない)`);
+      ok(hold.t === t0, `${tag}: カットインを見せている間は、合戦が止まる (合戦の時間 ${t0.toFixed(2)} → ${hold.t.toFixed(2)})`);
+      await cp.waitForFunction(() => document.getElementById('cutin').hidden, null, { timeout: 3000 }).catch(() => {});
+      const after = await cp.evaluate(() => ({ hidden: document.getElementById('cutin').hidden, t: window.__app.battle().t }));
+      await cp.waitForTimeout(300);
+      const t2 = await cp.evaluate(() => window.__app.battle().t);
+      ok(after.hidden && t2 > after.t, `${tag}: カットインは終わると消え、合戦がまた進む`);
+      // 押すと、すぐ先へ進む (下のボタンは押されない)
+      await cp.evaluate(() => window.__app.cutin());
+      await cp.waitForTimeout(400);
+      const hp0 = await cp.evaluate(() => { const b = window.__app.battle(); return b.enemies[b.current].hp; });
+      const pb = await cp.evaluate(() => { const r = document.getElementById('btnPunch').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      await cp.touchscreen.tap(pb.x, pb.y);
+      await cp.waitForTimeout(100);
+      const skip = await cp.evaluate((h) => { const b = window.__app.battle(); return { hidden: document.getElementById('cutin').hidden, hp: b.enemies[b.current].hp }; }, hp0);
+      ok(skip.hidden && skip.hp === hp0, `${tag}: カットインは押すとすぐ消える (その指で猫パンチは出ない)`);
       await cc.close();
     }
 

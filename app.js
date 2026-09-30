@@ -19,8 +19,6 @@
     hpFill: $('hpFill'), hpText: $('hpText'), nextFill: $('nextFill'),
     enemyUnit: $('enemyUnit'), enemyName: $('enemyName'), enemyHpFill: $('enemyHpFill'), enemyFaceImg: $('enemyFaceImg'),
     missionText: $('missionText'), chargeGauge: $('chargeGauge'), chargeFill: $('chargeFill'), chargeLabel: $('chargeLabel'),
-    btnItem: $('btnItem'), itemBadge: $('itemBadge'), itemMenu: $('itemMenu'),
-    btnFish: $('btnFish'), btnMatatabi: $('btnMatatabi'), fishCount: $('fishCount'), matatabiCount: $('matatabiCount'),
     btnPause: $('btnPause'), pausePanel: $('pausePanel'), btnResume: $('btnResume'), btnRetreat: $('btnRetreat'),
     coinVassals: $('coinVassals'),
     field: $('field'), fieldBg: $('fieldBg'), fieldFg: $('fieldFg'), fieldBanner: $('fieldBanner'),
@@ -314,11 +312,6 @@
     });
     // 夢中 MAX の間は、猫パンチが光る (今だ!)
     setOnce('ready', !!(e && e.state === 'charmed'), function (v) { els.btnPunch.classList.toggle('ready', v); });
-
-    const items = b ? b.items : state.items;
-    setText(els.itemBadge, 'itemBadge', String(items.fish + items.matatabi));
-    setText(els.fishCount, 'fish', '×' + items.fish);
-    setText(els.matatabiCount, 'matatabi', '×' + items.matatabi);
 
     const lc = b ? Math.round(Math.min(1, b.cd.lure / C.LURE_COOLDOWN) * 12) / 12 : 0;
     const pc = b ? Math.round(Math.min(1, b.cd.punch / C.PUNCH_COOLDOWN) * 12) / 12 : 0;
@@ -807,10 +800,6 @@
         anim.punchLevel = ev.level || 0;
         addEffect({ kind: 'text', x: heroX() + 60 * s, y: fieldSize.ground - 140 * s, text: 'スカッ', color: '#7a6650', size: 16, dur: 0.7 });
         setFace('shy', 0.8);
-      } else if (ev.type === 'item') {
-        addEffect({ kind: 'text', x: ev.item === 'fish' ? heroX() : ex, y: top - 10 * s,
-          text: ev.item === 'fish' ? '🐟 +' + ev.amount : '🌿 夢中 MAX!', color: ev.item === 'fish' ? '#3a8fe0' : '#5fa83a', size: 20, dur: 1.0 });
-        setFace('smile', 0.8);
       } else if (ev.type === 'skill') {
         // 家臣の得意技が効いた。その家臣が跳ねて、しるしを出す
         const i2 = b.allies.findIndex(function (x) { return x.skill === ev.skill; });
@@ -833,21 +822,35 @@
     b.events.length = 0;
   }
 
+  // 特大猫パンチのカットイン: 2.4 秒。飛びこんで (0.24 秒) 着いたら、止めて見せる (約 1.7 秒)。そのあと右へ抜ける。
+  // 前は 1.1 秒で、止まっているのが 0.5 秒ほどしかなく、すぐいなくなってさみしかった (いただいた声)。
+  // 見せている間は合戦も止める (見ている間に殴られないように)。画面を押すと、すぐ先へ進む
+  const CUTIN_MS = 2400;
+  let cutinAnims = null;
+  function cutinOn() { return !!cutinAnims; }
   function startCutin() {
     els.cutin.hidden = false;
     const band = els.cutin.querySelector('.cutin-band');
     const art = els.cutin.querySelector('.cutin-art');
-    band.animate([{ opacity: 0, transform: 'scaleY(0)' }, { opacity: 1, transform: 'scaleY(1)', offset: 0.15 }, { opacity: 1, transform: 'scaleY(1)', offset: 0.8 }, { opacity: 0, transform: 'scaleY(0)' }], { duration: 1000 });
+    const a1 = band.animate([{ opacity: 0, transform: 'scaleY(0)' }, { opacity: 1, transform: 'scaleY(1)', offset: 0.07 }, { opacity: 1, transform: 'scaleY(1)', offset: 0.9 }, { opacity: 0, transform: 'scaleY(0)' }], { duration: CUTIN_MS });
     // 左から飛びこみ、着いた瞬間に少し大きく (パンチの手ごたえ)、止まって見せてから右へ抜ける
-    const last = art.animate([
-      { transform: 'translateX(-110%) scale(1)' },
-      { transform: 'translateX(0) scale(1.12)', offset: 0.2 },
-      { transform: 'translateX(0) scale(1)', offset: 0.3 },
-      { transform: 'translateX(3%) scale(1)', offset: 0.8 },
+    const a2 = art.animate([
+      { transform: 'translateX(-110%) scale(1)', easing: 'ease-out' },
+      { transform: 'translateX(0) scale(1.12)', offset: 0.1 },
+      { transform: 'translateX(0) scale(1)', offset: 0.15 },
+      { transform: 'translateX(2%) scale(1.02)', offset: 0.86, easing: 'ease-in' },
       { transform: 'translateX(120%) scale(1)' }
-    ], { duration: 1100, easing: 'ease-out' });
-    last.onfinish = function () { els.cutin.hidden = true; };
-    setFace('smile', 1.4);
+    ], { duration: CUTIN_MS });
+    cutinAnims = [a1, a2];
+    a2.onfinish = endCutin;
+    setFace('smile', 2.4);
+  }
+  function endCutin() {
+    if (!cutinAnims) return;
+    const list = cutinAnims;
+    cutinAnims = null;
+    list.forEach(function (a) { a.cancel(); });
+    els.cutin.hidden = true;
   }
 
   // ---------------------------------------------------------- 描く
@@ -1368,13 +1371,13 @@
   }
 
   function showReady() {
+    endCutin();
     battle = null;
     lastBattle = null;
     paused = false;
     effects = [];
     els.resultPanel.hidden = true;
     els.pausePanel.hidden = true;
-    els.itemMenu.hidden = true;
     els.readyPanel.hidden = false;
     els.readyTitle.textContent = '第' + kanjiNum((state.battlesWon || 0) + 1) + '戦';
     const r = C.rankIndexOf(state);
@@ -1434,7 +1437,6 @@
   function onBattleEnd(b) {
     lastBattle = b;
     battle = null;
-    els.itemMenu.hidden = true;
     const res = C.applyBattleResult(state, b);
     state = res.state;
     saveSoon();
@@ -1450,8 +1452,6 @@
       if (cq) rows += row('🏯 手に入れた国', C.prefOf(cq.to).name) + row('入った兵', C.troopsAt(state, cq.to) + ' 匹') + row('失った兵', cq.lost + ' 匹');
       if (df) rows += row('🛡 守った国', C.prefOf(df.to).name) + row('追い返した兵', df.attackers + ' 匹') + row('へった守りの兵', df.lost + ' 匹');
       rows += row('倒した敵', b.enemies.length + ' 匹') + row('小判', '+' + gain) + row('経験値', '+' + gain) + row('資材', '+' + b.materials);
-      if (b.loot.fish) rows += row('🐟 魚', '+' + b.loot.fish);
-      if (b.loot.matatabi) rows += row('🌿 またたび', '+' + b.loot.matatabi);
       els.resultTitle.textContent = cq ? C.prefOf(cq.to).name + 'を 手に入れた!' : df ? C.prefOf(df.to).name + 'を 守りきった!' : '勝利!';
       els.resultRows.innerHTML = rows;
       els.btnNext.textContent = cq || df ? '天下の地図へ' : 'つぎの戦へ';
@@ -1534,7 +1534,6 @@
     battle.charge = { on: false, t: 0 }; // 溜めは捨てる (止めている間にたまらないように)
     els.btnPunch.classList.remove('charging');
     paused = true;
-    els.itemMenu.hidden = true;
     els.pausePanel.hidden = false;
   }
 
@@ -1543,7 +1542,7 @@
     els.pausePanel.hidden = true;
   }
 
-  /** 退却: 使ったアイテムだけ減る。ほかは何も減らない */
+  /** 退却: 何も減らない (倒したぶんの小判は持ち帰る) */
   function retreat() {
     const cq = battle && battle.conquest;
     if (battle) {
@@ -2060,19 +2059,6 @@
     els.btnPunch.classList.remove('charging');
     if (!battle || paused) return false;
     return C.punchRelease(battle);
-  }
-  function doItem(kind) {
-    if (!battle || paused) return false;
-    const ok = C.useItem(battle, kind);
-    if (ok) els.itemMenu.hidden = true;
-    return ok;
-  }
-  function toggleItemMenu() {
-    if (!battle || paused) return;
-    els.itemMenu.hidden = !els.itemMenu.hidden;
-    const e = C.currentEnemy(battle);
-    els.btnFish.disabled = !(battle.items.fish > 0) || battle.player.hp >= battle.player.maxHp;
-    els.btnMatatabi.disabled = !(battle.items.matatabi > 0) || !e || e.state === 'enter';
   }
 
   // 連打するので click (指を離したとき) ではなく pointerdown (触れた瞬間) で受ける
@@ -3119,7 +3105,7 @@
 
     if (currentTab === 'battle' && !titleShown) {
       if (battle) {
-        if (battle.phase === 'fight' && !paused) C.stepBattle(battle, dt);
+        if (battle.phase === 'fight' && !paused && !cutinOn()) C.stepBattle(battle, dt);   // カットインの間は止める
         // 知らせは戦の最中でなくても読む。最後の1匹をパンチで倒すと、
         // 勝ちの知らせは stepBattle の外で出る (読まないと勝利の札が出ずに止まる)
         handleEvents(battle);
@@ -3196,10 +3182,9 @@
     });
     els.btnPunch.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     [els.btnLure, els.btnPunch, els.fieldFg].forEach(blockLoupe);
-    els.btnItem.addEventListener('click', toggleItemMenu);
-    els.btnFish.addEventListener('click', function () { doItem('fish'); });
-    els.btnMatatabi.addEventListener('click', function () { doItem('matatabi'); });
     els.btnPause.addEventListener('click', pauseBattle);
+    // カットインは、画面のどこを押しても先へ進む (下のボタンは押されない)
+    els.cutin.addEventListener('pointerdown', function (e) { e.preventDefault(); endCutin(); });
     els.btnResume.addEventListener('click', resumeBattle);
     els.btnRetreat.addEventListener('click', retreat);
     els.btnRecruit.addEventListener('click', doRecruit);
@@ -3242,7 +3227,6 @@
       releasePunch: doPunchRelease,
       mood: function () { const b = battle; return b ? C.enemyMood(b.enemies[b.current]) : 'none'; },
       sfx: function () { return Object.assign({}, sfxCount); },
-      item: doItem,
       paused: function () { return paused; },
       offer: function () { return pendingOffer; },
       acceptOffer: acceptOffer,
@@ -3313,6 +3297,9 @@
       },
       /** 特大猫パンチのカットインだけを出す (見た目の確かめ用) */
       cutin: startCutin,
+      cutinOn: cutinOn,
+      /** いまの敵をすぐ夢中 MAX にする (テストで溜めパンチを試すため。前はまたたびで作っていた) */
+      debugMax: function () { const e = battle && C.currentEnemy(battle); if (e) C.toMax(e, 4); },
       closeModals: function () { els.rankModal.hidden = true; els.storyModal.hidden = true; realmEls.unify.hidden = true; },
       // 天下
       startRealm: doStartRealm,

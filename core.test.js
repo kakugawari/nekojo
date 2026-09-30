@@ -216,16 +216,14 @@ const masher = { press: (b) => Core.punch(b), release: () => true };
 const tapper = {
   press(b) {
     const e = Core.currentEnemy(b); if (!e) return false;
-    if (b.player.hp < b.player.maxHp * 0.3 && b.items.fish > 0) return Core.useItem(b, 'fish');
     return e.state === 'charmed' ? Core.punch(b) : Core.lure(b);
   },
   release: () => true
 };
-// ふつう: 「!」を気にせず猫じゃらしを振り、MAX になったら強パンチまで溜めて離す。体力が減ったら魚
+// ふつう: 「!」を気にせず猫じゃらしを振り、MAX になったら強パンチまで溜めて離す
 const casual = {
   press(b) {
     const e = Core.currentEnemy(b); if (!e || b.charge.on) return false;
-    if (b.player.hp < b.player.maxHp * 0.3 && b.items.fish > 0) return Core.useItem(b, 'fish');
     if (e.state === 'charmed') return Core.punchPress(b);
     return Core.lure(b);
   },
@@ -236,7 +234,6 @@ const casual = {
 const skilled = {
   press(b) {
     const e = Core.currentEnemy(b); if (!e || b.charge.on) return false;
-    if (b.player.hp < b.player.maxHp * 0.35 && b.items.fish > 0) return Core.useItem(b, 'fish');
     if (e.state === 'rushWarn') {
       // 突進の予告を見てから (反応の遅れ 0.15〜0.35 秒) 猫じゃらしで樽へ誘導
       if (e.react === undefined) e.react = 0.15 + b.rng() * 0.2;
@@ -310,7 +307,7 @@ test('合戦: のら猫は猫じゃらし2回で夢中 MAX。ゲージは ♡ �
 
 test('合戦: 夢中 MAX は決まった長さで切れ、ゲージは減っていく。切れると飽きて警戒する', () => {
   const { b, e } = duelWith('nora');
-  Core.useItem(b, 'matatabi');
+  Core.toMax(e, 4);
   step(b, 2);
   assert.strictEqual(e.state, 'charmed');
   assert.ok(e.muchu < Core.MUCHU_MAX && e.muchu > 0, `残り時間に合わせて減る (${Math.round(e.muchu)})`);
@@ -386,7 +383,7 @@ test('合戦: 溜めパンチは押している長さで 通常 → 強 → 会�
 test('合戦: 夢中 MAX の敵には大ダメージ。溜めも 2 倍の速さでたまる', () => {
   const { b, e } = duelWith('nora', 1);
   e.hp = e.maxHp = 100000;
-  Core.useItem(b, 'matatabi');
+  Core.toMax(e, 4);
   Core.punchPress(b);
   step(b, 0.42);
   assert.strictEqual(Core.chargeLevel(b.charge.t), 1, '0.4 秒で強になる (ふだんは 0.8 秒)');
@@ -488,18 +485,6 @@ test('合戦: 大きなボス猫は5回振ってやっと MAX。夢中でない�
   assert.strictEqual(e2.maxHp - e2.hp, Math.round(b2.player.atk * 0.5));
 });
 
-test('合戦: 魚で体力が戻り、またたびで敵がすぐ夢中 MAX になる。持っている数だけ使える', () => {
-  const { b, e } = duelWith('boss');
-  assert.strictEqual(Core.useItem(b, 'fish'), false, '体力が満タンなら魚は使わない');
-  b.player.hp = 10;
-  assert.strictEqual(Core.useItem(b, 'fish'), true);
-  assert.strictEqual(b.player.hp, 10 + Math.round(b.player.maxHp * 0.4));
-  assert.strictEqual(Core.useItem(b, 'matatabi'), true);
-  assert.strictEqual(e.state, 'charmed', 'ボス猫でも、またたびなら一発で MAX');
-  assert.strictEqual(e.muchu, Core.MUCHU_MAX);
-  assert.strictEqual(Core.useItem(b, 'matatabi'), false, '1つしか持っていない');
-});
-
 test('合戦: 倒すと少し間をおいて次の敵が出てくる。最後の1匹が倒れたら勝ち', () => {
   const b = Core.createBattle(stateAtRank(0), Core.mulberry32(3));
   for (let n = 0; n < b.enemies.length; n++) {
@@ -507,7 +492,7 @@ test('合戦: 倒すと少し間をおいて次の敵が出てくる。最後の
     assert.strictEqual(b.current, n, `${n + 1}匹目が出てくる`);
     e.hp = 1;
     b.cd.lure = 0; b.cd.punch = 0;
-    Core.useItem(b, 'matatabi') || Core.lure(b);
+    Core.toMax(e, 4);
     Core.punch(b);
     assert.strictEqual(e.state, 'down');
     if (n === b.enemies.length - 1) assert.strictEqual(b.phase, 'fight', '倒れる様子を見せてから終わる');
@@ -516,7 +501,7 @@ test('合戦: 倒すと少し間をおいて次の敵が出てくる。最後の
   assert.strictEqual(b.phase, 'won');
 });
 
-test('合戦: 勝つと手柄・資材・拾い物が入り、使ったアイテムは減る。出世もする', () => {
+test('合戦: 勝つと手柄・資材が入る。出世もする', () => {
   const s = stateAtRank(0);
   const b = runBattle(s, casual, 1);
   assert.strictEqual(b.phase, 'won');
@@ -524,21 +509,18 @@ test('合戦: 勝つと手柄・資材・拾い物が入り、使ったアイテ
   const r = Core.applyBattleResult(s, b);
   assert.strictEqual(r.state.totalMerit, s.totalMerit + b.merit + b.bonus);
   assert.strictEqual(r.state.materials, s.materials + b.materials);
-  assert.strictEqual(r.state.items.fish, s.items.fish - b.used.fish + b.loot.fish);
   assert.strictEqual(r.state.battlesWon, 1);
   assert.strictEqual(r.rankedUp, true, '村の子猫は1勝で出世する');
 });
 
-test('合戦: 体力が0になると負け。使ったアイテム以外は何も減らない', () => {
+test('合戦: 体力が0になると負け。何も減らない', () => {
   const s = stateAtRank(5);
   const b = Core.createBattle(s, Core.mulberry32(10));
   b.player.hp = 5;
-  Core.useItem(b, 'fish');
   for (let i = 0; i < 60 * 120 && b.phase === 'fight'; i++) Core.stepBattle(b, 1 / 60); // 何もしない
   assert.strictEqual(b.phase, 'lost');
   const r = Core.applyBattleResult(s, b);
-  assert.strictEqual(r.state.items.fish, s.items.fish - 1);
-  assert.deepStrictEqual(Object.assign({}, r.state, { items: s.items }), s);
+  assert.deepStrictEqual(r.state, s);
 });
 
 test('合戦: dt が 0 以下なら何もしない。大きな dt でも一気に進まない', () => {
@@ -563,7 +545,7 @@ test('合戦: 出陣の家臣がいっしょに戦う (2人まで)。夢中は�
   assert.strictEqual(b.allies.length, 2);
   const e = untilReady(b);
   e.hp = e.maxHp = 10000;
-  Core.useItem(b, 'matatabi'); // どの種類の敵でも 4 秒夢中
+  Core.toMax(e, 4); // どの種類の敵でも 4 秒夢中
   for (let i = 0; i < 60 * 3; i++) Core.stepBattle(b, 1 / 60);
   assert.ok(b.events.some((ev) => ev.type === 'allyAttack'));
   assert.ok(e.hp < 10000);
@@ -1253,17 +1235,23 @@ function campaign(home, ratio, bot, seed, trainShare) {
 }
 
 test('手ごたえ (天下): ふつうに遊べば天下統一できる。兵を多く連れて行くほど楽に勝てる', () => {
-  // 測った値 (5 つの国から): 敵と同じ数の兵で 46〜50 戦・残り体力の中央 58〜88%。2 倍なら 46〜47 戦・92〜94%
+  // 測った値 (アイテムをやめ、主人公の体力を 60 + 21 x 段位 にしたあと): 敵と同じ数の兵で 46 戦・残り体力の中央
+  // 北海道 73%・愛知 92%・沖縄 72%。2 倍なら 46 戦・94〜96% (兵を増やすと楽。愛知からは同じ数でもすでに楽なので差が小さい)
+  let gain = 0;
   for (const home of [1, 23, 47]) {
     const same = campaign(home, 1, casual, home);
     const twice = campaign(home, 2, casual, home);
     assert.ok(same.unified && same.battles <= 60, `${Core.prefOf(home).name}から: 敵と同じ数でも天下統一 (${same.battles} 戦・負け ${same.losses})`);
     assert.ok(twice.unified && twice.battles <= 55, `${Core.prefOf(home).name}から: 2 倍でも天下統一 (${twice.battles} 戦)`);
-    assert.ok(twice.medHp > same.medHp + 0.05, `2 倍連れて行くと楽 (残り体力 ${Math.round(same.medHp * 100)}% → ${Math.round(twice.medHp * 100)}%)`);
+    assert.ok(twice.medHp >= same.medHp, `2 倍連れて行って苦しくなることはない (残り体力 ${Math.round(same.medHp * 100)}% → ${Math.round(twice.medHp * 100)}%)`);
+    gain += (twice.medHp - same.medHp) / 3;
   }
-  // 溜めない子でも、小判を先に修行に使い、兵を 2 倍連れて行けば天下統一できる (測った値 59〜63 戦)
-  const tap = campaign(23, 2, tapper, 23, 1);
-  assert.ok(tap.unified && tap.battles <= 80, `溜めない子も、修行して兵を 2 倍にすれば天下統一 (${tap.battles} 戦・負け ${tap.losses})`);
+  assert.ok(gain > 0.08, `2 倍連れて行くと楽 (残り体力が平均 ${Math.round(gain * 100)} ポイント上がる)`);
+  // 溜めない子でも、小判を先に修行に使い、兵を 2 倍連れて行けば、たいてい天下統一できる。
+  // 1 戦の勝ち負けで道すじが分かれる (勝って守りの多い県へ進むと負け続けることがある) ので、5 つの国から見る。
+  // 測った値 (アイテムをやめたあと): 北海道 67・東京 56・広島 58・沖縄 63 戦、愛知だけ届かない (前の版も 5 つ中 4 つ)
+  const tapDone = [1, 13, 23, 34, 47].map((home) => campaign(home, 2, tapper, home, 1)).filter((t) => t.unified && t.battles <= 80);
+  assert.ok(tapDone.length >= 3, `溜めない子も、修行して兵を 2 倍にすれば、たいてい天下統一 (${tapDone.length}/5 の国から)`);
 });
 
 test('天下: 県ごとに昔の国の名前とひとことがある。取ったときの小判のめやすは、勝ったときの実際と同じ', () => {

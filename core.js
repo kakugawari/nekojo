@@ -275,7 +275,6 @@
   //   猫パンチ:   夢中の敵には肉球ゲージの数だけ大きく効く。満タンなら「猫じゃらしコンボ」。
   //               夢中の敵が羽に飛びついた高いところで当てると「会心の猫パンチ」。
   //               殴られた敵はしばらく警戒して羽に引っかからない。次の振りかぶりを見切るのが腕の見せどころ。
-  //   アイテム:   魚 = 体力回復 / またたび = 敵をしばらく夢中にして、ゲージ +2。
   //
   // 敵のタイプ:
   //   のら猫         すぐ夢中になる。最初の敵
@@ -347,12 +346,10 @@
   }
   function rankBoss(rankIndex) { return RANK_BOSS[Math.max(1, Math.min(RANK_BOSS.length - 1, rankIndex))]; }
 
-  const ITEM_KINDS = {
-    fish: { name: '魚', effect: '体力を 40% 回復' },
-    matatabi: { name: 'またたび', effect: '敵の夢中ゲージがすぐ MAX (4 秒)' }
-  };
 
-  function playerMaxHp(rankIndex) { return 60 + 12 * rankIndex; }
+  // 主人公の体力。アイテム (魚で体力 40% 回復) をやめたぶん、段位が上がるほど多めにした (前は 60 + 12 x 段位)。
+  // 一律に増やすと、パンチ連打の子まで草履取りで勝てた (1.3 倍で 30/30)。最初の段は前と同じ
+  function playerMaxHp(rankIndex) { return 60 + 21 * rankIndex; }
   function playerAtk(rankIndex) { return 6 + 3 * rankIndex; }
   /** 最後に出てくる大将は手柄 3 倍 (最初の戦の大将は、のら猫の親分) */
   function enemyReward(rankIndex, isLeader) {
@@ -416,7 +413,6 @@
     const allies = state.vassals.filter(function (v) { return v.job === 'battle'; }).slice(0, MAX_BATTLE_VASSALS)
       .map(function (v) { return { id: v.id, name: v.name, look: v.look, level: v.level, skill: v.skill, cd: allyInterval(v.level) }; });
     const maxHp = Math.round(playerMaxHp(r) * fx.hpMul * heroMul(state, 'hp'));
-    const items = state.items || { fish: 0, matatabi: 0 };
     const b = {
       rank: r, t: 0, phase: 'fight', rng: random,
       player: { x: PLAYER_X, hp: maxHp, maxHp: maxHp, atk: Math.round(playerAtk(r) * fx.atkMul * heroMul(state, 'atk')) },
@@ -427,9 +423,7 @@
       // 樽の山 (誘導を覚えてから置く)。こわれても少しすると運んでくる
       obstacle: r >= YUDO_RANK ? { ok: true, respawn: 0 } : null,
       healCd: HEAL_INTERVAL,
-      items: { fish: items.fish || 0, matatabi: items.matatabi || 0 },
-      used: { fish: 0, matatabi: 0 },
-      merit: 0, bonus: 0, materials: 0, loot: { fish: 0, matatabi: 0 },
+      merit: 0, bonus: 0, materials: 0,
       conquest: plan ? Object.assign({}, plan) : null,
       events: []
     };
@@ -511,8 +505,6 @@
       b.charge = { on: false, t: 0 };
       b.bonus = Math.round(b.merit * 0.3);
       b.materials = Math.round((b.merit + b.bonus) / 4);
-      const random = b.rng || Math.random;
-      b.loot = { fish: random() < 0.6 ? 1 : 0, matatabi: random() < 0.3 ? 1 : 0 };
       b.events.push({ type: 'won' });
     }
   }
@@ -815,24 +807,6 @@
     finish(b);
   }
 
-  function useItem(b, kind) {
-    if (b.phase !== 'fight' || !ITEM_KINDS[kind] || !(b.items[kind] > 0)) return false;
-    const e = currentEnemy(b);
-    if (kind === 'matatabi' && (!e || e.state === 'enter' || e.state === 'down')) return false;
-    if (kind === 'fish' && b.player.hp >= b.player.maxHp) return false;
-    b.items[kind]--;
-    b.used[kind]++;
-    if (kind === 'fish') {
-      const heal = Math.round(b.player.maxHp * 0.4);
-      b.player.hp = Math.min(b.player.maxHp, b.player.hp + heal);
-      b.events.push({ type: 'item', item: kind, amount: heal });
-    } else {
-      toMax(e, 4);
-      b.events.push({ type: 'item', item: kind, id: e.id });
-    }
-    return true;
-  }
-
   function rollRecruitOffer(state, b) {
     if (b.phase !== 'won' || !hasVassalSlot(state)) return null;
     const random = b.rng || Math.random;
@@ -905,32 +879,22 @@
   }
 
   function applyBattleRewards(state, b) {
-    // 使ったアイテムは、勝っても負けても減る
-    const items = {
-      fish: Math.max(0, (state.items.fish || 0) - b.used.fish),
-      matatabi: Math.max(0, (state.items.matatabi || 0) - b.used.matatabi)
-    };
     if (b.phase === 'won') {
       const r = addMerit(state, b.merit + b.bonus);
-      items.fish += b.loot.fish;
-      items.matatabi += b.loot.matatabi;
       r.state = Object.assign({}, r.state, {
         materials: r.state.materials + b.materials,
-        battlesWon: (state.battlesWon || 0) + 1,
-        items: items
+        battlesWon: (state.battlesWon || 0) + 1
       });
       return r;
     }
-    // 負け・退却: 倒した敵のぶんの小判 (と資材) は持ち帰る。勝ったときの上乗せと拾い物は無し。
+    // 負け・退却: 倒した敵のぶんの小判 (と資材) は持ち帰る。勝ったときの上乗せは無し。
     // 何も持ち帰れないと、挑み直しても強くなれず、同じ戦の繰り返しになる。持ち帰った小判で修行する。
     // 経験値 (出世) は入れない。敵の強さは段位で決まるので、勝たずに出世すると相手だけ強くなってしまう
     const idx = rankIndexOf(state);
     const got = lossReward(b);
-    const changed = got > 0 || b.used.fish || b.used.matatabi;
-    const next = changed ? Object.assign({}, state, {
+    const next = got > 0 ? Object.assign({}, state, {
       merit: state.merit + got,
-      materials: state.materials + Math.round(got / 4),
-      items: items
+      materials: state.materials + Math.round(got / 4)
     }) : state;
     return { state: next, prevRankIndex: idx, rankIndex: idx, rankedUp: false };
   }
@@ -1493,7 +1457,6 @@
       vassals: [],
       battlesWon: 0,
       storySeen: false,
-      items: { fish: 2, matatabi: 1 },
       hero: { hp: 0, atk: 0 },
       village: { population: 0, cells: new Array(MAP_CELLS).fill(null) },
       castle: { cells: new Array(MAP_CELLS).fill(null) },
@@ -1545,11 +1508,7 @@
       hp: Number.isInteger(hero.hp) ? Math.min(HERO_TRAIN_MAX, Math.max(0, hero.hp)) : 0,
       atk: Number.isInteger(hero.atk) ? Math.min(HERO_TRAIN_MAX, Math.max(0, hero.atk)) : 0
     };
-    const it = raw.items || {};
-    out.items = {
-      fish: Number.isInteger(it.fish) ? Math.max(0, it.fish) : base.items.fish,
-      matatabi: Number.isInteger(it.matatabi) ? Math.max(0, it.matatabi) : base.items.matatabi
-    };
+    // 前の保存データにあったアイテム (魚・またたび) は、アイテムをやめたので読み捨てる
     out.vassals = Array.isArray(raw.vassals) ? raw.vassals.filter(function (v) {
       return v && typeof v.id === 'number' && typeof v.name === 'string';
     }).map(function (v) {
@@ -1735,7 +1694,6 @@
     bossLook: bossLook,
     bossIdOf: bossIdOf,
     rankBoss: rankBoss,
-    ITEM_KINDS: ITEM_KINDS,
     playerMaxHp: playerMaxHp,
     playerAtk: playerAtk,
     enemyReward: enemyReward,
@@ -1752,7 +1710,7 @@
     punch: punch,
     punchPress: punchPress,
     punchRelease: punchRelease,
-    useItem: useItem,
+    toMax: toMax,
     rollRecruitOffer: rollRecruitOffer,
     applyBattleResult: applyBattleResult,
     lossReward: lossReward,

@@ -84,11 +84,6 @@
         <button type="button" class="btn-paper" id="btnRetreat">退却する (何も減らない)</button>
       </div>
 
-      <div class="item-menu" id="itemMenu" hidden>
-        <button type="button" class="item-choice" id="btnFish"><span class="item-icon">🐟</span><span class="item-name">魚</span><span class="item-note">体力が戻る</span><b class="item-count" id="fishCount">×0</b></button>
-        <button type="button" class="item-choice" id="btnMatatabi"><span class="item-icon">🌿</span><span class="item-name">またたび</span><span class="item-note">敵がすぐ夢中 MAX</span><b class="item-count" id="matatabiCount">×0</b></button>
-      </div>
-
       <div class="controls">
         <button type="button" class="round-btn lure-btn" id="btnLure" aria-label="猫じゃらし">
           <span class="round-face">
@@ -102,15 +97,6 @@
           </span>
           <span class="round-plate">猫じゃらし</span>
           <span class="round-cd" id="lureCd"></span>
-        </button>
-        <button type="button" class="item-btn" id="btnItem" aria-label="アイテム">
-          <svg viewBox="0 0 64 64" aria-hidden="true">
-            <ellipse cx="32" cy="40" rx="13" ry="11" fill="#fff"/>
-            <ellipse cx="18" cy="26" rx="5.5" ry="7" fill="#fff"/><ellipse cx="27" cy="18" rx="5.5" ry="7" fill="#fff"/>
-            <ellipse cx="37" cy="18" rx="5.5" ry="7" fill="#fff"/><ellipse cx="46" cy="26" rx="5.5" ry="7" fill="#fff"/>
-          </svg>
-          <span>アイテム</span>
-          <b class="item-badge" id="itemBadge">3</b>
         </button>
         <!-- 溜めゲージ: パンチを押している長さ。印は「強」(0.8秒) の所 -->
         <div class="charge-gauge" id="chargeGauge" aria-label="溜めゲージ">
