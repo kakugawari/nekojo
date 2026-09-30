@@ -3074,7 +3074,10 @@
     const a = els.titleScreen.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 350, easing: 'ease-out' });
     a.onfinish = function () { els.titleScreen.hidden = true; };
     sizeField();
-    if (!state.storySeen) els.storyModal.hidden = false;
+    if (!state.storySeen) {
+      els.storyModal.hidden = false;
+      els.storyModal.querySelector('.modal-card').animate([{ opacity: 0, transform: 'scale(.85) translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: 'ease-out' });
+    }
   }
 
   function closeStory() {

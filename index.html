@@ -219,20 +219,22 @@
 
 <!-- ================================================= 物語・出世 -->
 <div class="modal" id="storyModal" hidden>
-  <div class="modal-card paper">
-    <div class="tag-title">🐾 主人公の猫</div>
-    <p class="modal-lead">小さな村から、大きな夢を。</p>
-    <img class="modal-art" src="./img/stage0.png" alt="">
-    <p class="modal-text">とある村に生まれた、元気で好奇心いっぱいの子猫。<br>ある日、村を出て「猫侍」に仕えることを決意する。<br>猫じゃらしと猫パンチを武器に、たくさんの仲間たちと出会いながら、のし上がっていく──<br><br>目指すは、立派なお城と、たくさんの仲間が暮らす、最高の村!</p>
-    <button type="button" class="btn-gold btn-big" id="btnStory">旅立つ!</button>
+  <div class="modal-card scroll-card story-card">
+    <div class="ink-band"><span>主人公の猫</span></div>
+    <p class="modal-lead">小さな村から、<wbr><em>大きな夢</em>を。</p>
+    <div class="modal-medal"><img class="modal-art" src="./img/stage0.png" alt=""></div>
+    <!-- 文節ごとに <wbr> を入れ、word-break: keep-all で文節の切れ目で折り返す (「最<br>高の村」のような切れ方をしない) -->
+    <p class="modal-text">とある村に<wbr>生まれた、<wbr>元気で<wbr>好奇心<wbr>いっぱいの<wbr>子猫。<br>ある日、<wbr>村を出て<wbr>「猫侍」に<wbr>仕えることを<wbr>決意する。<br>猫じゃらしと<wbr>猫パンチを<wbr>武器に、<wbr>たくさんの<wbr>仲間たちと<wbr>出会いながら、<wbr>のし上がっていく──</p>
+    <p class="modal-goal"><small>目指すは</small>立派な<wbr>お城と、<wbr>たくさんの<wbr>仲間が<wbr>暮らす、<wbr><b>最高の村!</b></p>
+    <button type="button" class="btn-gold btn-big btn-go" id="btnStory">旅立つ!</button>
   </div>
 </div>
 
 <div class="modal" id="rankModal" hidden>
-  <div class="modal-card paper">
-    <div class="rank-up-label">出世!</div>
+  <div class="modal-card scroll-card">
+    <div class="ink-band"><span class="rank-up-label">出世!</span></div>
     <div class="rank-up-name" id="rankUpName">草履取り</div>
-    <img class="modal-art" id="rankUpArt" src="./img/stage0.png" alt="">
+    <div class="modal-medal"><img class="modal-art" id="rankUpArt" src="./img/stage0.png" alt=""></div>
     <p class="modal-text" id="rankUpText"></p>
     <div class="navi-say rank-navi" id="rankNavi" hidden><img class="navi-img" data-pose="cheer" alt="" draggable="false"><p class="navi-bubble" id="rankTips"></p></div>
     <button type="button" class="btn-gold btn-big" id="btnRankOk">やったにゃ!</button>
@@ -240,10 +242,10 @@
 </div>
 
 <div class="modal" id="unifyModal" hidden>
-  <div class="modal-card paper unify-card">
-    <div class="rank-up-label">天下統一!</div>
+  <div class="modal-card scroll-card unify-card">
+    <div class="ink-band"><span class="rank-up-label">天下統一!</span></div>
     <div class="rank-up-name">にゃんか統一</div>
-    <img class="modal-art" src="./img/stage3.png" alt="">
+    <div class="modal-medal"><img class="modal-art" src="./img/stage3.png" alt=""></div>
     <p class="modal-text" id="unifyText">47 の国を すべて 手に入れた!<br>ねこ将軍の 天下にゃ!</p>
     <button type="button" class="btn-gold btn-big" id="btnUnifyOk">やったにゃ!</button>
   </div>

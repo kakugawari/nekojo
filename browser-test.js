@@ -226,6 +226,14 @@ async function run() {
     // ------------------------------------------------ 物語
     section('はじめての物語');
     ok(await phone.evaluate(() => !document.getElementById('storyModal').hidden), 'はじめて遊ぶと、主人公の物語が出る');
+    // 物語の札は、金の二重ぶちの巻物 (見出しは墨の帯の絵)。画面 (縦の安全域の内側) に収まり、中で送らなくても全部見える
+    await phone.waitForTimeout(400);
+    const sc = await phone.evaluate(() => {
+      const c = document.querySelector('#storyModal .modal-card'), r = c.getBoundingClientRect();
+      const band = getComputedStyle(document.querySelector('#storyModal .ink-band')).backgroundImage;
+      return { top: r.top, bottom: r.bottom, fits: c.scrollHeight <= c.clientHeight + 1, band: band.includes('r-remain') || band.includes('data:image'), vh: innerHeight };
+    });
+    ok(sc.band && sc.fits && sc.top >= 59 && sc.bottom <= sc.vh - 34, `物語の札は墨の帯の見出しつきで、安全域の内側に収まる (${Math.round(sc.top)}〜${Math.round(sc.bottom)})`);
     await phone.locator('#btnStory').tap();
     await phone.waitForTimeout(100);
     ok(await phone.evaluate(() => document.getElementById('storyModal').hidden && window.__app.state().storySeen),
