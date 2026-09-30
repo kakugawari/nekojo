@@ -1062,11 +1062,14 @@ async function run() {
         if (!b || b.id !== id) why.push('絵が出ない');
         if (q.hud !== q.name || !q.face) why.push('上の札の名前・顔');
         if (b && b.pose !== 'stand') why.push('立ち絵でない (' + b.pose + ')');
-        // 横に広い絵なので、主人公にかぶらず、画面からはみ出さないこと
-        if (b && !(b.left > b.heroX && b.right <= b.w + 1)) why.push(`はみ出し (左 ${Math.round(b.left)} / 主人公 ${Math.round(b.heroX)} / 右 ${Math.round(b.right)})`);
+        // 横に広い絵なので、主人公の後ろへ入りすぎず (主人公の真ん中 − 30s まで)、画面からはみ出さないこと
+        if (b && !(b.left >= b.minLeft && b.right <= b.w + 1)) why.push(`はみ出し (左 ${Math.round(b.left)} / 許す左端 ${Math.round(b.minLeft)} / 右 ${Math.round(b.right)})`);
+        // 主人公との大きさの差 (等身のちがいを目立たなくする): 立ち絵の背丈が、ふつうのねこの背丈 (150 s) の 1.3 倍以上
+        // (縦は幅が足りないので 1.3 倍、横は 1.45 倍。前の大きさ (縦 1.17・横 1.33 倍) だと落ちる)
+        if (b && !((b.ground - b.bodyTop) >= 150 * b.s * (b.w > 600 ? 1.45 : 1.3))) why.push(`小さい (背丈 ${Math.round(b.ground - b.bodyTop)} / ふつうのねこ ${Math.round(150 * b.s)})`);
         if (why.length) bad.push(r + ':' + id + ' ' + why.join('・'));
       }
-      ok(bad.length === 0, `${tag}: 段位ごとに大将のボスが変わり、立ち絵・名前・顔が出て、主人公にかぶらず画面に収まる (9 匹)${bad.length ? ' ' + bad.join(' / ') : ''}`);
+      ok(bad.length === 0, `${tag}: 段位ごとに大将のボスが変わり、立ち絵・名前・顔が出て、主人公より大きく、画面に収まる (9 匹)${bad.length ? ' ' + bad.join(' / ') : ''}`);
       // ポーズの切り替え (甲羅猫大将): 殴られた瞬間 = 攻撃 / MAX でないパンチ = シールド / 倒す = やられた
       await toBoss(4);
       const pose = () => bp.evaluate(() => (window.__app.bossBox() || {}).pose);

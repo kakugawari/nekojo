@@ -644,17 +644,20 @@
     return fieldSize.s * (e.kind === 'boss' ? 1.45 : (e.boss ? 1.2 : 1));
   }
 
-  // ボスの大きさ: 立ち絵の体の高さを、縦は 175・横は 200 (s 倍) にそろえる。
-  // もらった絵は横に広い (前の大きなボス猫の 1.6 倍) ので、前の背丈 (150 x 1.45 = 218) のままだと縦画面で主人公にかぶる
-  const BOSS_UNITS = { portrait: 175, land: 200 };
+  // ボスの大きさ: 立ち絵の体の高さを、縦は 210・横は 240 (s 倍) にそろえる (主人公の 1.4 倍ほど)。
+  // もらった絵は主人公より等身が高い (頭が全身の 4 割。主人公は 6 割)。大きさの差をはっきりつけると、
+  // 「子猫が大きな大人のボスに挑む」に見えて、等身のちがいが目立たなくなる (175/200 から 1.2 倍にした)
+  const BOSS_UNITS = { portrait: 210, land: 240 };
   function bossScale(id) {
     const a = BOSS_ART[id].stand;
     const k = fieldSize.s * (fieldSize.land ? BOSS_UNITS.land : BOSS_UNITS.portrait) / a.bodyH;
     // 立ち絵が、主人公の真ん中より右・画面の右端より左に収まる大きさまで (縦画面で、花びらの広い姫にゃんだけ少し小さくなる)
-    const room = fieldSize.w - heroX() - BOSS_GAP * 2;
+    const room = fieldSize.w - heroX() - BOSS_GAP * 2 + bossOverlap();
     return Math.min(k, room / a.w);
   }
   const BOSS_GAP = 8;
+  // 縦画面は幅が足りないので、ボスの端が主人公の真ん中より少し後ろ (30 s) まで入るのを許す。主人公は手前に描くので隠れるのはボスの端
+  function bossOverlap() { return 30 * fieldSize.s; }
   /** 立ち絵の左右の端 (足もとの真ん中から)。風の射手の立ち絵はひっくり返すので左右が入れ替わる */
   function bossExtent(id) {
     const a = BOSS_ART[id].stand, bs = bossScale(id);
@@ -664,11 +667,11 @@
   /**
    * ボスの立つ位置のずれ: 横に広い絵は、ふつうの立ち位置だと主人公にかぶったり右端からはみ出したりする
    * (縦画面で、影の忍猫のマントが主人公の真ん中まで伸び、姫にゃんの花びらが右端を越えた)。
-   * 立ち絵が「主人公の真ん中 + 8」から「右端 − 8」に収まるように、左右へずらす
+   * 立ち絵が「主人公の真ん中 − 30s + 8」から「右端 − 8」に収まるように、左右へずらす
    */
   function bossShift(id) {
     const base = fx(C.ENEMY_X), ext = bossExtent(id);
-    const lo = heroX() + BOSS_GAP + ext.left, hi = fieldSize.w - BOSS_GAP - ext.right;
+    const lo = heroX() - bossOverlap() + BOSS_GAP + ext.left, hi = fieldSize.w - BOSS_GAP - ext.right;
     const want = Math.min(hi, Math.max(lo, base));
     return want - base;
   }
@@ -3263,7 +3266,7 @@
         const id = e && drawnBoss(e);
         if (!id) return null;
         const a = BOSS_ART[id].stand, bs = bossScale(id), x = enemyX(e), ext = bossExtent(id);
-        return { id: id, pose: lastBossPose, left: x - ext.left, right: x + ext.right, top: fieldSize.ground - a.ay * bs, bodyTop: fieldSize.ground - enemyHeadH(e), ground: fieldSize.ground, heroX: heroX(), w: fieldSize.w };
+        return { id: id, pose: lastBossPose, left: x - ext.left, right: x + ext.right, top: fieldSize.ground - a.ay * bs, bodyTop: fieldSize.ground - enemyHeadH(e), ground: fieldSize.ground, heroX: heroX(), minLeft: heroX() - bossOverlap(), w: fieldSize.w, s: fieldSize.s };
       },
       layout: function () {
         let enterLeft = Infinity;
