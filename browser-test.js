@@ -642,6 +642,8 @@ async function run() {
       }
       ok(hits.length === 0, `上の札と下のボタンが重ならない${hits.length ? ' (' + hits.join(', ') + ')' : ''}`);
 
+      // ボスの絵 (横に広い) も含めて測るので、先に立ち絵を読み終えておく
+      await lp.waitForFunction(() => window.__app.bossesReady() === Object.keys(window.Core.BOSSES).length, null, { timeout: 15000 }).catch(() => {});
       const L = await lp.evaluate(() => window.__app.layout());
       const fl = scene.left;
       ok(L.land && L.s > portraitLayout.s * 1.05, `横では、ねこが縦より大きく描かれる (倍率 縦 ${portraitLayout.s.toFixed(2)} → 横 ${L.s.toFixed(2)})`);
@@ -655,7 +657,7 @@ async function run() {
         const cover = ['charge', 'mission', 'item', 'player'].filter((k) => { const a = R[k]; return a.left < pop.right && pop.left < a.right && a.top < pop.bottom && pop.top < a.bottom; });
         ok(cover.length === 0, `敵の頭の上 (当たったときの字が出る所) を、札が隠さない${cover.length ? ' (' + cover.join(',') + ')' : ''}`);
       }
-      ok(L.enterLeft >= L.w, `敵は画面の右の外から歩いてくる (出だしの左端 ${Math.round(L.enterLeft)} ≥ 幅 ${L.w})`);
+      ok(L.enterLeft >= L.w, `敵は画面の右の外から歩いてくる (ボス 9 匹も。出だしの左端 ${Math.round(L.enterLeft)} ≥ 幅 ${L.w})`);
       ok(await lp.evaluate(() => { const c = document.getElementById('fieldBg'); const d = c.getContext('2d').getImageData(c.width - 4, Math.floor(c.height * 0.3), 1, 1).data; return d[3] > 0; }),
         '背景が戦場の右端まで描かれている');
       await checkBattleBg(lp, '横');
@@ -1018,6 +1020,71 @@ async function run() {
       await cp.waitForTimeout(1000);
       ok(await cp.evaluate(() => document.getElementById('cutin').hidden), `${tag}: カットインは終わると消える`);
       await cc.close();
+    }
+
+    // ------------------------------------------------ ボス (もらった絵 art/bosses/ → img/boss-*.webp)
+    section('ボス (段位ごとの大将・ポーズの切り替え)');
+    for (const [vw, vh, safe] of [[430, 932, ':root{--safe-t:59px;--safe-b:34px}'], [932, 430, ':root{--safe-l:59px;--safe-r:59px;--safe-b:21px}']]) {
+      const bc = await browser.newContext({ ...device, viewport: { width: vw, height: vh } });
+      const bp = await bc.newPage();
+      bp.on('pageerror', (e) => errors.push('ボス: ' + e.message));
+      await bp.bringToFront();
+      await bp.goto(URL);
+      await bp.waitForFunction(() => window.__app);
+      await bp.addStyleTag({ content: safe });
+      const tag = `${vw}x${vh}`;
+      await bp.evaluate(() => { const a = window.__app; a.start(); a.closeStory(); });
+      // 大将の前の敵は倒したことにして、大将が歩いてきて構えるまで待つ
+      const toBoss = async (r) => {
+        await bp.evaluate((r) => {
+          const a = window.__app, R = window.Core.RANKS, old = a.battle();
+          if (old && old.phase === 'fight') old.phase = 'done';   // 前の合戦は打ち切る (戦っている最中は出陣できない)
+          // 段位はその値に直接置く (足し算だと、上の段位から下の段位へ戻せない)
+          a.debugSetState((st) => Object.assign({}, st, { totalMerit: R[r].threshold, merit: R[r].threshold }));
+          a.closeModals(); a.setTab('battle'); a.sortie();
+        }, r);
+        await bp.evaluate(() => { const b = window.__app.battle(); b.enemies.forEach((e, i) => { if (i < b.enemies.length - 1) { e.alive = false; e.hp = 0; e.state = 'down'; e.timer = 0.01; } }); b.current = b.enemies.length - 2; b.player.hp = b.player.maxHp = 99999; });
+        await bp.waitForFunction(() => { const b = window.__app.battle(); const e = b && b.enemies[b.current]; return e && e.boss && e.state === 'idle' && window.__app.bossBox(); }, null, { timeout: 15000 }).catch(() => {});
+        await bp.evaluate(() => { const e = window.__app.battle().enemies[window.__app.battle().current]; e.cd = 99; });
+        await bp.waitForTimeout(120);
+      };
+      const bad = [];
+      for (let r = 1; r < 10; r++) {
+        await toBoss(r);
+        const q = await bp.evaluate(() => {
+          const b = window.__app.battle(), e = b.enemies[b.current], face = document.getElementById('enemyFaceImg');
+          return { box: window.__app.bossBox(), name: e.name, look: e.look, hud: document.getElementById('enemyName').textContent,
+            face: face.parentNode.classList.contains('boss') && face.naturalWidth > 0 && face.src.includes('face') };
+        });
+        const id = await bp.evaluate((r) => window.Core.RANK_BOSS[r], r);
+        const b = q.box;
+        const why = [];
+        if (!b || b.id !== id) why.push('絵が出ない');
+        if (q.hud !== q.name || !q.face) why.push('上の札の名前・顔');
+        if (b && b.pose !== 'stand') why.push('立ち絵でない (' + b.pose + ')');
+        // 横に広い絵なので、主人公にかぶらず、画面からはみ出さないこと
+        if (b && !(b.left > b.heroX && b.right <= b.w + 1)) why.push(`はみ出し (左 ${Math.round(b.left)} / 主人公 ${Math.round(b.heroX)} / 右 ${Math.round(b.right)})`);
+        if (why.length) bad.push(r + ':' + id + ' ' + why.join('・'));
+      }
+      ok(bad.length === 0, `${tag}: 段位ごとに大将のボスが変わり、立ち絵・名前・顔が出て、主人公にかぶらず画面に収まる (9 匹)${bad.length ? ' ' + bad.join(' / ') : ''}`);
+      // ポーズの切り替え (甲羅猫大将): 殴られた瞬間 = 攻撃 / MAX でないパンチ = シールド / 倒す = やられた
+      await toBoss(4);
+      const pose = () => bp.evaluate(() => (window.__app.bossBox() || {}).pose);
+      await bp.evaluate(() => { const e = window.__app.battle().enemies[window.__app.battle().current]; e.state = 'windup'; e.timer = 0.02; });
+      await bp.waitForTimeout(150);
+      const pAtk = await pose();
+      await bp.waitForTimeout(600);
+      const pBack = await pose();
+      await bp.evaluate(() => { const b = window.__app.battle(); b.cd.punch = 0; window.__app.punch(); });
+      await bp.waitForTimeout(120);
+      const pGuard = await pose();
+      await bp.waitForTimeout(600);
+      await bp.evaluate(() => { const b = window.__app.battle(), e = b.enemies[b.current]; e.hp = 1; e.wary = 0; b.cd.punch = 0; window.__app.punch(); });
+      await bp.waitForTimeout(300);
+      const pDown = await pose();
+      ok(pAtk === 'atk1' && pBack === 'stand' && pGuard === 'atk2' && pDown === 'down',
+        `${tag}: 甲羅猫大将は、攻撃が当たった瞬間=攻撃 → 立ち絵に戻る / パンチを受け止める=シールド / 倒れる=やられた (${[pAtk, pBack, pGuard, pDown].join(' → ')})`);
+      await bc.close();
     }
 
     // ------------------------------------------------ 案内猫 (art/guide-sheet.png から切り出した img/guide-*.png)

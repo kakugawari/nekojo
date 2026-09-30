@@ -331,6 +331,22 @@
     samurai: { name: 'ねこ侍', look: 'cat-kuro', hp: 1.3, atk: 1.3, interval: 1.8, lures: 3, maxTime: 1.8, parry: true, open: 1.0 },
     boss: { name: '大きなボス猫', look: 'cat-red', hp: 3.0, atk: 1.5, interval: 2.2, lures: 5, maxTime: 2.4, armor: 0.5, boss: true, rush: true }
   };
+  // ボス (もらった絵: art/bosses/。切り出しは tools/extract-bosses.js)。見た目 (look) は 'boss-<名前>'
+  const BOSSES = {
+    kaze: { name: '風の射手' }, 'kage-ninja': { name: '影の忍猫' }, hime: { name: '姫にゃん' },
+    koura: { name: '甲羅猫大将' }, sumo: { name: '大相撲猫' }, 'aka-oni': { name: '赤鬼猫' },
+    tengu: { name: '雷の猫天狗' }, kori: { name: '氷の大猫将' }, 'kuro-maou': { name: '黒猫大魔王' }
+  };
+  // 合戦の大将: 段位ごとに、弱そうな順。最初の段 (村の子猫) は「のら猫の親分」なので入れない
+  const RANK_BOSS = [null, 'kaze', 'kage-ninja', 'hime', 'koura', 'sumo', 'aka-oni', 'tengu', 'kori', 'kuro-maou'];
+  function bossLook(id) { return 'boss-' + id; }
+  /** look が 'boss-<名前>' ならその名前、そうでなければ null */
+  function bossIdOf(look) {
+    const id = typeof look === 'string' && look.indexOf('boss-') === 0 ? look.slice(5) : null;
+    return id && BOSSES[id] ? id : null;
+  }
+  function rankBoss(rankIndex) { return RANK_BOSS[Math.max(1, Math.min(RANK_BOSS.length - 1, rankIndex))]; }
+
   const ITEM_KINDS = {
     fish: { name: '魚', effect: '体力を 40% 回復' },
     matatabi: { name: 'またたび', effect: '敵の夢中ゲージがすぐ MAX (4 秒)' }
@@ -385,9 +401,11 @@
       const leader = i === count - 1;
       const hp = Math.round(baseHp * k.hp * (leader && !k.boss ? 1.6 : 1));
       let name = leader && !k.boss ? k.name + 'の親分' : k.name;
-      if (plan && leader) name = plan.daimyo;
+      let look = k.look;
+      if (k.boss) { name = BOSSES[rankBoss(er)].name; look = bossLook(rankBoss(er)); } // 段位ごとのボス
+      if (plan && leader) { name = plan.daimyo; look = plan.look; }
       enemies.push({
-        id: i + 1, kind: kind, look: plan && leader ? plan.look : k.look, name: name, boss: leader, daimyo: !!(plan && leader),
+        id: i + 1, kind: kind, look: look, name: name, boss: leader, daimyo: !!(plan && leader),
         hp: hp, maxHp: hp, atk: Math.round(baseAtk * k.atk), interval: k.interval,
         state: 'wait', timer: 0, cd: k.interval, age: 0, x: ENTER_X,
         muchu: 0, muchuIdle: 0, charm: 0, charmTime: 0, wary: 0, knockTime: 0, knockDist: 0, open: false,
@@ -819,8 +837,10 @@
     if (b.phase !== 'won' || !hasVassalSlot(state)) return null;
     const random = b.rng || Math.random;
     if (random() >= 0.5) return null;
+    // 大将 (ボス・大名) は仲間にならない。大将しかいない戦では、誘われない
     const pool = b.enemies.filter(function (e) { return !e.boss; });
-    const e = pool[Math.floor(random() * pool.length)] || b.enemies[0];
+    if (!pool.length) return null;
+    const e = pool[Math.floor(random() * pool.length)];
     return { name: pickVassalName(state, random), look: e.look, from: e.name, skill: skillFromEnemy(e.kind, random) };
   }
 
@@ -1116,9 +1136,22 @@
     ['鹿児島', 7, 'しまづ にゃしひろ', [43, 45, 47], '薩摩', '火の山と勇ましい猫侍の国。海をこえると琉球にゃ。'],
     ['沖縄', 7, 'しょう にゃい王', [46], '琉球', '青い海とシーサーの国。いちばん南の王さまにゃ。']
   ];
+  // 大名の姿は地方ごとのボス (名前は県ごと)。北陸の怨霊猫は絵がまだ無いので、それまでは雷の猫天狗
+  const HOKURIKU = ['新潟', '富山', '石川', '福井'], IGA_KOKA = ['三重', '滋賀'];
+  const HOKURIKU_BOSS = 'tengu';   // 怨霊猫の絵が届いたら 'onryo' にする
+  function prefBoss(name, region) {
+    if (region <= 1) return 'kori';                 // 北海道・東北
+    if (region === 2) return 'sumo';                // 関東
+    if (region === 3) return HOKURIKU.indexOf(name) >= 0 ? HOKURIKU_BOSS : 'tengu'; // 北陸 / 甲信・東海
+    if (region === 4) return IGA_KOKA.indexOf(name) >= 0 ? 'kage-ninja' : 'hime'; // 伊賀・甲賀 / 近畿のほか
+    if (region === 5) return 'kaze';                // 中国
+    if (region === 6) return 'koura';               // 四国
+    return 'aka-oni';                               // 九州・沖縄
+  }
+  // 天下統一の最後の 1 国だけは、どの県でも黒猫大魔王が出てくる
+  const FINAL_BOSS = 'kuro-maou';
   const PREFS = PREF_TABLE.map(function (p, i) {
-    // 大名の絵はあとで 1 匹ずつもらう。それまでは大きなボス猫の絵
-    return { id: i + 1, name: p[0], region: p[1], daimyo: p[2], look: 'cat-red', nb: p[3], kuni: p[4], desc: p[5] };
+    return { id: i + 1, name: p[0], region: p[1], daimyo: p[2], look: bossLook(prefBoss(p[0], p[1])), nb: p[3], kuni: p[4], desc: p[5] };
   });
   const PREF_COUNT = PREFS.length;
 
@@ -1276,9 +1309,11 @@
     const base = battleSize(level);
     const count = Math.max(2, base - (ratio >= 1.5 ? 1 : 0) - (ratio >= 3 ? 1 : 0));
     const strength = Math.min(1.5, Math.max(0.7, Math.sqrt(1 / ratio)));
+    const last = ownedCount(state) === PREF_COUNT - 1;   // 天下統一の最後の 1 国
     return {
       from: from, to: to, sent: sent, garrison: garrison, ratio: ratio, level: level,
-      count: count, strength: strength, daimyo: lord.daimyo, look: lord.look, name: p.name
+      count: count, strength: strength, name: p.name, final: last,
+      daimyo: last ? BOSSES[FINAL_BOSS].name : lord.daimyo, look: last ? bossLook(FINAL_BOSS) : lord.look
     };
   }
 
@@ -1694,6 +1729,12 @@
     canYudo: canYudo,
     isRushing: isRushing,
     ENEMY_KINDS: ENEMY_KINDS,
+    BOSSES: BOSSES,
+    RANK_BOSS: RANK_BOSS,
+    FINAL_BOSS: FINAL_BOSS,
+    bossLook: bossLook,
+    bossIdOf: bossIdOf,
+    rankBoss: rankBoss,
     ITEM_KINDS: ITEM_KINDS,
     playerMaxHp: playerMaxHp,
     playerAtk: playerAtk,

@@ -248,6 +248,8 @@ img { -webkit-user-drag: none; }
 .unit-face img { position: absolute; left: -8%; top: 2%; width: 116%; height: auto; }
 .enemy-face { width: 50px; height: 50px; }
 .enemy-face img { left: -22%; top: 0; width: 144%; }
+/* ボスは顔だけを切った四角 (img/boss-*-face.webp) */
+.enemy-face.boss img { left: 0; top: 0; width: 100%; }
 .unit-plate {
   flex: 1 1 auto;
   min-width: 0;
@@ -880,6 +882,7 @@ img { -webkit-user-drag: none; }
 .realm-sheet .rs-head { display: flex; align-items: center; gap: 10px; }
 .realm-sheet .rs-head > img { width: 58px; height: 50px; object-fit: contain; flex: none; filter: drop-shadow(0 2px 2px rgba(0,0,0,.2)); }
 .realm-sheet .rs-head .face { width: 42px; height: 50px; }
+.realm-sheet .rs-head .face.boss { width: 50px; height: 50px; object-fit: cover; border-radius: 50%; border: 2px solid var(--gold); background: #fff8e6; }
 .realm-sheet .sheet-name { font-weight: 900; font-size: 20px; line-height: 1.15; letter-spacing: .1em; color: #2a1e12; }
 .realm-sheet .sheet-name i { font-style: normal; font-size: 16px; color: #d9892a; letter-spacing: 0; }
 .realm-sheet .sheet-note { font-size: 11px; color: var(--ink-2); line-height: 1.5; }

@@ -1435,3 +1435,69 @@ test('手ごたえ (攻めてくる): 攻めてきたら迎え撃つ子は、天
     assert.ok(inv >= 5 && rep >= inv - 3, `${Core.prefOf(home).name}から: 攻めてきた ${inv} 回、追い返した ${rep} 回`);
   }
 });
+
+// ---------------------------------------------------------- ボス (もらった絵: art/bosses/)
+
+test('ボス: 合戦の大将は段位ごとに変わる。最初の段だけは、のら猫の親分 (連打でも勝てるように)', () => {
+  const first = Core.createBattle(stateAtRank(0), Core.mulberry32(1));
+  const lead0 = first.enemies[first.enemies.length - 1];
+  assert.strictEqual(lead0.kind, 'nora');
+  assert.strictEqual(lead0.name, 'のら猫の親分');
+  const seen = new Set();
+  for (let r = 1; r < Core.RANKS.length; r++) {
+    const b = Core.createBattle(stateAtRank(r), Core.mulberry32(r));
+    const lead = b.enemies[b.enemies.length - 1];
+    const id = Core.RANK_BOSS[r];
+    assert.strictEqual(lead.kind, 'boss', Core.RANKS[r].name + ' の大将はボス');
+    assert.strictEqual(lead.look, 'boss-' + id);
+    assert.strictEqual(lead.name, Core.BOSSES[id].name);
+    assert.strictEqual(Core.bossIdOf(lead.look), id);
+    b.enemies.slice(0, -1).forEach((e) => assert.strictEqual(Core.bossIdOf(e.look), null, 'ボスは大将だけ'));
+    seen.add(id);
+  }
+  assert.strictEqual(seen.size, Core.RANKS.length - 1, '段位ごとにちがうボス');
+  assert.strictEqual(Core.RANK_BOSS[Core.RANKS.length - 1], 'kuro-maou', 'いちばん上の段は黒猫大魔王');
+});
+
+test('ボス: 天下の大名は地方ごとの姿。名前は県ごと', () => {
+  const lookOf = (name) => Core.PREFS.find((p) => p.name === name).look;
+  const want = { 北海道: 'kori', 青森: 'kori', 東京: 'sumo', 新潟: 'tengu', 愛知: 'tengu', 三重: 'kage-ninja', 滋賀: 'kage-ninja',
+    京都: 'hime', 大阪: 'hime', 山口: 'kaze', 高知: 'koura', 鹿児島: 'aka-oni', 沖縄: 'aka-oni' };
+  Object.keys(want).forEach((n) => assert.strictEqual(lookOf(n), 'boss-' + want[n], n));
+  Core.PREFS.forEach((p) => assert.ok(Core.bossIdOf(p.look), p.name + ' の大名はボスの姿'));
+  assert.ok(!Core.PREFS.some((p) => p.look === 'boss-kuro-maou'), '黒猫大魔王は最後の 1 国だけ');
+});
+
+test('ボス: 天下統一の最後の 1 国だけは、どの県でも黒猫大魔王が出てくる', () => {
+  let s = realmState(23);
+  const plan0 = Core.attackPlan(s, 23, 22, 500);
+  assert.strictEqual(plan0.final, false);
+  assert.strictEqual(plan0.look, Core.PREFS[21].look);
+  // 静岡 (22) だけを残して、ぜんぶ自分の国にする
+  const r = JSON.parse(JSON.stringify(s.realm));
+  r.mine = r.mine.map((m, i) => i !== 21);
+  r.troops = r.troops.map((t, i) => (i !== 21 ? 500 : t));
+  s = Object.assign({}, s, { realm: r });
+  const plan = Core.attackPlan(s, 23, 22, 500);
+  assert.strictEqual(plan.final, true);
+  assert.strictEqual(plan.look, 'boss-kuro-maou');
+  assert.strictEqual(plan.daimyo, '黒猫大魔王');
+  const b = Core.createBattle(s, Core.mulberry32(5), plan);
+  const lead = b.enemies[b.enemies.length - 1];
+  assert.strictEqual(lead.look, 'boss-kuro-maou');
+  assert.strictEqual(lead.name, '黒猫大魔王');
+});
+
+test('ボス: 大将 (ボス・大名) は仲間にならない。大将しかいない戦では誘われない', () => {
+  const s = stateAtRank(Core.VASSAL_UNLOCK_RANK);
+  let offers = 0;
+  for (let seed = 1; seed <= 200; seed++) {
+    const b = Core.createBattle(s, Core.mulberry32(seed));
+    b.phase = 'won';
+    const o = Core.rollRecruitOffer(s, b);
+    if (o) { offers++; assert.strictEqual(Core.bossIdOf(o.look), null, '大将の姿の家臣はできない'); }
+    const solo = Object.assign({}, b, { enemies: b.enemies.slice(-1) });
+    assert.strictEqual(Core.rollRecruitOffer(s, solo), null);
+  }
+  assert.ok(offers > 50, '大将のほかの敵からは、ふつうに誘われる (' + offers + '/200)');
+});

@@ -60,6 +60,36 @@
   });
   const ready = (im) => im && im.complete && im.naturalWidth > 0;
 
+  // ---------------------------------------------------------- ボスの絵 (img/boss-<名前>-<ポーズ>.webp。大きさと足もとは boss-art.js)
+  // 1 匹 4 ポーズ + 顔。合わせて 2MB ほどあるので、はじめに全部は読まず、出てくる合戦が決まったときに読む
+
+  const BOSS_ART = window.BOSS_ART || {};
+  const BOSS_POSES = ['stand', 'atk1', 'atk2', 'down', 'face'];
+  const bossImgs = {};
+  function bossImg(id, pose) {
+    const name = 'boss-' + id + '-' + pose;
+    let im = bossImgs[name];
+    if (!im) {
+      im = new Image();
+      im.src = './img/' + name + '.webp';
+      if (im.decode) im.decode().catch(function () {});   // 描く前に展開しておく (大将が出た瞬間に止まらないように)
+      bossImgs[name] = im;
+    }
+    return im;
+  }
+  /** 合戦に出てくるボスの絵を先に読んでおく (大将は最後に出てくるので、それまでに読み終わる) */
+  function preloadBosses(b) {
+    b.enemies.forEach(function (e) {
+      const id = C.bossIdOf(e.look);
+      if (id) BOSS_POSES.forEach(function (p) { bossImg(id, p); });
+    });
+  }
+  /** 見た目 (look) の顔の絵。ボスは顔だけを切った四角、ほかの猫は全身の絵 (丸い枠で顔のあたりを見せる) */
+  function faceSrc(look) {
+    const id = C.bossIdOf(look);
+    return id ? bossImg(id, 'face').src : (imgs[look] || imgs['cat-red']).src;
+  }
+
   // ---------------------------------------------------------- 案内猫 (art/guide-sheet.png から切り出した 6 つのポーズ)
   // main=手を差し出す / stand=立ち絵 / walk=地図を見て歩く / hello=手を振る / cheer=杖をかかげる / worry=困り
 
@@ -262,7 +292,10 @@
     if (showEnemy) {
       setText(els.enemyName, 'enemyName', e.name);
       setWidth(els.enemyHpFill, 'enemyHp', e.hp / e.maxHp * 100);
-      setOnce('enemyFace', e.look, function (v) { els.enemyFaceImg.src = imgs[v].src; });
+      setOnce('enemyFace', e.look, function (v) {
+        els.enemyFaceImg.src = faceSrc(v);
+        els.enemyFaceImg.parentNode.classList.toggle('boss', !!C.bossIdOf(v));
+      });
     }
 
     // 修行の札 (小判・段位・修行の段が変わったときだけ書き換える)
@@ -598,16 +631,79 @@
   function enemyX(e) {
     // 歩いてくる間は、画面の右の外から出てくるように引き伸ばす (横画面ではそのままだと半身が見えた所から出る)
     if (fieldSize.land && e.state === 'enter' && e.x > C.ENEMY_X) {
-      const im = imgs[e.look];
-      const half = (im && im.naturalWidth ? im.naturalWidth : 130) * enemyScale(e) / 2;
-      const from = fx(C.ENEMY_X), to = fieldSize.w + half + 10;
+      const half = enemyHalfW(e);
+      const id = drawnBoss(e);
+      const from = fx(C.ENEMY_X) + (id ? bossShift(id) : 0), to = fieldSize.w + half + 10;
       return from + (e.x - C.ENEMY_X) / (C.ENTER_X - C.ENEMY_X) * (to - from);
     }
-    return fx(e.x);
+    const id = drawnBoss(e);
+    return fx(e.x) + (id ? bossShift(id) : 0);
   }
 
   function enemyScale(e) {
     return fieldSize.s * (e.kind === 'boss' ? 1.45 : (e.boss ? 1.2 : 1));
+  }
+
+  // ボスの大きさ: 立ち絵の体の高さを、縦は 175・横は 200 (s 倍) にそろえる。
+  // もらった絵は横に広い (前の大きなボス猫の 1.6 倍) ので、前の背丈 (150 x 1.45 = 218) のままだと縦画面で主人公にかぶる
+  const BOSS_UNITS = { portrait: 175, land: 200 };
+  function bossScale(id) {
+    const a = BOSS_ART[id].stand;
+    const k = fieldSize.s * (fieldSize.land ? BOSS_UNITS.land : BOSS_UNITS.portrait) / a.bodyH;
+    // 立ち絵が、主人公の真ん中より右・画面の右端より左に収まる大きさまで (縦画面で、花びらの広い姫にゃんだけ少し小さくなる)
+    const room = fieldSize.w - heroX() - BOSS_GAP * 2;
+    return Math.min(k, room / a.w);
+  }
+  const BOSS_GAP = 8;
+  /** 立ち絵の左右の端 (足もとの真ん中から)。風の射手の立ち絵はひっくり返すので左右が入れ替わる */
+  function bossExtent(id) {
+    const a = BOSS_ART[id].stand, bs = bossScale(id);
+    const flip = bossFlip(id, 'stand');
+    return { left: (flip ? a.w - a.ax : a.ax) * bs, right: (flip ? a.ax : a.w - a.ax) * bs };
+  }
+  /**
+   * ボスの立つ位置のずれ: 横に広い絵は、ふつうの立ち位置だと主人公にかぶったり右端からはみ出したりする
+   * (縦画面で、影の忍猫のマントが主人公の真ん中まで伸び、姫にゃんの花びらが右端を越えた)。
+   * 立ち絵が「主人公の真ん中 + 8」から「右端 − 8」に収まるように、左右へずらす
+   */
+  function bossShift(id) {
+    const base = fx(C.ENEMY_X), ext = bossExtent(id);
+    const lo = heroX() + BOSS_GAP + ext.left, hi = fieldSize.w - BOSS_GAP - ext.right;
+    const want = Math.min(hi, Math.max(lo, base));
+    return want - base;
+  }
+  /** 絵が読めているボスなら、その名前 (まだなら null。前の大きなボス猫の絵で描く) */
+  function drawnBoss(e) {
+    const id = C.bossIdOf(e.look);
+    return id && BOSS_ART[id] && ready(bossImg(id, 'stand')) ? id : null;
+  }
+  /** 足もとから頭のてっぺんまで (頭の上のしるし・ゲージ・字の位置に使う) */
+  function enemyHeadH(e) {
+    const id = drawnBoss(e);
+    if (!id) return 150 * enemyScale(e);
+    const a = BOSS_ART[id].stand;
+    return (a.ay - a.top) * bossScale(id);
+  }
+  /** 足もとの真ん中から、絵の遠いほうの端まで (歩いてくるとき、画面の外から出すのに使う) */
+  function enemyHalfW(e) {
+    const id = drawnBoss(e);
+    if (!id) { const im = imgs[e.look]; return (im && im.naturalWidth ? im.naturalWidth : 130) * enemyScale(e) / 2; }
+    const a = BOSS_ART[id].stand;
+    return Math.max(a.ax, a.w - a.ax) * bossScale(id);
+  }
+  // ボスのポーズ: 攻撃が当たった・パンチを受け止めた、の一瞬だけ別の絵にする (合戦の中身は変えない。見た目だけ)
+  const bossPose = {};
+  let lastBossPose = null;   // いちばん最後に描いたボスのポーズ (見張りが読む)
+  const BOSS_POSE_TIME = 0.45;
+  function rushPose(id) { return id === 'koura' ? 'atk1' : 'atk2'; }   // 甲羅猫大将は「受け止める」(体当たり) で突っ込む
+  function markBossPose(b, ev) {
+    const en = b.enemies.find(function (x) { return x.id === ev.id; });
+    const id = en && C.bossIdOf(en.look);
+    if (!id) return;
+    let pose = null;
+    if (ev.type === 'playerHit') pose = en.state === 'rushBack' ? rushPose(id) : 'atk1';
+    else if (ev.type === 'hit' && ev.armor && id === 'koura') pose = 'atk2';   // MAX でないパンチは半分: シールドで受け止める
+    if (pose) bossPose[en.id] = { pose: pose, until: performance.now() / 1000 + BOSS_POSE_TIME };
   }
 
   const LURE_TEXT = {
@@ -620,9 +716,10 @@
     const s = fieldSize.s;
     const e = b.enemies[b.current];
     const ex = e ? enemyX(e) : fieldSize.w * 0.7;
-    const top = e ? fieldSize.ground - 150 * enemyScale(e) : fieldSize.ground - 150 * s;
+    const top = e ? fieldSize.ground - enemyHeadH(e) : fieldSize.ground - 150 * s;
     for (let i = 0; i < b.events.length; i++) {
       const ev = b.events[i];
+      if (ev.type === 'playerHit' || (ev.type === 'hit' && ev.armor)) markBossPose(b, ev);
       if (ev.type === 'lure') {
         anim.lure = 1;
         addEffect({ kind: 'swish', dur: 0.45, big: ev.result === 'max' });
@@ -930,11 +1027,13 @@
   function drawEnemy(ctx, b, e, t) {
     const s = fieldSize.s;
     const sc = enemyScale(e);
+    const bid = drawnBoss(e);
     let x = enemyX(e);
     let y = fieldSize.ground;
     let rot = 0;
     let alpha = 1;
-    const headY = function () { return y - 150 * sc; };
+    let headH = enemyHeadH(e);
+    const headY = function () { return y - headH; };
     const chasing = C.isChasing(e);
 
     if (e.state === 'enter') {
@@ -996,9 +1095,33 @@
       alpha = k > 0.75 ? (1 - k) / 0.25 : 1;
     }
 
-    shadow(ctx, enemyX(e), fieldSize.ground, 40 * sc);
     const flash = anim.knock > 0.6 && e.state !== 'down' ? anim.knock : 0;
-    drawSprite(ctx, imgs[e.look], x, y, sc, { rot: rot, alpha: alpha, flash: flash });
+    if (bid) {
+      // ボス: ポーズの絵を選ぶ。倒れた・目を回した = やられた / 突っ込む = 突進の絵 / 当たった瞬間 = 攻撃の絵
+      const bs = bossScale(bid);
+      const held = bossPose[e.id];
+      let pose = 'stand';
+      if (e.state === 'down' || (e.state === 'charmed' && e.dizzy)) pose = 'down';
+      else if (e.state === 'rush') pose = rushPose(bid);
+      else if (held && held.until > performance.now() / 1000) pose = held.pose;
+      if (!ready(bossImg(bid, pose))) pose = 'stand';
+      if (pose === 'down') {
+        // やられたの絵は、はじめから寝ている。回さずに、その場で少し沈めて消える
+        rot = 0;
+        x = enemyX(e);
+        y = fieldSize.ground + (e.state === 'down' ? Math.min(1, (1 - Math.max(0, e.timer) / 1.3) * 3) * 6 * s : 0);
+        const d = BOSS_ART[bid].down;
+        headH = (d.ay - d.top) * bs;
+      } else if (pose !== 'stand') {
+        rot = 0;   // 攻撃の絵は、絵そのものが前のめり
+      }
+      lastBossPose = pose;
+      shadow(ctx, enemyX(e), fieldSize.ground, BOSS_ART[bid].stand.bodyH * 0.34 * bs);
+      drawBoss(ctx, bid, pose, x, y, bs, { rot: rot, alpha: alpha, flash: flash });
+    } else {
+      shadow(ctx, enemyX(e), fieldSize.ground, 40 * sc);
+      drawSprite(ctx, imgs[e.look], x, y, sc, { rot: rot, alpha: alpha, flash: flash });
+    }
 
     // 夢中: ぶらさがる羽とハート (目を回しているときは星)
     if ((e.state === 'charmed' && !e.dizzy) || chasing) {
@@ -1023,8 +1146,29 @@
         outlinedText(ctx, '★', x + Math.cos(a) * 30 * s, headY() + 20 * s + Math.sin(a) * 8 * s, 14, '#ffe27a');
       }
     } else if (e.state !== 'enter') {
-      drawMood(ctx, e, enemyX(e), fieldSize.ground - 150 * sc, t);
+      drawMood(ctx, e, enemyX(e), fieldSize.ground - enemyHeadH(e), t);
     }
+  }
+
+  // 攻撃の絵は右向きに描いてあるので、左右をひっくり返す (敵は右に立ち、左の主人公を攻撃する)。
+  // 風の射手だけは立ち絵も右を向いて弓を引いているので、ひっくり返す。やられたは、そのまま (頭が主人公の側)
+  function bossFlip(id, pose) { return pose === 'atk1' || pose === 'atk2' || (id === 'kaze' && pose === 'stand'); }
+  function drawBoss(ctx, id, pose, x, groundY, sc, opts) {
+    const a = BOSS_ART[id][pose], im = bossImg(id, pose);
+    if (!ready(im)) return;
+    const w = a.w * sc, h = a.h * sc, ax = a.ax * sc, ay = a.ay * sc;
+    ctx.save();
+    ctx.translate(x, groundY);
+    if (opts.rot) ctx.rotate(opts.rot);
+    if (bossFlip(id, pose)) ctx.scale(-1, 1);
+    if (opts.alpha !== undefined) ctx.globalAlpha = opts.alpha;
+    ctx.drawImage(im, -ax, -ay, w, h);
+    if (opts.flash > 0) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = opts.flash * 0.6;
+      ctx.drawImage(im, -ax, -ay, w, h);
+    }
+    ctx.restore();
   }
 
   // 溜めの光は、一度だけ小さな絵に描いておき、毎コマは拡大して置くだけにする (毎コマ光の濃淡を作り直すより軽い)
@@ -1258,6 +1402,7 @@
   function sortie() {
     if (battle && battle.phase === 'fight') return;
     battle = C.createBattle(state, rng);
+    preloadBosses(battle);
     lastBattle = null;
     paused = false;
     effects = [];
@@ -2669,7 +2814,12 @@
       row.appendChild(buy); row.appendChild(gather);
     } else {
       const lv = state.realm.level[sel - 1];
-      head('<img src="' + imgs[pref.look].src + '" alt="" class="face">', pref.name + ' <i>🐾</i>', pref.kuni + 'の国 ・ 大名「' + pref.daimyo + '」');
+      // 天下統一の最後の 1 国だけは、どの県でも黒猫大魔王が出てくる (core の attackPlan と同じ決まり)
+      const last = C.ownedCount(state) === C.PREF_COUNT - 1;
+      const lordLook = last ? C.bossLook(C.FINAL_BOSS) : C.lordOf(state, sel).look;
+      const lordName = last ? C.BOSSES[C.FINAL_BOSS].name : C.lordOf(state, sel).daimyo;
+      head('<img src="' + faceSrc(lordLook) + '" alt="" class="face' + (C.bossIdOf(lordLook) ? ' boss' : '') + '">', pref.name + ' <i>🐾</i>',
+        pref.kuni + 'の国 ・ ' + (last ? '最後に待つのは「' + lordName + '」' : '大名「' + lordName + '」'));
       add('<img class="tag" src="' + imgs['r-tag-strength'].src + '" alt="敵の強さ"><img class="swords" src="' + imgs['r-swords'].src + '" alt=""><b data-v="garrison"></b><span class="stars">' + stars(lv) + '</span>', 'rs-row');
       add(pref.desc, 'rs-desc flavor', 'p');
       const src = C.attackSource(state, sel);
@@ -2838,6 +2988,7 @@
     switchTab('battle');
     showReady();
     battle = C.createBattle(state, rng, plan);
+    preloadBosses(battle);
     lastBattle = null;
     paused = false;
     effects = [];
@@ -2891,6 +3042,7 @@
     switchTab('battle');
     showReady();
     battle = C.createBattle(state, rng, plan);
+    preloadBosses(battle);
     lastBattle = null;
     paused = false;
     effects = [];
@@ -3098,15 +3250,28 @@
         const b = battle; const e = b && b.enemies[b.current];
         if (!e) return null;
         const s = fieldSize.s;
-        return Math.max(fieldSize.ground - 150 * enemyScale(e) - 34 * s, (fieldSize.hudBottom || 0) + 34 * s) - 16 * s - 12;
+        return Math.max(fieldSize.ground - enemyHeadH(e) - 34 * s, (fieldSize.hudBottom || 0) + 34 * s) - 16 * s - 12;
       },
       // 立ち位置。enterLeft は、歩き出す瞬間の敵の絵の左端 (種類ごとの最小)。画面の外 (>= w) であるべき
+      /** ボスの立ち絵を全部読み、読めた数を返す (見張りが、ボスの大きさを測る前に待つ) */
+      bossesReady: function () {
+        return Object.keys(C.BOSSES).filter(function (id) { return ready(bossImg(id, 'stand')); }).length;
+      },
+      /** ボスの絵の大きさ (画面の画素): 足もとの位置と、立ち絵の左右の端・頭のてっぺん */
+      bossBox: function () {
+        const e = battle && battle.enemies[battle.current];
+        const id = e && drawnBoss(e);
+        if (!id) return null;
+        const a = BOSS_ART[id].stand, bs = bossScale(id), x = enemyX(e), ext = bossExtent(id);
+        return { id: id, pose: lastBossPose, left: x - ext.left, right: x + ext.right, top: fieldSize.ground - a.ay * bs, bodyTop: fieldSize.ground - enemyHeadH(e), ground: fieldSize.ground, heroX: heroX(), w: fieldSize.w };
+      },
       layout: function () {
         let enterLeft = Infinity;
-        Object.keys(C.ENEMY_KINDS).forEach(function (k) {
-          const e = { x: C.ENTER_X, state: 'enter', kind: k, look: C.ENEMY_KINDS[k].look, boss: k === 'boss' };
-          const im = imgs[e.look];
-          enterLeft = Math.min(enterLeft, enemyX(e) - im.naturalWidth * enemyScale(e) / 2);
+        const looks = Object.keys(C.ENEMY_KINDS).map(function (k) { return { kind: k, look: C.ENEMY_KINDS[k].look }; })
+          .concat(Object.keys(C.BOSSES).map(function (id) { return { kind: 'boss', look: C.bossLook(id) }; }));
+        looks.forEach(function (q) {
+          const e = { x: C.ENTER_X, state: 'enter', kind: q.kind, look: q.look, boss: q.kind === 'boss' };
+          enterLeft = Math.min(enterLeft, enemyX(e) - enemyHalfW(e));
         });
         return { bg: battleBgReady ? 'image' : 'drawn', bgGroundY: fieldSize.bgGroundY, land: !!fieldSize.land, w: fieldSize.w, h: fieldSize.h, s: fieldSize.s, ground: fieldSize.ground,
           obstacle: (function () {
