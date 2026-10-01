@@ -558,38 +558,177 @@
   // ---------------------------------------------------------- 効果
 
   let effects = [];
-  const anim = { lure: 0, punch: 0, hurt: 0, shake: 0, flash: 0, knock: 0, punchLevel: 0, charge: 0, hop: 0, crash: 0, barrelIn: 1 };
+  const anim = { lure: 0, punch: 0, hurt: 0, shake: 0, flash: 0, knock: 0, punchLevel: 0, charge: 0, hop: 0, crash: 0, barrelIn: 1, gaugePop: 0, maxStamp: 0 };
+  // ヒットストップ: 強い一撃が当たった瞬間、合戦と動きを少しだけ止める (画面のゆれは続く)。手ごたえが「止まり」で伝わる
+  const HIT_STOP = { lv1: 0.06, lv2: 0.09, counter: 0.1, max: 0.14 };
+  let hitStop = 0;
+  let lastGauge = null;   // 夢中ゲージの位置 (ハートが飛び込む先)
+  const gaugeShown = new WeakMap();   // 敵ごとの、ゲージに出している中身 (なめらかに伸ばす)
+  let heartImg = null;
+  /** 飛ぶハートの絵 (白の縁どりの桃色のハート)。はじめて使うときに一度だけ描く */
+  function heartSprite() {
+    if (heartImg) return heartImg;
+    const c = document.createElement('canvas');
+    c.width = c.height = 48;
+    const g = c.getContext('2d');
+    g.font = '900 36px "Hiragino Maru Gothic ProN", sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineJoin = 'round'; g.lineWidth = 7; g.strokeStyle = '#fff';
+    g.strokeText('♥', 24, 26);
+    g.fillStyle = '#ff5f9e';
+    g.fillText('♥', 24, 26);
+    heartImg = c;
+    return c;
+  }
   const petals = [];
   for (let i = 0; i < 12; i++) petals.push({ x: Math.random(), y: Math.random(), v: 0.03 + Math.random() * 0.03, p: Math.random() * 6 });
   let cheer = { t: 3, text: '' };
 
-  // 効果音。いまは溜めが会心に届いたときの「ポン」だけ。音は最初に画面を押したときに鳴らせるようになる (iOS の決まり)
-  let audioCtx = null;
+  // 効果音。WebAudio でその場で作る (音の絵は持たない)。音は最初に画面を押したときに鳴らせるようになる (iOS の決まり)。
+  // 鳴らすのは、猫じゃらし (段ごとに高くなる)・夢中 MAX・溜めている間 (溜まるほど高くなる)・強に届いた「カッ」・会心の「ポン」・
+  // 当たり (強いほど重い)・空振り・カットインの「ドーン」。大きさは数字で測って決めた (__app.measureSfx。OfflineAudioContext で鳴らして
+  // いちばん大きい所と平均を読む。効果音のいちばん大きい所は 0.2〜0.6 に収める)
+  let audioCtx = null, master = null;
   const sfxCount = { pon: 0 };
   function unlockAudio() {
     if (!audioCtx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
       try { audioCtx = new AC(); } catch (err) { return; }
+      master = audioCtx.createGain();
+      master.gain.value = 1;
+      master.connect(audioCtx.destination);
     }
     if (audioCtx.state === 'suspended') audioCtx.resume();
   }
-  function playPon() {
-    sfxCount.pon++;
-    if (!audioCtx) return;
-    const t = audioCtx.currentTime;
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(520, t);
-    o.frequency.exponentialRampToValueAtTime(1040, t + 0.08);
+  const noiseCache = new WeakMap();
+  function noiseBuf(ac) {
+    let b = noiseCache.get(ac);
+    if (!b) {
+      b = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+      const d = b.getChannelData(0);
+      let x = 7;
+      for (let i = 0; i < d.length; i++) { x = (x * 16807) % 2147483647; d[i] = x / 1073741823.5 - 1; }
+      noiseCache.set(ac, b);
+    }
+    return b;
+  }
+  function envGain(ac, out, t, attack, peak, decay) {
+    const g = ac.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
-    o.connect(g);
-    g.connect(audioCtx.destination);
+    g.gain.exponentialRampToValueAtTime(peak, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+    g.connect(out);
+    return g;
+  }
+  function tone(ac, out, t, type, f0, f1, attack, peak, decay) {
+    const o = ac.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + attack + decay);
+    o.connect(envGain(ac, out, t, attack, peak, decay));
     o.start(t);
-    o.stop(t + 0.3);
+    o.stop(t + attack + decay + 0.02);
+  }
+  function noise(ac, out, t, filter, f0, f1, q, attack, peak, decay) {
+    const src = ac.createBufferSource();
+    src.buffer = noiseBuf(ac);
+    const f = ac.createBiquadFilter();
+    f.type = filter; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t);
+    f.frequency.exponentialRampToValueAtTime(f1, t + attack + decay);
+    src.connect(f);
+    f.connect(envGain(ac, out, t, attack, peak, decay));
+    src.start(t);
+    src.stop(t + attack + decay + 0.02);
+  }
+  // 夢中ゲージの段で上がる音 (ド・ミ・ソ・ド・ミ)。じゃらすたびに 1 段ずつ上がり、MAX が近いと分かる
+  const LURE_NOTES = [523, 659, 784, 1047, 1319];
+  const SFX = {
+    lure: function (ac, out, t, step) {
+      noise(ac, out, t, 'bandpass', 1400, 3600, 1.4, 0.01, 0.22, 0.13);   // ひゅっ
+      if (step >= 0) {
+        const f = LURE_NOTES[Math.min(LURE_NOTES.length - 1, step)];
+        tone(ac, out, t + 0.04, 'triangle', f, f * 1.02, 0.006, 0.26, 0.18);
+      }
+    },
+    weak: function (ac, out, t) {   // 見られていて効かない: 低くこもった音
+      noise(ac, out, t, 'bandpass', 900, 700, 1.0, 0.01, 0.12, 0.1);
+      tone(ac, out, t + 0.03, 'sine', 330, 300, 0.01, 0.12, 0.12);
+    },
+    max: function (ac, out, t) {    // 夢中 MAX: きらきらと駆け上がる
+      [1047, 1319, 1568, 2093].forEach(function (f, k) { tone(ac, out, t + k * 0.055, 'triangle', f, f, 0.005, 0.22, 0.22); });
+      noise(ac, out, t + 0.05, 'highpass', 5000, 7000, 0.7, 0.02, 0.07, 0.35);
+    },
+    tick: function (ac, out, t) {   // 溜めが「強」に届いた: カッ
+      tone(ac, out, t, 'square', 880, 760, 0.003, 0.14, 0.05);
+      noise(ac, out, t, 'highpass', 3000, 3000, 0.7, 0.002, 0.12, 0.04);
+    },
+    pon: function (ac, out, t) {    // 溜めが「会心」に届いた: ポン
+      tone(ac, out, t, 'sine', 520, 1040, 0.01, 0.3, 0.24);
+    },
+    hit: function (ac, out, t, lv) {   // 当たり: 強いほど低く重い
+      const k = Math.max(0, Math.min(2, lv || 0));
+      tone(ac, out, t, 'sine', 170 - 20 * k, 42, 0.004, 0.34 + 0.07 * k, 0.16 + 0.07 * k);
+      noise(ac, out, t, 'lowpass', 2400 - 500 * k, 300, 0.8, 0.003, 0.2 + 0.07 * k, 0.07 + 0.05 * k);
+    },
+    boom: function (ac, out, t) {   // 特大猫パンチ: ドーン
+      tone(ac, out, t, 'sine', 140, 32, 0.004, 0.46, 0.55);
+      noise(ac, out, t, 'lowpass', 1800, 160, 0.7, 0.004, 0.28, 0.45);
+      [1568, 2093].forEach(function (f, k) { tone(ac, out, t + 0.06 + k * 0.05, 'triangle', f, f, 0.004, 0.08, 0.3); });
+    },
+    miss: function (ac, out, t) {   // 空振り: すかっ
+      noise(ac, out, t, 'bandpass', 2400, 900, 1.0, 0.01, 0.3, 0.12);
+    },
+    charge: function (ac, out, t) { // 溜めている間 (測る用に 1.5 秒ぶん鳴らす。ふだんは chargeSound で押している間だけ)
+      const v = chargeVoiceOn(ac, out, t);
+      v.osc.frequency.linearRampToValueAtTime(chargeFreq(1), t + 1.5);
+      v.stop(t + 1.5);
+    }
+  };
+  function playSfx(name, arg) {
+    sfxCount[name] = (sfxCount[name] || 0) + 1;
+    if (!audioCtx || !master) return;
+    try { SFX[name](audioCtx, master, audioCtx.currentTime + 0.005, arg); } catch (err) { /* 音が出せなくても遊べる */ }
+  }
+  function playPon() { playSfx('pon'); }
+
+  // 溜めている間の音: 押している間ずっと小さく鳴り、溜まるほど高くなる (強で 1 段、会心で 2 段の高さ)
+  function chargeFreq(frac) { return 180 + 420 * frac; }
+  function chargeVoiceOn(ac, out, t) {
+    const osc = ac.createOscillator(), f = ac.createBiquadFilter(), g = ac.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(chargeFreq(0), t);
+    f.type = 'lowpass'; f.frequency.value = 1400; f.Q.value = 2;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.06, t + 0.08);
+    osc.connect(f); f.connect(g); g.connect(out);
+    osc.start(t);
+    // 止めるときは、いまの大きさから静かに落とす (gain.value は鳴らす前だと 1 を返すことがあり、それを使うと「バチッ」と大きく鳴った)
+    return { osc: osc, gain: g, stop: function (at) { g.gain.cancelScheduledValues(at); g.gain.setTargetAtTime(0.0001, at, 0.02); osc.stop(at + 0.15); } };
+  }
+  let chargeVoice = null;
+  function chargeSound(on, frac) {
+    if (!on) {
+      if (chargeVoice && audioCtx) chargeVoice.stop(audioCtx.currentTime);
+      chargeVoice = null;
+      return;
+    }
+    if (!audioCtx || !master) return;
+    if (!chargeVoice) { sfxCount.charge = (sfxCount.charge || 0) + 1; chargeVoice = chargeVoiceOn(audioCtx, master, audioCtx.currentTime); }
+    chargeVoice.osc.frequency.setTargetAtTime(chargeFreq(Math.min(1, frac)), audioCtx.currentTime, 0.03);
+  }
+  /** 見張り用: 効果音を OfflineAudioContext で鳴らし、いちばん大きい所と、鳴っている間の平均 (二乗平均) を返す */
+  function measureSfx(name, arg) {
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const oc = new OAC(1, 44100 * 1.8, 44100);
+    SFX[name](oc, oc.destination, 0.01, arg);
+    return oc.startRendering().then(function (buf) {
+      const d = buf.getChannelData(0);
+      let peak = 0, sum = 0, n = 0;
+      for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; if (a > 0.003) { sum += d[i] * d[i]; n++; } }
+      return { peak: peak, rms: n ? Math.sqrt(sum / n) : 0, sec: n / 44100 };
+    });
   }
 
   function addEffect(e) {
@@ -752,6 +891,21 @@
         if (lt) addEffect({ kind: 'text', x: ex, y: top + 40 * s, text: lt[0], color: lt[1], size: lt[2], dur: 0.9 });
         if (ev.result === 'max') setFace('smile', 1.0);
         if (ev.result === 'weak') setFace('shy', 0.7);
+        // 効いたら: ゲージが跳ね、顔からハートがゲージへ飛び込み、段ごとに高くなる音。MAX は「今だ!」が押し出され、猫パンチが跳ねる
+        const k = e ? Math.max(0, Math.min(1, e.muchu / C.MUCHU_MAX)) : 0;
+        if (ev.result === 'weak') playSfx('weak');
+        else if (ev.result === 'max') {
+          playSfx('lure', 4); playSfx('max');
+          anim.gaugePop = 1; anim.maxStamp = 1;
+          addEffect({ kind: 'ring', x: ex, y: top + 40 * s, r: 110 * s, dur: 0.45, color: '#ffd84a' });
+          bounce(els.btnPunch, 1.2);
+        } else {
+          playSfx('lure', Math.min(3, Math.floor(k * 4)));
+          anim.gaugePop = 1;
+        }
+        if (ev.result !== 'weak') {
+          for (let h = 0; h < (ev.result === 'max' ? 5 : 3); h++) addEffect({ kind: 'heartfly', x: ex + (h - 1) * 14 * s, y: top + 50 * s, dur: 0.42 + h * 0.06, seed: h });
+        }
       } else if (ev.type === 'rushWarn') {
         setFace('surprised', 1.0);
       } else if (ev.type === 'rush') {
@@ -776,34 +930,46 @@
           addEffect({ kind: 'text', x: hx, y: hy - 40 * s, text: 'ポン!', color: '#ffd84a', size: 30, stroke: '#3a2a1c', dur: 0.8 });
           addEffect({ kind: 'ring', x: hx, y: hy, r: 60 * s, dur: 0.35 });
           playPon();
+          bounce(els.btnPunch, 1.14);
           setFace('serious', 1.0);
         } else {
           addEffect({ kind: 'ring', x: hx, y: hy, r: 40 * s, dur: 0.3 });
+          playSfx('tick');
+          bounce(els.btnPunch, 1.08);
         }
       } else if (ev.type === 'chargeBroken') {
+        chargeSound(false);
         addEffect({ kind: 'text', x: heroX() + 30 * s, y: fieldSize.ground - 170 * s, text: 'あっ…', color: '#7a6650', size: 18, dur: 0.8 });
       } else if (ev.type === 'hit') {
         if (ev.source === 'punch') {
+          chargeSound(false);
           const lv = ev.level || 0;
+          const special = lv === 2 && ev.max;
           anim.punch = 1;
           anim.punchLevel = lv;
-          anim.knock = 1;
-          const big = lv >= 1 || ev.max || ev.crit;
-          addEffect({ kind: 'burst', x: ex - 20 * s, y: fieldSize.ground - 80 * s, r: [46, 64, 90][lv] * s * (ev.max ? 1.15 : 1), dur: 0.3 + 0.1 * lv });
-          addEffect({ kind: 'text', x: ex + 10 * s, y: top - 30 * s, text: ev.armor && !ev.max ? 'カキン!' : PUNCH_WORD[lv], color: '#ffd84a', size: [32, 38, 44][lv], rot: -0.12, dur: 0.75, stroke: '#3a2a1c' });
-          let label = '';
-          if (ev.counter) label = 'カウンター!';
-          else if (ev.open) label = 'スキあり!';
-          else if (lv === 2) label = ev.max ? '特大 猫パンチ!' : '会心の猫パンチ!';
-          else if (lv === 1) label = '強パンチ!';
-          if (label) addEffect({ kind: 'text', x: ex, y: top - 70 * s, text: label, color: '#c8412f', size: 20, dur: 1.0 });
-          if (lv === 2 && ev.max) startCutin();
-          if (lv >= 1) anim.shake = 0.6 + 0.4 * (lv - 1);
-          if (big) setFace('smile', 1.0);
-        } else if (ev.source === 'ally') {
-          addEffect({ kind: 'burst', x: ex - 10 * s, y: fieldSize.ground - 100 * s, r: 20 * s, dur: 0.2 });
+          // 当たった手ごたえ (光・字・数・ゆれ・止まり・音)。特大猫パンチは、カットインが終わった瞬間に「ドーン」と決まる
+          const impact = function () {
+            anim.knock = 1;
+            const big = lv >= 1 || ev.max || ev.crit;
+            addEffect({ kind: 'burst', x: ex - 20 * s, y: fieldSize.ground - 80 * s, r: [46, 64, 90][lv] * s * (ev.max ? 1.15 : 1) * (special ? 1.25 : 1), dur: 0.3 + 0.1 * lv });
+            addEffect({ kind: 'text', x: ex + 10 * s, y: top - 30 * s, text: ev.armor && !ev.max ? 'カキン!' : PUNCH_WORD[lv], color: '#ffd84a', size: [32, 38, 44][lv] * (special ? 1.2 : 1), rot: -0.12, dur: 0.75, stroke: '#3a2a1c' });
+            let label = '';
+            if (ev.counter) label = 'カウンター!';
+            else if (ev.open) label = 'スキあり!';
+            else if (lv === 2) label = ev.max ? '特大 猫パンチ!' : '会心の猫パンチ!';
+            else if (lv === 1) label = '強パンチ!';
+            if (label) addEffect({ kind: 'text', x: ex, y: top - 70 * s, text: label, color: '#c8412f', size: 20, dur: 1.0 });
+            if (lv >= 1) anim.shake = special ? 1.4 : 0.6 + 0.4 * (lv - 1);
+            hitStop = Math.max(hitStop, special ? HIT_STOP.max : ev.counter ? HIT_STOP.counter : lv === 2 ? HIT_STOP.lv2 : lv === 1 ? HIT_STOP.lv1 : 0);
+            playSfx('hit', lv);
+            if (big) setFace('smile', 1.0);
+            addEffect({ kind: 'num', x: ex + 30 * s, y: top + 10 * s, text: String(ev.amount), crit: ev.crit || ev.max, dur: 0.8 });
+          };
+          if (special) startCutin(impact); else impact();
+        } else {
+          if (ev.source === 'ally') addEffect({ kind: 'burst', x: ex - 10 * s, y: fieldSize.ground - 100 * s, r: 20 * s, dur: 0.2 });
+          addEffect({ kind: 'num', x: ex + 30 * s, y: top + 10 * s, text: String(ev.amount), crit: ev.crit || ev.max, dur: 0.8 });
         }
-        addEffect({ kind: 'num', x: ex + 30 * s, y: top + 10 * s, text: String(ev.amount), crit: ev.crit || ev.max, dur: 0.8 });
       } else if (ev.type === 'parry') {
         anim.punch = 1;
         anim.punchLevel = ev.level || 0;
@@ -824,6 +990,8 @@
         addEffect({ kind: 'num', x: heroX(), y: fieldSize.ground - 170 * s, text: '-' + ev.amount, hurt: true, dur: 0.8 });
         setFace('surprised', 0.7);
       } else if (ev.type === 'miss') {
+        chargeSound(false);
+        playSfx('miss');
         anim.punch = 1;
         anim.punchLevel = ev.level || 0;
         addEffect({ kind: 'text', x: heroX() + 60 * s, y: fieldSize.ground - 140 * s, text: 'スカッ', color: '#7a6650', size: 16, dur: 0.7 });
@@ -850,35 +1018,52 @@
     b.events.length = 0;
   }
 
-  // 特大猫パンチのカットイン: 2.0 秒。飛びこんで (0.22 秒) 着いたら、止めて見せる (約 1.4 秒)。そのあと右へ抜ける (0.33 秒)。
-  // 1.1 秒だと、止まっているのが 0.5 秒ほどしかなく、すぐいなくなってさみしかった。2.4 秒だと少し長く感じた (どちらもいただいた声)。
-  // 見せている間は合戦も止める (見ている間に殴られないように)。画面を押すと、すぐ先へ進む
-  const CUTIN_MS = 2000;
-  let cutinAnims = null;
+  // 特大猫パンチのカットイン: 1.5 秒。飛びこんで (0.18 秒) 着いた瞬間に「ドーン」(音と、絵がぐっと大きく)、止めて見せ (約 1.0 秒)、
+  // 右へ抜ける (0.28 秒)。抜けた瞬間に一撃が決まる (光・数・大きなゆれ・ヒットストップ。impact)。
+  // 1.1 秒だと止まっているのが 0.5 秒ほどでさみしく、2.4 秒は長く、2.0 秒も「まだ少し長い」(どれもいただいた声)。
+  // 見せている間は合戦も止める (見ている間に殴られないように)。画面を押すと、すぐ先へ進む (一撃もすぐ決まる)
+  const CUTIN_MS = 1500;
+  const CUTIN_ARRIVE = 0.12;   // 着く所 (全体の割合。0.18 秒)
+  const CUTIN_LEAVE = 0.813;   // 抜けはじめる所 (1.22 秒)
+  let cutinAnims = null, cutinImpact = null, cutinBoomTimer = 0;
   function cutinOn() { return !!cutinAnims; }
-  function startCutin() {
+  function startCutin(impact) {
+    if (cutinAnims) endCutin();
     els.cutin.hidden = false;
+    cutinImpact = impact || null;
     const band = els.cutin.querySelector('.cutin-band');
     const art = els.cutin.querySelector('.cutin-art');
-    const a1 = band.animate([{ opacity: 0, transform: 'scaleY(0)' }, { opacity: 1, transform: 'scaleY(1)', offset: 0.07 }, { opacity: 1, transform: 'scaleY(1)', offset: 0.88 }, { opacity: 0, transform: 'scaleY(0)' }], { duration: CUTIN_MS });
-    // 左から飛びこみ、着いた瞬間に少し大きく (パンチの手ごたえ)、止まって見せてから右へ抜ける
+    const a1 = band.animate([{ opacity: 0, transform: 'scaleY(0)' }, { opacity: 1, transform: 'scaleY(1)', offset: 0.07 }, { opacity: 1, transform: 'scaleY(1)', offset: 0.86 }, { opacity: 0, transform: 'scaleY(0)' }], { duration: CUTIN_MS });
+    // 左から飛びこみ、着いた瞬間にぐっと大きく (パンチの手ごたえ)、止まって見せてから右へ抜ける
     const a2 = art.animate([
-      { transform: 'translateX(-110%) scale(1)', easing: 'ease-out' },
-      { transform: 'translateX(0) scale(1.12)', offset: 0.11 },
-      { transform: 'translateX(0) scale(1)', offset: 0.15 },
-      { transform: 'translateX(2%) scale(1.02)', offset: 0.835, easing: 'ease-in' },
+      { transform: 'translateX(-110%) scale(1)', easing: 'cubic-bezier(.2,.8,.3,1)' },
+      { transform: 'translateX(0) scale(1.16)', offset: CUTIN_ARRIVE },
+      { transform: 'translateX(0) scale(1)', offset: CUTIN_ARRIVE + 0.06 },
+      { transform: 'translateX(2%) scale(1.02)', offset: CUTIN_LEAVE, easing: 'ease-in' },
       { transform: 'translateX(120%) scale(1)' }
     ], { duration: CUTIN_MS });
     cutinAnims = [a1, a2];
     a2.onfinish = endCutin;
+    cutinBoomTimer = setTimeout(function () { if (cutinAnims) playSfx('boom'); }, CUTIN_MS * CUTIN_ARRIVE);
     setFace('smile', 2.0);
   }
   function endCutin() {
     if (!cutinAnims) return;
     const list = cutinAnims;
     cutinAnims = null;
+    clearTimeout(cutinBoomTimer);
     list.forEach(function (a) { a.cancel(); });
     els.cutin.hidden = true;
+    const f = cutinImpact;
+    cutinImpact = null;
+    if (f) f();
+  }
+
+  /** ボタンをぽんと跳ねさせる (Web Animations。ボタンの位置決めの transform は使っていない) */
+  function bounce(el, to) {
+    if (!el || !el.animate) return;
+    const face = el.querySelector('.round-face') || el;
+    face.animate([{ transform: 'scale(1)' }, { transform: 'scale(' + to + ')', offset: 0.35 }, { transform: 'scale(1)' }], { duration: 260, easing: 'ease-out' });
   }
 
   // ---------------------------------------------------------- 描く
@@ -991,10 +1176,22 @@
       });
       feather(ctx, cx + Math.cos(a1) * rx, cy + Math.sin(a1) * ry, 26 * s, a1 + Math.PI / 2);
       ctx.globalAlpha = 1;
+    } else if (e.kind === 'heartfly') {
+      // 効いた猫じゃらし: 顔からハートが弧を描いて夢中ゲージへ飛び込む
+      const g = lastGauge || { x: e.x, y: e.y - 60 * s };
+      const q = 1 - Math.pow(1 - k, 2);
+      const side = (e.seed - 1) * 26 * s;
+      const hx = e.x + (g.x - e.x) * q + side * Math.sin(q * Math.PI);
+      const hy = e.y + (g.y - e.y) * q - 40 * s * Math.sin(q * Math.PI);
+      ctx.globalAlpha = k > 0.85 ? (1 - k) / 0.15 : 1;
+      // 縁どりの字を毎コマ描くと遅い端末で重かった (4 秒で 150 → 120 コマ)。一度だけ描いた小さな絵を拡げて貼る
+      const hs = (16 + 8 * Math.sin(q * Math.PI)) * 1.25;
+      ctx.drawImage(heartSprite(), hx - hs / 2, hy - hs * 0.72, hs, hs);
+      ctx.globalAlpha = 1;
     } else if (e.kind === 'ring') {
-      // 溜めの段が上がったとき、肉球から広がる輪
+      // 溜めの段が上がったとき、肉球から広がる輪 (MAX は敵のまわりに金の輪)
       ctx.globalAlpha = 1 - k;
-      ctx.strokeStyle = '#ffe27a';
+      ctx.strokeStyle = e.color || '#ffe27a';
       ctx.lineWidth = 5 * (1 - k) + 1;
       ctx.beginPath(); ctx.arc(e.x, e.y, e.r * (0.4 + k), 0, Math.PI * 2); ctx.stroke();
       ctx.globalAlpha = 1;
@@ -1014,10 +1211,18 @@
     const mood = C.enemyMood(e);
     const gw = 96 * s, gh = 12 * s, gx = x - gw / 2 + 10 * s;
     const gy = Math.max(headY - 34 * s, (fieldSize.hudBottom || 0) + 34 * s);
-    // ゲージ
+    lastGauge = { x: gx + gw / 2, y: gy + gh / 2 };
+    // ゲージ。効いた瞬間にぽんと跳ね (gaugePop)、中身はなめらかに伸びる (0.1 秒ほどで追いつく。減るときはすぐ)
+    const pop = anim.gaugePop;
+    ctx.save();
+    if (pop > 0) { const sc = 1 + 0.22 * Math.sin(pop * Math.PI); ctx.translate(gx + gw / 2, gy + gh / 2); ctx.scale(sc, sc); ctx.translate(-(gx + gw / 2), -(gy + gh / 2)); }
     ctx.fillStyle = 'rgba(30,26,40,.82)';
     ctx.beginPath(); ctx.roundRect(gx - 2, gy - 2, gw + 4, gh + 4, gh / 2 + 2); ctx.fill();
-    const k = Math.max(0, Math.min(1, e.muchu / C.MUCHU_MAX));
+    const target = Math.max(0, Math.min(1, e.muchu / C.MUCHU_MAX));
+    const sh = gaugeShown.get(e);
+    let k = target;
+    if (sh && target > sh.v) k = sh.v + (target - sh.v) * Math.min(1, Math.max(0, t - sh.t) * 16);
+    gaugeShown.set(e, { v: k, t: t });
     if (k > 0) {
       const flash = mood === 'max' ? 0.75 + 0.25 * Math.sin(t * 14) : 1;
       ctx.globalAlpha = flash;
@@ -1028,6 +1233,7 @@
     // 半分の印 (ここから先は追いかけていて、攻撃してこない)
     ctx.fillStyle = 'rgba(255,255,255,.6)';
     ctx.fillRect(gx + gw * C.MUCHU_CHASE / C.MUCHU_MAX - 1, gy + 2, 2, gh - 4);
+    ctx.restore();
     // しるし (ゲージの左)
     const ix = gx - 16 * s, iy = gy + gh / 2 + 7 * s;
     if (mood === 'rush') {
@@ -1054,7 +1260,9 @@
       outlinedText(ctx, '♥', ix, iy + Math.sin(t * 8) * 2 * s, 24 * (0.8 + 0.4 * k), '#ff5f9e', '#fff');
     } else if (mood === 'max') {
       outlinedText(ctx, '🐾', ix, iy + Math.sin(t * 10) * 3 * s, 26, '#fff', '#fff');
-      outlinedText(ctx, '今だ!', x + 10 * s, gy - 12 * s, 16 + Math.sin(t * 12) * 2, '#c8412f', '#fff');
+      // MAX になった瞬間、「今だ!」が大きく押し出されて縮む (maxStamp)
+      const st = anim.maxStamp;
+      outlinedText(ctx, '今だ!', x + 10 * s, gy - 12 * s, (16 + Math.sin(t * 12) * 2) * (1 + 1.1 * st * st), '#c8412f', '#fff');
     }
   }
 
@@ -1267,8 +1475,8 @@
     ctx.clearRect(0, 0, w, h);
     const t = now / 1000;
 
-    ['lure', 'punch', 'hurt', 'shake', 'flash', 'knock', 'hop', 'crash'].forEach(function (k) {
-      const dur = { lure: 0.35, punch: 0.3, hurt: 0.4, shake: 0.25, flash: 0.35, knock: 0.25, hop: 0.55, crash: 0.6 }[k];
+    ['lure', 'punch', 'hurt', 'shake', 'flash', 'knock', 'hop', 'crash', 'gaugePop', 'maxStamp'].forEach(function (k) {
+      const dur = { lure: 0.35, punch: 0.3, hurt: 0.4, shake: 0.25, flash: 0.35, knock: 0.25, hop: 0.55, crash: 0.6, gaugePop: 0.28, maxStamp: 0.4 }[k];
       anim[k] = Math.max(0, anim[k] - dt / dur);
     });
     if (anim.shake > 0) ctx.translate((Math.random() - 0.5) * 8 * anim.shake, (Math.random() - 0.5) * 5 * anim.shake);
@@ -3593,16 +3801,21 @@
     }
 
     if (currentTab === 'battle' && !titleShown) {
+      // ヒットストップの間は、合戦も動きも止める (画面のゆれだけは続く)
+      const stopped = hitStop > 0 && !paused;
+      if (stopped) hitStop = Math.max(0, hitStop - dt);
       if (battle) {
-        if (battle.phase === 'fight' && !paused && !cutinOn()) C.stepBattle(battle, dt);   // カットインの間は止める
+        if (battle.phase === 'fight' && !paused && !cutinOn() && !stopped) C.stepBattle(battle, dt);   // カットインの間は止める
         // 知らせは戦の最中でなくても読む。最後の1匹をパンチで倒すと、
         // 勝ちの知らせは stepBattle の外で出る (読まないと勝利の札が出ずに止まる)
         handleEvents(battle);
       }
-      draw(now, paused ? 0 : Math.min(dt, 0.1));
+      // 溜めている間の音 (押している間だけ。溜まるほど高く)
+      chargeSound(!!(battle && battle.charge.on && !paused && battle.phase === 'fight'), battle ? battle.charge.t / 1.5 : 0);
+      draw(now, paused || stopped ? 0 : Math.min(dt, 0.1));
       updateFace(now);
       renderHud(false);
-    }
+    } else if (chargeVoice) chargeSound(false);
 
     // 攻めてくる大名の知らせと秒読み (合戦の画面で戦っている間・タイトルの間は止まる)
     if (dt > 0 && realmClockRuns()) realmStep(Math.min(dt, 1));
@@ -3719,6 +3932,22 @@
       releasePunch: doPunchRelease,
       mood: function () { const b = battle; return b ? C.enemyMood(b.enemies[b.current]) : 'none'; },
       sfx: function () { return Object.assign({}, sfxCount); },
+      measureSfx: measureSfx,
+      /** 見張り用: 猫じゃらしの音の高さ (段ごと)。風の音が消えたあとの 0.08〜0.14 秒の、0 をまたぐ数から */
+      lurePitch: function (step) {
+        const oc = new OfflineAudioContext(1, 44100 * 0.3, 44100);
+        SFX.lure(oc, oc.destination, 0, step);
+        return oc.startRendering().then(function (buf) {
+          const d = buf.getChannelData(0); let z = 0;
+          for (let i = Math.floor(0.08 * 44100); i < Math.floor(0.14 * 44100); i++) if ((d[i - 1] < 0) !== (d[i] < 0)) z++;
+          return z / 2 / 0.06;
+        });
+      },
+      hitStop: function () { return hitStop; },
+      punchPress: doPunchPress,
+      punchRelease: doPunchRelease,
+      effectKinds: function () { return effects.map(function (e) { return e.kind; }); },
+      anim: function () { return { gaugePop: anim.gaugePop, maxStamp: anim.maxStamp, shake: anim.shake }; },
       paused: function () { return paused; },
       offer: function () { return pendingOffer; },
       acceptOffer: acceptOffer,

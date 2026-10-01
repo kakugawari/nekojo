@@ -289,6 +289,9 @@ async function run() {
     await phone.waitForTimeout(60);
     const g1 = await phone.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; return { st: e.state, muchu: e.muchu, mood: window.__app.mood() }; });
     ok(g1.st === 'idle' && g1.muchu > 50 && g1.mood === 'chase', `猫じゃらしを指で押すと、夢中ゲージがたまり頭の上に ♡ (${Math.round(g1.muchu)}, ${g1.mood})`);
+    // 効いた手ごたえ: 音が鳴り、ゲージが跳ね、ハートがゲージへ飛ぶ
+    const fb1 = await phone.evaluate(() => ({ sfx: window.__app.sfx().lure || 0, pop: window.__app.anim().gaugePop, hearts: window.__app.effectKinds().filter((k) => k === 'heartfly').length }));
+    ok(fb1.sfx === 1 && fb1.pop > 0.3 && fb1.hearts >= 2, `効いた猫じゃらしは、音が鳴り (${fb1.sfx}回)、ゲージが跳ね (${fb1.pop.toFixed(2)})、ハートが飛ぶ (${fb1.hearts}個)`);
     const cdOf = () => phone.evaluate(() => parseFloat(document.getElementById('lureCd').style.getPropertyValue('--cd')) || 0);
     const cd1 = await cdOf();
     ok(cd1 > 0.5, `振った直後は、猫じゃらしのボタンに待ち時間の影がかかる (${cd1.toFixed(2)})`);
@@ -300,6 +303,8 @@ async function run() {
     const g2 = await phone.evaluate(() => { const b = window.__app.battle(); const e = b.enemies[b.current]; return { st: e.state, mood: window.__app.mood(), ready: document.getElementById('btnPunch').classList.contains('ready') }; });
     ok(g2.st === 'charmed' && g2.mood === 'max', `続けて振ると MAX になり、敵が動けなくなる (頭の上は 🐾) (${g2.st}, ${g2.mood})`);
     ok(g2.ready, 'MAX の間は、猫パンチのボタンが光る');
+    const fb2 = await phone.evaluate(() => ({ max: window.__app.sfx().max || 0, stamp: window.__app.anim().maxStamp, bounce: document.querySelector('#btnPunch .round-face').getAnimations().length }));
+    ok(fb2.max === 1 && fb2.stamp > 0.3 && fb2.bounce > 0, `MAX になった瞬間: きらきらの音 (${fb2.max}回)・「今だ!」が押し出され (${fb2.stamp.toFixed(2)})・猫パンチが跳ねる`);
     ok(await phone.evaluate(() => document.querySelector('#btnPunch .round-glow').getAnimations().length > 0), '光は点滅している');
 
     // 溜めパンチ: 本物の指のように、押したまま待ってから離す
@@ -325,6 +330,19 @@ async function run() {
     ok(!afterStrong.on && before.hp - afterStrong.hp === before.atk * 2 * 3,
       `離すと強パンチ。MAX の敵には 強(2倍)x MAX(3倍) で効く (${before.hp} → ${afterStrong.hp}、攻撃力 ${before.atk})`);
     ok(afterStrong.st === 'knock', '強パンチで敵が吹っ飛ぶ');
+    // ヒットストップ: 強以上が当たった瞬間、合戦が少しだけ止まる (ゆれは続く)
+    {
+      await phone.waitForTimeout(400);
+      // 当たりの知らせは次のコマで読まれるので、1 コマ待ってから見る
+      const hs = await phone.evaluate(async () => { const a = window.__app, b = a.battle(); const e = b.enemies[b.current]; e.wary = 0; a.debugMax(); b.cd.punch = 0;
+        a.punchPress(); b.charge.t = 1.0; a.punchRelease(); await new Promise((r) => requestAnimationFrame(r)); return { stop: a.hitStop(), t: a.battle().t }; });
+      await phone.waitForTimeout(30);
+      const t1 = await phone.evaluate(() => window.__app.battle().t);
+      await phone.waitForTimeout(250);
+      const t2 = await phone.evaluate(() => window.__app.battle().t);
+      ok(hs.stop >= 0.05 && t1 === hs.t && t2 > hs.t, `強パンチが当たると、合戦が ${Math.round(hs.stop * 1000)}ms 止まり (30ms 後も 合戦の時間 ${hs.t.toFixed(2)} のまま)、そのあと進む (${t2.toFixed(2)})`);
+      await phone.waitForTimeout(500);
+    }
 
     // 会心まで溜めると「ポン!」が鳴り、離すと特大猫パンチ (カットイン)
     await phone.waitForTimeout(700);
@@ -337,12 +355,21 @@ async function run() {
     // 指をボタンの外へずらしてから離しても、パンチは出る (指を捕まえている)
     await touch('touchMove', { x: pp.x - 200, y: pp.y - 300 });
     const hpBig = await phone.evaluate(() => { const b = window.__app.battle(); return b.enemies[b.current].hp; });
+    const s0 = await phone.evaluate(() => window.__app.sfx());
+    const tStart = Date.now();
     await touch('touchEnd');
     await phone.waitForTimeout(80);
-    const big = await phone.evaluate(() => { const b = window.__app.battle(); return { hp: b.enemies[b.current].hp, on: b.charge.on, cutin: !document.getElementById('cutin').hidden }; });
+    const big = await phone.evaluate(() => { const b = window.__app.battle(); return { hp: b.enemies[b.current].hp, on: b.charge.on, cutin: !document.getElementById('cutin').hidden, hit: window.__app.sfx().hit || 0, stop: window.__app.hitStop() }; });
     ok(!big.on && hpBig - big.hp === Math.round(before.atk * 3.5 * 3), `指をずらしてから離しても、特大猫パンチが出る (${hpBig} → ${big.hp})`);
     ok(big.cutin, '特大猫パンチでカットインが出る');
-    await phone.waitForFunction(() => document.getElementById('cutin').hidden, null, { timeout: 4000 }).catch(() => {});
+    // 一撃の手ごたえ (当たりの音・ヒットストップ) は、カットインが終わった瞬間に決まる。カットインは 1.5 秒
+    ok(big.hit === (s0.hit || 0) && big.stop === 0, `カットインの間は、まだ一撃が決まらない (当たりの音 ${big.hit - (s0.hit || 0)} 回)`);
+    await phone.waitForFunction(() => document.getElementById('cutin').hidden, null, { timeout: 4000, polling: 16 }).catch(() => {});
+    const len = Date.now() - tStart;
+    const done = await phone.evaluate(() => ({ hit: window.__app.sfx().hit || 0, boom: window.__app.sfx().boom || 0, stop: window.__app.hitStop(), burst: window.__app.effectKinds().includes('burst') }));
+    ok(len >= 1350 && len <= 1800, `カットインは 1.5 秒ほどで終わる (${len}ms。2.0 秒は「少し長い」と言われた)`);
+    ok(done.hit === (s0.hit || 0) + 1 && done.boom === (s0.boom || 0) + 1 && done.stop > 0 && done.burst,
+      `カットインが着いた瞬間に「ドーン」、終わった瞬間に一撃が決まる (当たりの音・光・ヒットストップ ${Math.round(done.stop * 1000)}ms)`);
 
     // 長押しで iOS の虫眼鏡 (ルーペ) が出ないように: 指が触れた瞬間 (touchstart) を止めている。
     // chromium では虫眼鏡は出ないので、止めたかどうか (defaultPrevented) と、字を選べないことを見る
@@ -1379,12 +1406,12 @@ async function run() {
       ok(ci.loaded && ci.words === '', `${tag}: カットインはもらった絵だけで、絵の上に字を重ねない (重ねた字: 「${ci.words}」)`);
       ok(ci.textL >= 0 && ci.textR <= vw, `${tag}: 絵の中の「特大猫パンチ!」が画面の中 (${Math.round(ci.textL)}〜${Math.round(ci.textR)})`);
       ok(Math.abs(ci.artMid - ci.bandMid) <= 4 && ci.artH >= ci.bandH * 0.7, `${tag}: 絵は虹色の帯の真ん中に大きく出る (帯 ${Math.round(ci.bandH)} / 絵 ${Math.round(ci.artH)})`);
-      // 止めて見せる: 出てから 1.3 秒たっても、まだ出ていて、絵は動いていない (1.1 秒で消えていたころは、さみしかった)。その間、合戦は止まる
+      // 止めて見せる: 出てから 0.9 秒たっても、まだ出ていて、絵は動いていない (1.1 秒で消えていたころは、止まっているのが 0.5 秒でさみしかった)。その間、合戦は止まる
       const t0 = await cp.evaluate(() => window.__app.battle().t);
       const x0 = await cp.evaluate(() => document.querySelector('.cutin-art').getBoundingClientRect().left);
-      await cp.waitForTimeout(800);   // 出てから 1.3 秒 (止めて見せるのは 0.3〜1.67 秒)
+      await cp.waitForTimeout(450);   // 出てから 0.9 秒ほど (止めて見せるのは 0.27〜1.22 秒)
       const hold = await cp.evaluate(() => ({ shown: !document.getElementById('cutin').hidden, x: document.querySelector('.cutin-art').getBoundingClientRect().left, t: window.__app.battle().t }));
-      ok(hold.shown && Math.abs(hold.x - x0) <= 0.05 * vw, `${tag}: カットインは止めて見せる (1.3 秒たっても出ていて、絵は ${Math.round(Math.abs(hold.x - x0))}px しか動かない)`);
+      ok(hold.shown && Math.abs(hold.x - x0) <= 0.05 * vw, `${tag}: カットインは止めて見せる (0.9 秒たっても出ていて、絵は ${Math.round(Math.abs(hold.x - x0))}px しか動かない)`);
       ok(hold.t === t0, `${tag}: カットインを見せている間は、合戦が止まる (合戦の時間 ${t0.toFixed(2)} → ${hold.t.toFixed(2)})`);
       await cp.waitForFunction(() => document.getElementById('cutin').hidden, null, { timeout: 3000 }).catch(() => {});
       const after = await cp.evaluate(() => ({ hidden: document.getElementById('cutin').hidden, t: window.__app.battle().t }));
@@ -1599,6 +1626,25 @@ async function run() {
     }
 
     // ------------------------------------------------ アイコン
+    // 効果音は WebAudio でその場で作る。耳で確かめられないので、大きさを数字で測る (OfflineAudioContext で鳴らす)
+    section('効果音 (猫じゃらし・MAX・溜め・当たり・カットイン)');
+    {
+      const lv = await phone.evaluate(async () => {
+        const out = {};
+        for (const [n, a] of [['lure', 2], ['weak'], ['max'], ['tick'], ['pon'], ['hit', 0], ['hit', 1], ['hit', 2], ['boom'], ['miss'], ['charge']]) out[n + (a !== undefined ? a : '')] = await window.__app.measureSfx(n, a);
+        out.pitch = [];
+        for (let st = 0; st < 5; st++) out.pitch.push(Math.round(await window.__app.lurePitch(st)));
+        return out;
+      });
+      const fx = Object.keys(lv).filter((k) => k !== 'pitch' && k !== 'charge');
+      const bad = fx.filter((k) => !(lv[k].peak >= 0.1 && lv[k].peak <= 0.62));
+      ok(bad.length === 0, `効果音のいちばん大きい所が 0.1〜0.62 (${fx.map((k) => k + ' ' + lv[k].peak.toFixed(2)).join(' / ')})`);
+      ok(lv.hit0.peak < lv.hit1.peak && lv.hit1.peak < lv.hit2.peak, `当たりの音は、強いほど大きい (${lv.hit0.peak.toFixed(2)} < ${lv.hit1.peak.toFixed(2)} < ${lv.hit2.peak.toFixed(2)})`);
+      // 溜めている間の音は、押している間ずっと鳴るので小さく。止めたときに「バチッ」と鳴らない (前は 0.9 まで跳ねた)
+      ok(lv.charge.peak <= 0.1, `溜めている間の音は小さく、止めても跳ねない (いちばん大きい所 ${lv.charge.peak.toFixed(3)})`);
+      ok(lv.pitch.every((f, i) => i === 0 || f > lv.pitch[i - 1] * 1.1), `猫じゃらしの音は、ゲージの段ごとに高くなる (${lv.pitch.join(' → ')} Hz)`);
+    }
+
     section('アイコン');
     const desk = await browser.newPage();
     await desk.goto(URL);
