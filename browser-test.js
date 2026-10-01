@@ -868,7 +868,58 @@ async function run() {
       // 一覧は札の中で送れる (送らなくても「建築する」は見えている)
       const sc = await cp.evaluate(() => { const e = document.getElementById('castleList'); e.scrollTop = 9999; return { top: e.scrollTop, last: (() => { const c = e.lastElementChild.getBoundingClientRect(), b = e.getBoundingClientRect(); return c.bottom <= b.bottom + 1; })() }; });
       ok(sc.last, `${tag}: 一覧は札の中で送れて、いちばん下の物まで見られる`);
+      // 見本から切り出した絵 (題の札・資源・城レベルの猫・施設の肉球・梅の花・金づち・建築するの札) が読めている
+      const pics = await cp.evaluate(async () => {
+        const urls = [...document.querySelectorAll('#view-castle img')].filter((e) => /u-/.test(e.src)).map((e) => e.src);
+        const b = document.getElementById('castleBuild');
+        const css = [getComputedStyle(b).borderImageSource, getComputedStyle(b.querySelector('.cs-build-icon')).webkitMaskImage];
+        for (const c of css) { const m = /url\("?([^")]+)"?\)/.exec(c); if (m) urls.push(m[1]); }
+        const res = await Promise.all(urls.map((u) => new Promise((r) => { const im = new Image(); im.onload = () => r(im.naturalWidth > 0); im.onerror = () => r(false); im.src = u; })));
+        return { n: urls.length, bad: urls.filter((u, i) => !res[i]).map((u) => u.split('/').pop().slice(0, 30)) };
+      });
+      ok(pics.n >= 8 && pics.bad.length === 0, `${tag}: 見本から切り出した絵 ${pics.n} 枚が読めている${pics.bad.length ? ' (読めない: ' + pics.bad.join(', ') + ')' : ''}`);
       await cc.close();
+    }
+
+    // ------------------------------------------------ タブの帯 (見本の紺の帯・切り出したアイコン・選んだタブの金の札)
+    section('タブの帯 (見本の紺の帯と金の札)');
+    for (const [vw, vh, safe] of [[430, 932, ':root{--safe-t:59px;--safe-b:34px}'], [932, 430, ':root{--safe-l:59px;--safe-r:59px;--safe-b:21px}']]) {
+      const tc = await browser.newContext({ ...device, viewport: { width: vw, height: vh } });
+      const tp = await tc.newPage();
+      tp.on('pageerror', (e) => errors.push('タブ: ' + e.message));
+      await tp.goto(URL);
+      await tp.waitForFunction(() => window.__app);
+      await tp.addStyleTag({ content: safe });
+      const tag = `${vw}x${vh}`;
+      await tp.evaluate(() => { const a = window.__app; a.start(); a.closeStory(); a.debugAddMerit(5000000); a.closeModals(); });
+      const icons = await tp.evaluate(async () => {
+        const urls = [...document.querySelectorAll('#tabbar .tab-icon')].map((e) => (/url\("?([^")]+)"?\)/.exec(getComputedStyle(e).webkitMaskImage) || [])[1]);
+        const res = await Promise.all(urls.map((u) => !u ? false : new Promise((r) => { const im = new Image(); im.onload = () => r(im.naturalWidth > 0); im.onerror = () => r(false); im.src = u; })));
+        return { n: urls.length, ok: res.filter(Boolean).length, distinct: new Set(urls).size };
+      });
+      ok(icons.n === 5 && icons.ok === 5 && icons.distinct === 5, `${tag}: タブのアイコンは見本から切り出した 5 枚 (読めた ${icons.ok}/${icons.n})`);
+      // 選んだタブの金の札は帯のふちから外へはみ出す (縦は上へ 12px・横は右へ 12px)。はみ出した所が、
+      // その画面のボタンや地図の出典の字にかからない
+      for (const t of ['battle', 'realm', 'vassals', 'castle', 'village']) {
+        await tp.evaluate((t) => window.__app.setTab(t), t);
+        await tp.waitForTimeout(250);
+        const hit = await tp.evaluate((t) => {
+          const tab = document.getElementById('tab-' + t), r = tab.getBoundingClientRect(), cs = getComputedStyle(tab, '::before');
+          const plate = { l: r.left + parseFloat(cs.left), t: r.top + parseFloat(cs.top), r: r.right - parseFloat(cs.right), b: r.bottom - parseFloat(cs.bottom) };
+          const bar = document.getElementById('tabbar').getBoundingClientRect();
+          // 帯の外へはみ出した所だけを見る
+          const out = () => (innerWidth > innerHeight ? { l: bar.right, t: plate.t, r: plate.r, b: plate.b } : { l: plate.l, t: plate.t, r: plate.r, b: bar.top });
+          const o = out();
+          const els = [...document.querySelectorAll('.view:not([hidden]) button, .view:not([hidden]) .realm-credit')].filter((e) => e.offsetWidth && getComputedStyle(e).visibility !== 'hidden' && !e.closest('[hidden]'));
+          // 送れる入れ物の中の物は、入れ物の見えている所で切って見る
+          const seen = (e) => { const b = e.getBoundingClientRect(); let v = { l: b.left, t: b.top, r: b.right, b: b.bottom };
+            for (let p = e.parentElement; p; p = p.parentElement) { if (getComputedStyle(p).overflowY === 'visible') continue; const q = p.getBoundingClientRect(); v = { l: Math.max(v.l, q.left), t: Math.max(v.t, q.top), r: Math.min(v.r, q.right), b: Math.min(v.b, q.bottom) }; }
+            return v; };
+          return { over: o.r > o.l && o.b > o.t, hits: els.filter((e) => { const b = seen(e); return b.r > b.l && b.b > b.t && b.l < o.r && b.r > o.l && b.t < o.b && b.b > o.t; }).map((e) => (e.id || e.className).slice(0, 20)) };
+        }, t);
+        ok(hit.over && hit.hits.length === 0, `${tag}: 「${t}」を選ぶと金の札が帯から少しはみ出し、そこに画面のボタンや字がかからない${hit.hits.length ? ' (' + hit.hits.join(', ') + ')' : ''}`);
+      }
+      await tc.close();
     }
 
     // ------------------------------------------------ 天下 (日本地図の国とり)

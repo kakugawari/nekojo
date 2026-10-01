@@ -598,23 +598,19 @@ img { -webkit-user-drag: none; }
 
 /* --------------------------------------------------------- 城 (見本: 上に「城」の札と資源、真ん中に城の地図と城レベル・施設の帯、
    右 (縦は下) に紺の見出しの「建築・強化」の一覧と金の「建築する」)。地図は入れ物いっぱいで、大きさは JS が決める */
-.castle-view { position: relative; overflow: hidden; background: linear-gradient(#e4edf1, #f6f1e4 55%, #efe3cb); }
+.castle-view { position: relative; overflow: hidden; background: linear-gradient(#f8f3e6, #f3ead6); }
 .castle-view .locked-art { margin: 30px 14px 0; }
 .castle-body { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) minmax(0, 46%); }
 .castle-body[hidden] { display: none; }
-.cs-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 4px; position: relative; z-index: 2; }
-.cs-title {
-  margin: 0; display: inline-flex; align-items: center; gap: 8px; padding: 3px 20px 3px 4px;
-  background: var(--paper); border: 2px solid var(--gold-edge); border-radius: 999px;
-  box-shadow: 0 0 0 2px var(--gold-2) inset, 0 3px 8px rgba(58,42,28,.15);
-  font-size: 23px; font-weight: 900; color: var(--ink); letter-spacing: .12em; line-height: 1.2;
-}
-.cs-paw { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 17px;
-  background: radial-gradient(circle at 40% 35%, #fff3c8, #e9c46a); border: 2px solid var(--gold-edge); letter-spacing: 0; }
-.cs-res { margin-left: auto; display: flex; gap: 12px; padding: 5px 14px; background: var(--paper); border: 2px solid var(--gold-edge);
-  border-radius: 999px; font-weight: 800; font-size: 13px; color: var(--ink); box-shadow: 0 3px 8px rgba(58,42,28,.12); }
+.cs-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px 5px 4px; position: relative; z-index: 2;
+  background: linear-gradient(#fbf7ec, #f6efdf); border-bottom: 2px solid #d9b46a; }
+/* 題の札は見本から切り出した絵 (肉球・「城」の字・金の雲)。右の雲は資源の札の後ろへ回す */
+.cs-title { margin: 0; flex: none; width: 150px; height: 42px; position: relative; line-height: 0; }
+.cs-title img { position: absolute; left: 0; top: 0; height: 42px; width: auto; pointer-events: none; }
+.cs-res { margin-left: auto; display: flex; gap: 12px; padding: 4px 14px; background: #fdf9ef; border: 2px solid #d9b46a; position: relative;
+  border-radius: 999px; font-weight: 800; font-size: 13px; color: var(--ink); box-shadow: 0 2px 6px rgba(58,42,28,.1); }
 .cs-res-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.cs-res-icon { width: 18px; height: 18px; font-size: 15px; line-height: 18px; text-align: center; }
+.cs-res-icon { width: 22px; height: 20px; object-fit: contain; }
 .cs-res b { font-variant-numeric: tabular-nums; font-size: 14px; }
 
 .cs-stage { position: relative; min-height: 0; overflow: hidden;
@@ -622,8 +618,7 @@ img { -webkit-user-drag: none; }
 #castleMap.castle-map { position: absolute; inset: 0; width: auto; height: auto; border: 0; border-radius: 0; box-shadow: none; background: transparent; margin: 0; max-width: none; }
 .cs-level { position: absolute; left: 8px; top: 4px; display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 5px;
   background: rgba(251,246,236,.9); border-radius: 18px; box-shadow: 0 3px 10px rgba(58,42,28,.14); pointer-events: none; }
-.cs-level-icon { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; object-position: 50% 20%;
-  background: radial-gradient(circle at 40% 35%, #fff3c8, #e9c46a); border: 2px solid var(--gold-edge); }
+.cs-level-icon { width: 42px; height: 42px; object-fit: contain; }
 .cs-level-name { font-weight: 800; font-size: 13px; color: var(--ink); }
 .cs-level-name b { font-size: 19px; margin-left: 2px; }
 .cs-bar { width: 118px; height: 9px; border-radius: 9px; background: var(--navy); overflow: hidden; margin-top: 2px; }
@@ -633,7 +628,7 @@ img { -webkit-user-drag: none; }
   background: rgba(251,246,236,.95); border: 2px solid var(--gold-edge); border-radius: 999px; pointer-events: none; overflow: hidden;
   box-shadow: 0 3px 10px rgba(58,42,28,.14); }
 .cs-fac-title { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 800; white-space: nowrap; padding-right: 6px; color: var(--ink); }
-.cs-fac-paw { width: 28px; height: 28px; border-radius: 50%; background: var(--navy); color: #fff; display: grid; place-items: center; font-size: 14px; }
+.cs-fac-paw { width: 32px; height: 32px; margin-left: -2px; }
 .cs-fac { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 2px; border-left: 1px solid var(--paper-edge); height: 26px; }
 .cs-fac img { width: 26px; height: 26px; object-fit: contain; flex: none; }
 .cs-fac > span { display: flex; flex-direction: column; min-width: 0; line-height: 1.05; }
@@ -644,7 +639,8 @@ img { -webkit-user-drag: none; }
   border: 2px solid var(--navy); border-bottom: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -3px 12px rgba(58,42,28,.14); overflow: hidden; }
 .cs-panel-head { background: linear-gradient(var(--navy), var(--navy-2)); color: #fff; font-weight: 900; font-size: 16px; padding: 7px 14px;
   letter-spacing: .1em; flex: none; }
-.cs-panel-head span { color: var(--gold); margin-right: 4px; }
+.cs-panel-head { display: flex; align-items: center; gap: 8px; }
+.cs-panel-head img { width: 20px; height: 19px; }
 .cs-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; -webkit-overflow-scrolling: touch; }
 .cs-card { flex: none; display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 6px; background: #fffdf7; border: 1.5px solid var(--paper-edge);
   border-radius: 12px; text-align: left; font: inherit; color: inherit; box-shadow: 0 2px 4px rgba(58,42,28,.08); }
@@ -676,12 +672,19 @@ img { -webkit-user-drag: none; }
 .cs-built-effect { font-size: 11px; color: var(--ink-2); margin: 2px 0 4px; }
 .cs-built .demolish { padding: 5px 10px; font-size: 12px; border-radius: 10px; }
 .cs-hint { flex: none; margin: 0; padding: 2px 10px 0; font-size: 12px; color: var(--ink-2); font-weight: 700; min-height: 1.5em; text-align: center; }
-.cs-build { flex: none; margin: 4px 10px 8px; padding: 9px 10px; font-size: 17px; font-weight: 900; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 14px; }
-.cs-build-icon { font-size: 18px; }
+/* 「建築する」は見本の金の札 (u-build。377x84) を、両はしの花を残して伸ばす。高さ 46px で 0.55 倍 */
+.cs-build { flex: none; margin: 4px 10px 8px; height: 46px; padding: 0 10px; font-size: 18px; font-weight: 900; display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: none; box-shadow: none; color: #1d2b48; letter-spacing: .08em; text-shadow: 0 1px 0 rgba(255,244,210,.7);
+  border-style: solid; border-color: transparent; border-width: 0; border-radius: 0;
+  border-image: url(./img/u-build.webp) 0 90 fill / 0 50px stretch; }
+.cs-build:disabled { filter: saturate(.35) brightness(1.06); opacity: .72; color: #5a5040; }
+.cs-build-icon { width: 24px; height: 23px; background: currentColor; -webkit-mask: url(./img/u-hammer.webp) center / contain no-repeat; mask: url(./img/u-hammer.webp) center / contain no-repeat; }
 @media (orientation: portrait) {
   /* 縦は幅が狭いので、施設の帯は絵と数だけ */
   .cs-fac small { display: none; }
   .cs-fac-title { font-size: 10px; }
+  /* 選んだタブの金の札が 12px 上へはみ出すので、そのぶん上に置く */
+  .cs-build { margin-bottom: 16px; }
 }
 
 /* 城と村の地図。高さは幅から JS が決める (斜めのマスの比が決まっているので) */
@@ -874,8 +877,8 @@ img { -webkit-user-drag: none; }
 }
 .realm-credit {
   position: absolute;
-  left: 6px;
-  bottom: 2px;
+  right: 8px;
+  bottom: 3px;
   margin: 0;
   font-size: 8px;
   color: rgba(255,255,255,.75);
@@ -887,7 +890,8 @@ img { -webkit-user-drag: none; }
   position: absolute;
   left: 6px;
   right: 6px;
-  bottom: 6px;
+  /* 下は地図の出典の字ぶん空ける (縦は選んだタブの金の札が 12px 上へはみ出すので、出典は右に置く) */
+  bottom: 16px;
   max-height: 60%;
   overflow-y: auto;
   padding: 10px 12px 12px;
@@ -1055,11 +1059,15 @@ img { -webkit-user-drag: none; }
 
 /* --------------------------------------------------------- タブ */
 
+/* 見本 (art/castle-mock.png) の紺の帯。アイコンは見本から切り出した白い絵を mask にして、字と同じ色で塗る。
+   選んだタブは金の札 (u-tab-on。縦は角が上を向いた u-tab-on-up) を敷く。札は帯のふちから少しはみ出す */
 #tabbar {
   flex: none;
   display: flex;
-  background: var(--paper);
-  border-top: 2px solid var(--paper-edge);
+  position: relative;
+  z-index: 6;
+  background: linear-gradient(#24385a, #1f3150);
+  border-top: 3px solid #d9b46a;
   padding-bottom: var(--safe-b);
 }
 .tab {
@@ -1067,26 +1075,46 @@ img { -webkit-user-drag: none; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1px;
-  padding: 7px 4px 6px;
+  justify-content: center;
+  gap: 2px;
+  height: 58px;
+  padding: 0 4px;
   background: none;
   border: none;
-  color: var(--ink-2);
+  color: #f1e6c9;
   cursor: pointer;
   position: relative;
 }
-.tab-icon { font-size: 20px; }
-.tab-label { font-size: 11px; font-weight: 800; }
-.tab.active { color: var(--navy); }
-.tab.active::after {
+.tab > span { position: relative; z-index: 1; }
+.tab-icon {
+  width: 30px; height: 28px;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+#tab-battle .tab-icon { --icon: url(./img/u-tab-battle.webp); }
+#tab-realm .tab-icon { --icon: url(./img/u-tab-realm.webp); }
+#tab-vassals .tab-icon { --icon: url(./img/u-tab-vassals.webp); }
+#tab-castle .tab-icon { --icon: url(./img/u-tab-castle.webp); }
+#tab-village .tab-icon { --icon: url(./img/u-tab-village.webp); }
+.tab-label { font-size: 12px; font-weight: 800; letter-spacing: .06em; line-height: 1.1; }
+.tab.active { color: #1d2b48; }
+/* 縦: 札は上に 9px はみ出し、下は安全域の下まで */
+.tab.active::before {
   content: "";
   position: absolute;
-  bottom: 2px;
-  width: 28px;
-  height: 4px;
-  border-radius: 99px;
-  background: var(--gold);
+  left: 0; right: 0; top: -12px; bottom: calc(-1 * var(--safe-b));
+  border-style: solid; border-color: transparent; border-width: 0;
+  border-image: url(./img/u-tab-on-up.webp) 56 0 20 fill / 36px 0 13px stretch;
 }
+/* タブのあいだの細い線 (選んだタブのとなりには引かない) */
+.tab + .tab::after {
+  content: "";
+  position: absolute;
+  left: 0; top: 12px; bottom: 12px; width: 1px;
+  background: rgba(241,230,201,.25);
+}
+.tab.active::after, .tab.active + .tab::after { display: none; }
 .tab.locked { opacity: .5; }
 
 /* --------------------------------------------------------- お知らせ */
@@ -1343,14 +1371,26 @@ img { -webkit-user-drag: none; }
   #tabbar {
     order: -1;
     flex-direction: column;
-    justify-content: center;
-    gap: 6px;
+    justify-content: flex-start;
+    gap: 4px;
     width: calc(var(--safe-l) + 64px);
-    padding: var(--safe-t) 0 var(--safe-b) var(--safe-l);
+    padding: calc(var(--safe-t) + 10px) 0 var(--safe-b) var(--safe-l);
     border-top: 0;
-    border-right: 2px solid var(--paper-edge);
+    border-right: 3px solid #d9b46a;
   }
-  .tab { flex: 0 0 auto; padding: 8px 0 9px; }
+  /* 見本の左下の波。タブの下の空きに敷き、上のふちは帯の紺へぼかす */
+  #tabbar::before {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 150px; pointer-events: none;
+    background: url(./img/u-wave.webp) left bottom / 100% auto no-repeat;
+    -webkit-mask: linear-gradient(transparent, #000 45%); mask: linear-gradient(transparent, #000 45%);
+  }
+  .tab { flex: 0 0 auto; height: 62px; padding: 0; }
+  /* 横: 札は左の安全域の下から、右は帯のふちを越えて角が出る */
+  .tab.active::before {
+    left: calc(-1 * var(--safe-l)); right: -12px; top: -2px; bottom: -2px;
+    border-image: url(./img/u-tab-on.webp) 0 56 0 20 fill / 0 28px 0 10px stretch;
+  }
+  .tab + .tab::after { left: 10px; right: 10px; top: -3px; bottom: auto; width: auto; height: 1px; }
   .view { min-width: 0; }
 
   /* 合戦 */
@@ -1387,7 +1427,7 @@ img { -webkit-user-drag: none; }
   .cs-stage { grid-column: 1; grid-row: 2; margin-bottom: var(--safe-b); }
   .cs-panel { grid-column: 2; grid-row: 2; margin: 0 calc(8px + var(--safe-r)) calc(6px + var(--safe-b)) 0; border-bottom: 2px solid var(--navy); border-radius: 16px; }
   .castle-view .locked-art { margin: calc(20px + var(--safe-t)) calc(14px + var(--safe-r)) 0 14px; }
-  .cs-build { font-size: 15px; padding: 8px 6px; }
+  .cs-build { font-size: 16px; height: 40px; border-image-width: 0 43px; }
 
   /* 天下: 地図を左いっぱい、札を右に */
   /* 天下: 札は右 (見本と同じ)。「あと ○ 国」の帯は札の下、案内の猫は左下 */
@@ -1407,7 +1447,7 @@ img { -webkit-user-drag: none; }
   .realm-remain { left: auto; top: auto; right: calc(290px + var(--safe-r)); bottom: calc(2px + var(--safe-b)); width: 210px; }
   .realm-guide { bottom: calc(4px + var(--safe-b)); }
   .realm-guide img { width: 70px; }
-  .realm-credit { left: auto; right: calc(292px + var(--safe-r)); bottom: calc(2px + var(--safe-b)); }
+  .realm-credit { right: calc(292px + var(--safe-r)); bottom: calc(2px + var(--safe-b)); }
   .invasion-bar { left: calc(50% + 32px); bottom: calc(var(--safe-b) + 8px); }
 
   /* 物語・出世の札: 絵を左、文を右に並べて、低い画面に収める */

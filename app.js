@@ -2238,7 +2238,7 @@
       els.castleList.appendChild(card);
     });
     // 下の帯: 城内の施設 (効き目のある建物の数)
-    els.castleFacilities.innerHTML = '<span class="cs-fac-title"><span class="cs-fac-paw" aria-hidden="true">🐾</span>城内の施設</span>' +
+    els.castleFacilities.innerHTML = '<span class="cs-fac-title"><img class="cs-fac-paw" src="./img/u-fac-paw.webp" alt="">城内の施設</span>' +
       CASTLE_MAIN.map(function (t) {
         const def = C.BUILDINGS[t];
         return '<span class="cs-fac" data-type="' + t + '"><img src="' + buildingImg(t).src + '" alt=""><span><small>' + def.name + '</small><b data-v="fac"></b></span></span>';

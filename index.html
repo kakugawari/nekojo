@@ -164,16 +164,16 @@
     </div>
     <div class="castle-body" id="castleContent" hidden>
       <div class="cs-head">
-        <h2 class="cs-title"><span class="cs-paw" aria-hidden="true">🐾</span>城</h2>
+        <h2 class="cs-title"><img src="./img/u-title.webp" alt="城" draggable="false"></h2>
         <div class="cs-res">
-          <span class="cs-res-item"><span class="cs-res-icon" aria-hidden="true">🪵</span>資材 <b id="materialCountCastle">0</b></span>
-          <span class="cs-res-item"><img class="cs-res-icon" src="./img/r-coin.png" alt="">小判 <b id="castleCoin">0</b></span>
+          <span class="cs-res-item"><img class="cs-res-icon" src="./img/u-wood.webp" alt="">資材 <b id="materialCountCastle">0</b></span>
+          <span class="cs-res-item"><img class="cs-res-icon" src="./img/u-coin.webp" alt="">小判 <b id="castleCoin">0</b></span>
         </div>
       </div>
       <div class="cs-stage" id="castleStage">
         <div class="town-map castle-map" id="castleMap"><canvas class="map-bg"></canvas><canvas class="map-fg"></canvas></div>
         <div class="cs-level" id="castleLevelCard">
-          <img class="cs-level-icon" src="./img/face-smile.png" alt="">
+          <img class="cs-level-icon" src="./img/u-lv-cat.webp" alt="">
           <div class="cs-level-main">
             <div class="cs-level-name">城レベル <b id="castleLevel">1</b></div>
             <div class="cs-bar"><i id="castleLevelFill"></i></div>
@@ -183,11 +183,11 @@
         <div class="cs-facilities" id="castleFacilities"></div>
       </div>
       <aside class="cs-panel" id="castlePanel">
-        <div class="cs-panel-head"><span aria-hidden="true">✿</span> 建築・強化</div>
+        <div class="cs-panel-head"><img src="./img/u-plum.webp" alt="">建築・強化</div>
         <div class="cs-built" id="castleBuilt" hidden></div>
         <div class="cs-list" id="castleList"></div>
         <p class="cs-hint" id="castleHint"></p>
-        <button type="button" class="btn-gold cs-build" id="castleBuild"><span class="cs-build-icon" aria-hidden="true">🔨</span><span id="castleBuildLabel">建築する</span></button>
+        <button type="button" class="btn-gold cs-build" id="castleBuild"><span class="cs-build-icon" aria-hidden="true"></span><span id="castleBuildLabel">建築する</span></button>
       </aside>
     </div>
   </section>
@@ -215,11 +215,11 @@
   </section>
 
   <nav id="tabbar">
-    <button type="button" class="tab" id="tab-battle" data-tab="battle"><span class="tab-icon">⚔️</span><span class="tab-label">合戦</span></button>
-    <button type="button" class="tab" id="tab-realm" data-tab="realm"><span class="tab-icon">🗾</span><span class="tab-label">天下</span></button>
-    <button type="button" class="tab" id="tab-vassals" data-tab="vassals"><span class="tab-icon">🐾</span><span class="tab-label">家臣</span></button>
-    <button type="button" class="tab" id="tab-castle" data-tab="castle"><span class="tab-icon">🏯</span><span class="tab-label">城</span></button>
-    <button type="button" class="tab" id="tab-village" data-tab="village"><span class="tab-icon">🏘️</span><span class="tab-label">村</span></button>
+    <button type="button" class="tab" id="tab-battle" data-tab="battle"><span class="tab-icon" aria-hidden="true"></span><span class="tab-label">合戦</span></button>
+    <button type="button" class="tab" id="tab-realm" data-tab="realm"><span class="tab-icon" aria-hidden="true"></span><span class="tab-label">天下</span></button>
+    <button type="button" class="tab" id="tab-vassals" data-tab="vassals"><span class="tab-icon" aria-hidden="true"></span><span class="tab-label">家臣</span></button>
+    <button type="button" class="tab" id="tab-castle" data-tab="castle"><span class="tab-icon" aria-hidden="true"></span><span class="tab-label">城</span></button>
+    <button type="button" class="tab" id="tab-village" data-tab="village"><span class="tab-icon" aria-hidden="true"></span><span class="tab-label">村</span></button>
   </nav>
 
   <div class="toast" id="toast" hidden></div>
