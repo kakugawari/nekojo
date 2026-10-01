@@ -2922,13 +2922,11 @@
         go.dataset.act = 'attack';
         box.appendChild(go);
         // 「○倍に そろえる」: つながった自分の国から足りないぶんだけ集め、それでも足りないぶんを買って、連れて行く数もそこに合わせる。
-        // 敵が減る区切り (1.5 倍・3 倍) に合わせた 2 つ。前は「兵を100 買う」を何度も押すしかなかった
+        // ボタンは 1 つ。敵が減る区切りを 1 段ずつ進む (1.5 倍 → 3 倍 → そろった)。前は「兵を100 買う」を何度も押すしかなかった
         const row = add('', 'sheet-row');
-        C.RATIO_STEPS.forEach(function (k, i) {
-          const btn = sheetButton(i === 0 ? 'btn-paper' : 'btn-gold', '<b data-v="fillT' + i + '"></b><small data-v="fillS' + i + '"></small>', function () { doFill(sel, k); });
-          btn.dataset.act = 'fill' + i;
-          row.appendChild(btn);
-        });
+        const fill = sheetButton('btn-paper', '<b data-v="fillT"></b><small data-v="fillS"></small>', function () { const k = nextFillStep(sel, src); if (k) doFill(sel, k); });
+        fill.dataset.act = 'fill';
+        row.appendChild(fill);
       }
     }
     updateRealmSheet();
@@ -3015,19 +3013,19 @@
       realm.send = Math.max(0, Math.min(C.troopsAt(state, src), realm.send));
       set('send', String(realm.send));
       set('use', C.prefOf(src).name + 'の兵を ' + realm.send + ' つかう');
-      // 「○倍に そろえる」: そろえたあとの敵の数と強さ、かかる小判 (集めるだけなら 0)
-      C.RATIO_STEPS.forEach(function (k, i) {
-        const el = act('fill' + i);
-        if (!el) return;
-        const target = C.troopsForRatio(state, sel, k);
+      // 「○倍に そろえる」: 次の段 (1.5 倍 → 3 倍) の、そろえたあとの敵の数と強さ、かかる小判 (集めるだけなら 0)
+      const fillEl = act('fill');
+      if (fillEl) {
+        const k = nextFillStep(sel, src);
+        const last = C.RATIO_STEPS[C.RATIO_STEPS.length - 1];
+        const target = C.troopsForRatio(state, sel, k || last);
         const fp = C.fillPlan(state, src, target);
-        const after = C.attackPlan(state, src, sel, target);
-        const done = realm.send >= target;
-        set('fillT' + i, done ? '✓ ' + k + '倍 そろった' : k + '倍に そろえる');
-        set('fillS' + i, '敵 ' + after.count + ' 匹・強さ ' + Math.round(after.strength * 100) + '%\n' +
-          (done ? '' : !fp.ok ? '小判が あと ' + Math.ceil(fp.cost - state.merit) + ' たりない' : fp.cost > 0 ? '小判 ' + fp.cost + (fp.moved ? ' (集める ' + fp.moved + ')' : '') : '集めるだけ (小判 0)'));
-        el.disabled = done || !fp.ok;
-      });
+        const after = C.attackPlan(state, src, sel, Math.max(target, realm.send));
+        set('fillT', k ? k + '倍に そろえる' : '✓ ' + last + '倍 そろった');
+        set('fillS', '敵 ' + after.count + ' 匹・強さ ' + Math.round(after.strength * 100) + '%\n' +
+          (!k ? 'これ以上は 敵が へらない' : !fp.ok ? '小判が あと ' + Math.ceil(fp.cost - state.merit) + ' たりない' : fp.cost > 0 ? '小判 ' + fp.cost + (fp.moved ? ' (集める ' + fp.moved + ')' : '') : '集めるだけ (小判 0)'));
+        fillEl.disabled = !k || !fp.ok;
+      }
       act('minus').disabled = realm.send <= C.TROOP_UNIT;
       act('plus').disabled = realm.send >= C.troopsAt(state, src);
       act('attack').disabled = !C.canAttack(state, src, sel, realm.send);
@@ -3125,6 +3123,14 @@
     realm.dirty = true;
     updateRealmSheet();
     return true;
+  }
+
+  /** 「そろえる」の次の段: 連れて行く数がまだ届いていない、いちばん低い区切り (1.5 倍 → 3 倍)。ぜんぶ届いていれば null */
+  function nextFillStep(to, src) {
+    for (let i = 0; i < C.RATIO_STEPS.length; i++) {
+      if (realm.send < C.troopsForRatio(state, to, C.RATIO_STEPS[i])) return C.RATIO_STEPS[i];
+    }
+    return null;
   }
 
   /** 攻める県 to に、守りの k 倍の兵をそろえる (集めて、足りないぶんを買う)。連れて行く数もそこに合わせる */

@@ -876,31 +876,39 @@ async function run() {
       const sel22 = await rp.evaluate(() => window.__app.selectedPref());
       if (sel22 !== 22) { await tapPref(22); await settle(); }
       ok(await rp.evaluate(() => window.__app.selectedPref()) === 22, `${tag}: となりの静岡を指で選べる`);
-      const fillBtns = () => rp.evaluate(() => [0, 1].map((i) => { const b = document.querySelector('[data-act="fill' + i + '"]'); return b && { text: b.textContent, off: b.disabled }; }));
-      const f0 = await rp.evaluate(() => { window.__fill = [0, 1].map((i) => document.querySelector('[data-act="fill' + i + '"]')); return !!window.__fill[0]; });
-      const before = await fillBtns();
-      // 守り 500: 1.5 倍は 800 (あと 300 = 小判 150)、3 倍は 1500 (あと 1000 = 小判 500。小判 175 では足りない)
-      ok(f0 && /1\.5倍に そろえる/.test(before[0].text) && /敵 3 匹/.test(before[0].text) && /小判 150/.test(before[0].text) && !before[0].off,
-        `${tag}: 「1.5倍に そろえる」に、そろえたあとの敵の数とかかる小判が出る (${before[0].text})`);
-      ok(before[1].off && /小判が あと \d+ たりない/.test(before[1].text), `${tag}: 小判が足りないと「3倍に そろえる」は押せず、あといくら足りないかが出る (${before[1].text})`);
-      await rp.locator('[data-act="fill0"]').tap();
+      const fillBtn = () => rp.evaluate(() => { const b = document.querySelector('[data-act="fill"]'); return b && { text: b.textContent, off: b.disabled }; });
+      const sameFill = () => rp.evaluate(() => window.__fill === document.querySelector('[data-act="fill"]'));
+      const f0 = await rp.evaluate(() => { window.__fill = document.querySelector('[data-act="fill"]'); return !!window.__fill && document.querySelectorAll('[data-act^="fill"]').length; });
+      const st1 = await fillBtn();
+      // 守り 500: まずは 1.5 倍 = 800 (あと 300 = 小判 150)。ボタンは 1 つ
+      ok(f0 === 1 && /1\.5倍に そろえる/.test(st1.text) && /敵 3 匹/.test(st1.text) && /小判 150/.test(st1.text) && !st1.off,
+        `${tag}: 「そろえる」のボタンは 1 つ。はじめは「1.5倍に そろえる」で、そろえたあとの敵の数とかかる小判が出る (${st1.text})`);
+      await rp.locator('[data-act="fill"]').tap();
       await rp.waitForTimeout(150);
       const filled = await rp.evaluate(() => ({ t: window.Core.troopsAt(window.__app.state(), 23), m: window.__app.state().merit, send: document.querySelector('[data-v="send"]').textContent,
-        preview: document.querySelector('[data-v="preview"]').textContent, same: window.__fill.every((b, i) => b === document.querySelector('[data-act="fill' + i + '"]')) }));
+        preview: document.querySelector('[data-v="preview"]').textContent }));
       // 小判は年貢で少しずつ増えるので、切り捨てで見る
       ok(filled.t === 800 && Math.floor(filled.m) === 25 && filled.send === '800' && /敵 3 匹/.test(filled.preview),
         `${tag}: 1 回押すと、愛知の兵が 800・小判が 150 減り、連れて行く兵も 800 (敵が 1 匹へる) (${filled.t}, ${filled.m.toFixed(2)}, ${filled.send}, ${filled.preview})`);
-      const after1 = await fillBtns();
-      ok(filled.same && after1[0].off && /そろった/.test(after1[0].text), `${tag}: そろえたあとは「✓ 1.5倍 そろった」になり、札のボタンは作り直さない (${after1[0].text})`);
+      const st2 = await fillBtn();
+      ok(await sameFill() && /3倍に そろえる/.test(st2.text) && st2.off && /小判が あと \d+ たりない/.test(st2.text),
+        `${tag}: 押すと次の段「3倍に そろえる」に変わる (小判が足りないと押せず、あといくら足りないかが出る。ボタンは作り直さない) (${st2.text})`);
       await rp.evaluate(() => window.__app.debugAddCoins(1000));
       await rp.waitForTimeout(400);
-      const grown = await rp.evaluate(() => ({ same: window.__fill.every((b, i) => b === document.querySelector('[data-act="fill' + i + '"]')), sub: document.getElementById('realmSub').textContent, b1: document.querySelector('[data-act="fill1"]').textContent, off: document.querySelector('[data-act="fill1"]').disabled }));
-      ok(grown.same && /小判 102\d/.test(grown.sub) && !grown.off && /小判 350/.test(grown.b1), `${tag}: 開いたまま小判が増えると、上の数字と「3倍に そろえる」(あと 700 = 小判 350) が書き変わり、ボタンは同じもの (${grown.sub} / ${grown.b1})`);
+      const grown = await rp.evaluate(() => ({ sub: document.getElementById('realmSub').textContent }));
+      const st3 = await fillBtn();
+      ok(await sameFill() && /小判 102\d/.test(grown.sub) && !st3.off && /小判 350/.test(st3.text), `${tag}: 開いたまま小判が増えると、上の数字と「3倍に そろえる」(あと 700 = 小判 350) が書き変わる (${grown.sub} / ${st3.text})`);
+      await rp.locator('[data-act="fill"]').tap();
+      await rp.waitForTimeout(150);
+      const filled3 = await rp.evaluate(() => ({ t: window.Core.troopsAt(window.__app.state(), 23), send: document.querySelector('[data-v="send"]').textContent, preview: document.querySelector('[data-v="preview"]').textContent }));
+      const st4 = await fillBtn();
+      ok(filled3.t === 1500 && filled3.send === '1500' && /敵 2 匹/.test(filled3.preview) && st4.off && /そろった/.test(st4.text),
+        `${tag}: もう 1 回押すと 3 倍 (1500。敵がもう 1 匹へる) になり、ボタンは「✓ 3倍 そろった」で押せなくなる (${filled3.preview} / ${st4.text})`);
       // つながった自分の国の兵は、買うより先に集める (静岡を自分の国にしたことにして、となりの山梨を攻める)
       {
         const g = await rp.evaluate(() => {
           const a = window.__app;
-          a.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.mine[19] = true; r.troops[19] = 600; r.troops[18] = 400; return Object.assign({}, s, { realm: r, merit: 1000 }); });
+          a.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.mine[19] = true; r.troops[19] = 600; r.troops[18] = 400; r.troops[22] = 800; return Object.assign({}, s, { realm: r, merit: 1000 }); });
           a.selectPref(19);
           const src = window.Core.attackSource(a.state(), 19);
           const before = { src, t: window.Core.troopsAt(a.state(), src), m: a.state().merit };
@@ -1032,11 +1040,11 @@ async function run() {
             const started = window.__app.attack();
             const t0 = window.Core.troopsAt(window.__app.state(), 23);
             const filled = window.__app.fill(14, 3);
-            return { atk: q('attack') && q('attack').disabled, fill0: q('fill0') && q('fill0').disabled, fill1: q('fill1') && q('fill1').disabled,
+            return { atk: q('attack') && q('attack').disabled, fill: q('fill') && q('fill').disabled,
               back: !!q('back-battle') && !q('back-battle').disabled, started, same: window.__app.battle() === before,
               filled, moved: window.Core.troopsAt(window.__app.state(), 23) !== t0 };
           });
-          ok(lock.atk && lock.fill0 && lock.fill1 && lock.back && !lock.started && lock.same && !lock.filled && !lock.moved,
+          ok(lock.atk && lock.fill && lock.back && !lock.started && lock.same && !lock.filled && !lock.moved,
             `${tag}: 合戦の最中に天下の画面へ来ても、攻める・そろえる (兵を集める・買う) は押せず、「合戦に もどる」だけ押せる (${JSON.stringify(lock)})`);
           await rp.waitForTimeout(600);
           ok(await rp.evaluate(() => window.__app.state().realm.invasion.left) === l4, `${tag}: 迎え撃つ合戦を開いたまま天下の画面にいても、秒読みは止まったまま`);
