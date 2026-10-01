@@ -1078,6 +1078,56 @@ test('天下: 兵は 100 匹ずつ小判で買う。自分の国にしか置け�
   assert.strictEqual(Core.rankIndexOf(r.state), Core.rankIndexOf(s), '小判を使っても出世は下がらない');
 });
 
+test('天下: 兵はまとめても買える (1000 匹・買えるだけ)。半端な数や、小判が足りない数は買えない', () => {
+  const s = realmState(23, { merit: 1234 });
+  const r = Core.buyTroops(s, 23, 1000);
+  assert.ok(r.ok);
+  assert.strictEqual(Core.troopsAt(r.state, 23), Core.START_TROOPS + 1000);
+  assert.strictEqual(r.state.merit, 1234 - 500);
+  assert.strictEqual(Core.affordableTroops(s), 2400, '小判 1234 で 2400 匹 (100 匹 50 小判)');
+  assert.ok(Core.buyTroops(s, 23, Core.affordableTroops(s)).ok, '買えるだけ買える');
+  assert.strictEqual(Core.buyTroops(s, 23, 2500).ok, false, '小判が足りない');
+  assert.strictEqual(Core.buyTroops(s, 23, 150).ok, false, '100 匹ずつでない');
+});
+
+test('天下: 「○倍に そろえる」は、つながった自分の国から足りないぶんだけ集め、それでも足りないぶんを買う', () => {
+  // 愛知 500・静岡 300・長野 700 (自分の国)。三重 (守り 1000) を攻める
+  const s0 = JSON.parse(JSON.stringify(realmState(23, { merit: 1000 })));
+  s0.realm.mine[21] = true; s0.realm.troops[21] = 300;
+  s0.realm.mine[19] = true; s0.realm.troops[19] = 700;
+  s0.realm.troops[23] = 1000;
+  assert.deepStrictEqual(Core.RATIO_STEPS.map((k) => Core.troopsForRatio(s0, 24, k)), [1500, 3000]);
+  // 1.5 倍 = 1500: 足りない 1000 のうち、兵の多い長野から 700、静岡から 300。買うのは 0
+  const a = Core.fillTroops(s0, 23, 1500);
+  assert.ok(a.ok && a.plan.moved === 1000 && a.plan.buy === 0 && a.plan.cost === 0);
+  assert.deepStrictEqual([23, 22, 20].map((id) => Core.troopsAt(a.state, id)), [1500, 0, 0]);
+  // 3 倍 = 3000: 集めて 1500、残り 1500 を買う (小判 750)
+  const b = Core.fillTroops(s0, 23, 3000);
+  assert.ok(b.ok && b.plan.moved === 1000 && b.plan.buy === 1500 && b.plan.cost === 750);
+  assert.strictEqual(Core.troopsAt(b.state, 23), 3000);
+  assert.strictEqual(b.state.merit, 250);
+  assert.strictEqual(Core.totalTroops(b.state), Core.totalTroops(s0) + 1500, '兵は集めたぶん動き、買ったぶんだけ増える');
+  // 小判が足りなければ何もしない
+  const poor = Object.assign({}, s0, { merit: 100 });
+  const c = Core.fillTroops(poor, 23, 3000);
+  assert.ok(!c.ok && c.state === poor && c.plan.cost === 750);
+  // もうそろっていれば何もしない
+  assert.ok(Core.fillPlan(a.state, 23, 1500).ok && Core.fillPlan(a.state, 23, 1500).need === 0);
+  // 集めすぎない: 必要なぶんだけ動かす (残りはそのまま守りに残る)
+  const d = Core.fillTroops(s0, 23, 700);
+  assert.deepStrictEqual([23, 22, 20].map((id) => Core.troopsAt(d.state, id)), [700, 300, 500]);
+});
+
+test('天下: 「そろえる」で集めるとき、攻められている国の兵は最後に使う', () => {
+  const s0 = JSON.parse(JSON.stringify(realmState(23, { merit: 0 })));
+  s0.realm.mine[21] = true; s0.realm.troops[21] = 900;   // 静岡 (攻められている。兵がいちばん多い)
+  s0.realm.mine[19] = true; s0.realm.troops[19] = 400;   // 長野
+  s0.realm.invasion = { from: 14, to: 22, troops: 600, left: 50, lord: 14 };
+  const r = Core.fillTroops(s0, 23, 900);
+  assert.ok(r.ok);
+  assert.deepStrictEqual([22, 20].map((id) => Core.troopsAt(r.state, id)), [900, 0], '長野から先に集め、静岡は手をつけない');
+});
+
 test('天下: 兵は自分の国どうしで移せる (100 匹ずつ)。集めると 1 か所にまとまる', () => {
   let s = realmState(23);
   s = JSON.parse(JSON.stringify(s));

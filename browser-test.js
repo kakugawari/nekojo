@@ -870,23 +870,69 @@ async function run() {
         ok(hid.length === 0, `${tag}: 全体の地図から敵の県を押しても、その県と愛知の名前は札にも案内猫にも隠れない${hid.length ? ' (だめ: ' + hid.join(' ') + ')' : ''}`);
       }
 
-      // 兵を指で買う
-      await rp.evaluate(() => { window.__app.debugSetState((s) => Object.assign({}, s, { merit: 175 })); window.__app.realmFitAll(); });
+      // 「1.5倍に そろえる」「3倍に そろえる」(前は「兵を100 買う」を何度も押すしかなかった。遠い国の 3 倍で 300 回)
+      await rp.evaluate(() => { window.__app.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.troops[21] = 500; return Object.assign({}, s, { realm: r, merit: 175 }); }); window.__app.realmFitAll(); });
       await tapPref(22); await settle();
       const sel22 = await rp.evaluate(() => window.__app.selectedPref());
       if (sel22 !== 22) { await tapPref(22); await settle(); }
       ok(await rp.evaluate(() => window.__app.selectedPref()) === 22, `${tag}: となりの静岡を指で選べる`);
-      const buyBtn = await rp.evaluate(() => { window.__buy = document.querySelector('[data-act="buy"]'); return !!window.__buy; });
-      await rp.locator('[data-act="buy"]').tap();
-      await rp.locator('[data-act="buy"]').tap();
-      const bought = await rp.evaluate(() => ({ t: window.Core.troopsAt(window.__app.state(), 23), m: window.__app.state().merit, send: document.querySelector('[data-v="send"]').textContent, same: window.__buy === document.querySelector('[data-act="buy"]') }));
+      const fillBtns = () => rp.evaluate(() => [0, 1].map((i) => { const b = document.querySelector('[data-act="fill' + i + '"]'); return b && { text: b.textContent, off: b.disabled }; }));
+      const f0 = await rp.evaluate(() => { window.__fill = [0, 1].map((i) => document.querySelector('[data-act="fill' + i + '"]')); return !!window.__fill[0]; });
+      const before = await fillBtns();
+      // 守り 500: 1.5 倍は 800 (あと 300 = 小判 150)、3 倍は 1500 (あと 1000 = 小判 500。小判 175 では足りない)
+      ok(f0 && /1\.5倍に そろえる/.test(before[0].text) && /敵 3 匹/.test(before[0].text) && /小判 150/.test(before[0].text) && !before[0].off,
+        `${tag}: 「1.5倍に そろえる」に、そろえたあとの敵の数とかかる小判が出る (${before[0].text})`);
+      ok(before[1].off && /小判が あと \d+ たりない/.test(before[1].text), `${tag}: 小判が足りないと「3倍に そろえる」は押せず、あといくら足りないかが出る (${before[1].text})`);
+      await rp.locator('[data-act="fill0"]').tap();
+      await rp.waitForTimeout(150);
+      const filled = await rp.evaluate(() => ({ t: window.Core.troopsAt(window.__app.state(), 23), m: window.__app.state().merit, send: document.querySelector('[data-v="send"]').textContent,
+        preview: document.querySelector('[data-v="preview"]').textContent, same: window.__fill.every((b, i) => b === document.querySelector('[data-act="fill' + i + '"]')) }));
       // 小判は年貢で少しずつ増えるので、切り捨てで見る
-      ok(buyBtn && bought.t === 700 && Math.floor(bought.m) === 75 && bought.send === '700', `${tag}: 「兵を100 買う」を 2 回押すと、愛知の兵が 700・小判が 100 減る (連れて行く兵も 700) (${bought.t}, ${bought.m.toFixed(2)}, ${bought.send})`);
-      ok(bought.same, `${tag}: 買っても札のボタンは作り直さない (押している最中に入れ替わらない)`);
+      ok(filled.t === 800 && Math.floor(filled.m) === 25 && filled.send === '800' && /敵 3 匹/.test(filled.preview),
+        `${tag}: 1 回押すと、愛知の兵が 800・小判が 150 減り、連れて行く兵も 800 (敵が 1 匹へる) (${filled.t}, ${filled.m.toFixed(2)}, ${filled.send}, ${filled.preview})`);
+      const after1 = await fillBtns();
+      ok(filled.same && after1[0].off && /そろった/.test(after1[0].text), `${tag}: そろえたあとは「✓ 1.5倍 そろった」になり、札のボタンは作り直さない (${after1[0].text})`);
       await rp.evaluate(() => window.__app.debugAddCoins(1000));
       await rp.waitForTimeout(400);
-      const grown = await rp.evaluate(() => ({ same: window.__buy === document.querySelector('[data-act="buy"]'), sub: document.getElementById('realmSub').textContent }));
-      ok(grown.same && /小判 107\d/.test(grown.sub), `${tag}: 開いたまま小判が増えると上の数字が変わり、ボタンは同じもの (${grown.sub})`);
+      const grown = await rp.evaluate(() => ({ same: window.__fill.every((b, i) => b === document.querySelector('[data-act="fill' + i + '"]')), sub: document.getElementById('realmSub').textContent, b1: document.querySelector('[data-act="fill1"]').textContent, off: document.querySelector('[data-act="fill1"]').disabled }));
+      ok(grown.same && /小判 102\d/.test(grown.sub) && !grown.off && /小判 350/.test(grown.b1), `${tag}: 開いたまま小判が増えると、上の数字と「3倍に そろえる」(あと 700 = 小判 350) が書き変わり、ボタンは同じもの (${grown.sub} / ${grown.b1})`);
+      // つながった自分の国の兵は、買うより先に集める (静岡を自分の国にしたことにして、となりの山梨を攻める)
+      {
+        const g = await rp.evaluate(() => {
+          const a = window.__app;
+          a.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.mine[19] = true; r.troops[19] = 600; r.troops[18] = 400; return Object.assign({}, s, { realm: r, merit: 1000 }); });
+          a.selectPref(19);
+          const src = window.Core.attackSource(a.state(), 19);
+          const before = { src, t: window.Core.troopsAt(a.state(), src), m: a.state().merit };
+          a.fill(19, 1.5);
+          const s = a.state();
+          return { before, t: window.Core.troopsAt(s, src), aichi: window.Core.troopsAt(s, 23), nagano: window.Core.troopsAt(s, 20), m: s.merit };
+        });
+        // 山梨 (守り 400) の 1.5 倍 = 600。攻めに出る長野にもう 600 いるので、集めも買いもしない
+        ok(g.before.src === 20 && g.t === 600 && Math.floor(g.m) === Math.floor(g.before.m), `${tag}: もうそろっていれば、集めも買いもしない (${JSON.stringify(g)})`);
+        const g3 = await rp.evaluate(() => {
+          const a = window.__app; a.fill(19, 3);
+          const s = a.state(); return { nagano: window.Core.troopsAt(s, 20), aichi: window.Core.troopsAt(s, 23), m: s.merit };
+        });
+        // 3 倍 = 1200: 長野 600 + 愛知から 600 集める (買わない)
+        ok(g3.nagano === 1200 && g3.aichi === 800 - 600 && Math.floor(g3.m) === 1000, `${tag}: 「3倍に そろえる」は、となりの自分の国 (愛知) から先に集め、足りれば買わない (${JSON.stringify(g3)})`);
+        await rp.evaluate(() => window.__app.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.mine[19] = false; r.troops[19] = 500; r.troops[22] = 800; return Object.assign({}, s, { realm: r }); }));
+      }
+      // 自分の国の札: 兵 +100・+1000・買えるだけ
+      {
+        await rp.evaluate(() => { window.__app.debugSetState((s) => Object.assign({}, s, { merit: 1234 })); window.__app.selectPref(23); });
+        await rp.waitForTimeout(150);
+        const t0 = await rp.evaluate(() => window.Core.troopsAt(window.__app.state(), 23));
+        await rp.locator('[data-act="buy1000"]').tap();
+        await rp.waitForTimeout(100);
+        const a1 = await rp.evaluate(() => ({ t: window.Core.troopsAt(window.__app.state(), 23), m: window.__app.state().merit, max: document.querySelector('[data-act="buymax"]').textContent }));
+        ok(a1.t === t0 + 1000 && Math.floor(a1.m) === 734 && /1400 匹/.test(a1.max), `${tag}: 自分の国の札の「兵 +1000」で 1000 匹 (小判 500)。「買えるだけ」には買える数が出る (${a1.max})`);
+        await rp.locator('[data-act="buymax"]').tap();
+        await rp.waitForTimeout(100);
+        const a2 = await rp.evaluate(() => ({ t: window.Core.troopsAt(window.__app.state(), 23), m: window.__app.state().merit, off: document.querySelector('[data-act="buy"]').disabled }));
+        ok(a2.t === t0 + 2400 && a2.m < 50 && a2.off, `${tag}: 「買えるだけ」で小判を使い切り、+100 も押せなくなる (${a2.t}, 小判 ${a2.m.toFixed(1)})`);
+        await rp.evaluate(() => { window.__app.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.troops[22] = 800; return Object.assign({}, s, { realm: r, merit: 1025 }); }); window.__app.selectPref(22); window.__app.setSend(800); });
+      }
 
       // 出陣 → 大名との合戦 → 勝つと国が増える
       await rp.locator('[data-act="attack"]').tap();

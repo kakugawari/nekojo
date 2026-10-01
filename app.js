@@ -2796,7 +2796,7 @@
     if (plan.ratio >= 3) return ['この兵なら 楽勝にゃ!', 'cheer'];
     if (plan.ratio >= 1.5) return ['この兵なら いけるにゃ!', 'cheer'];
     if (plan.ratio >= 1) return ['互角にゃ… 兵を増やすと 楽になるにゃ', 'stand'];
-    return ['兵が足りないにゃ… 敵が強くなるにゃ', 'worry'];
+    return ['兵が足りないにゃ… 「そろえる」で 増やせるにゃ', 'worry'];
   }
 
   function sheetButton(cls, html, fn) {
@@ -2878,12 +2878,17 @@
       head(castleImg, pref.name + ' <i>🐾</i>', pref.kuni + 'の国 (' + (home ? 'はじめに任された国' : '自分の国') + ')');
       add('<span data-v="here"></span><span data-v="troops"></span>', 'sheet-stats');
       add(pref.desc, 'rs-desc flavor', 'p');
+      // 兵を買う: 100 匹・1000 匹・買えるだけ (前は 100 匹ずつ何度も押すしかなかった)
       const row = add('', 'sheet-row');
-      const buy = sheetButton('btn-gold', '', function () { doBuyTroops(sel); });
-      buy.dataset.act = 'buy';
+      [['buy', function () { return C.TROOP_UNIT; }], ['buy1000', function () { return 10 * C.TROOP_UNIT; }], ['buymax', function () { return C.affordableTroops(state); }]].forEach(function (b) {
+        const btn = sheetButton(b[0] === 'buy' ? 'btn-gold' : 'btn-paper', '', function () { doBuyTroops(sel, b[1]()); });
+        btn.dataset.act = b[0];
+        row.appendChild(btn);
+      });
+      const row2 = add('', 'sheet-row');
       const gather = sheetButton('btn-paper', '🐾 ここに 兵を集める<br><small>つながった自分の国から ぜんぶ</small>', function () { doGather(sel); });
       gather.dataset.act = 'gather';
-      row.appendChild(buy); row.appendChild(gather);
+      row2.appendChild(gather);
     } else {
       const lv = state.realm.level[sel - 1];
       // 天下統一の最後の 1 国だけは、どの県でも黒猫大魔王が出てくる (core の attackPlan と同じ決まり)
@@ -2916,12 +2921,14 @@
         const go = sheetButton('btn-attack', SWORDS_SVG + '<span><b>この国を攻める</b><small data-v="use"></small></span>', function () { doAttack(); });
         go.dataset.act = 'attack';
         box.appendChild(go);
+        // 「○倍に そろえる」: つながった自分の国から足りないぶんだけ集め、それでも足りないぶんを買って、連れて行く数もそこに合わせる。
+        // 敵が減る区切り (1.5 倍・3 倍) に合わせた 2 つ。前は「兵を100 買う」を何度も押すしかなかった
         const row = add('', 'sheet-row');
-        const buy = sheetButton('btn-paper', '', function () { doBuyTroops(src); realm.send += C.TROOP_UNIT; updateRealmSheet(); });
-        buy.dataset.act = 'buy';
-        const gather = sheetButton('btn-paper', '🐾 ' + C.prefOf(src).name + 'に 兵を集める', function () { doGather(src); realm.send = C.troopsAt(state, src); updateRealmSheet(); });
-        gather.dataset.act = 'gather';
-        row.appendChild(buy); row.appendChild(gather);
+        C.RATIO_STEPS.forEach(function (k, i) {
+          const btn = sheetButton(i === 0 ? 'btn-paper' : 'btn-gold', '<b data-v="fillT' + i + '"></b><small data-v="fillS' + i + '"></small>', function () { doFill(sel, k); });
+          btn.dataset.act = 'fill' + i;
+          row.appendChild(btn);
+        });
       }
     }
     updateRealmSheet();
@@ -2988,11 +2995,17 @@
       const html = done.map(function (d, r) { return '<i class="' + (d ? 'on' : '') + '" title="' + C.REGIONS[r] + '"></i>'; }).join('');
       if (prog.innerHTML !== html) prog.innerHTML = html;
     }
-    const buyText = '兵を100 買う<br><small>小判 ' + C.TROOP_COST + '</small>';
+    const html = function (el, h) { if (el && el.innerHTML !== h) el.innerHTML = h; };
     if (sel && C.isMine(state, sel)) {
       set('here', 'ここの兵 ' + C.troopsAt(state, sel));
-      const buy = act('buy');
-      if (buy) { if (buy.innerHTML !== buyText) buy.innerHTML = buyText; buy.disabled = !C.canBuyTroops(state, sel); }
+      const most = C.affordableTroops(state);
+      [['buy', C.TROOP_UNIT, '+100'], ['buy1000', 10 * C.TROOP_UNIT, '+1000'], ['buymax', most, '買えるだけ']].forEach(function (b) {
+        const el = act(b[0]);
+        if (!el) return;
+        const n = b[1];
+        html(el, '兵 ' + b[2] + '<br><small>' + (b[0] === 'buymax' ? (n > 0 ? n + ' 匹' : '小判が たりない') : '小判 ' + C.troopCost(n)) + '</small>');
+        el.disabled = !(n > 0 && C.canBuyTroops(state, sel, n));
+      });
       const g = act('gather');
       if (g) g.disabled = C.totalTroops(state) === C.troopsAt(state, sel);
     } else if (sel) {
@@ -3002,10 +3015,19 @@
       realm.send = Math.max(0, Math.min(C.troopsAt(state, src), realm.send));
       set('send', String(realm.send));
       set('use', C.prefOf(src).name + 'の兵を ' + realm.send + ' つかう');
-      const buy = act('buy');
-      if (buy) { if (buy.innerHTML !== buyText) buy.innerHTML = buyText; buy.disabled = !C.canBuyTroops(state, src); }
-      const g = act('gather');
-      if (g) g.disabled = C.totalTroops(state) === C.troopsAt(state, src);
+      // 「○倍に そろえる」: そろえたあとの敵の数と強さ、かかる小判 (集めるだけなら 0)
+      C.RATIO_STEPS.forEach(function (k, i) {
+        const el = act('fill' + i);
+        if (!el) return;
+        const target = C.troopsForRatio(state, sel, k);
+        const fp = C.fillPlan(state, src, target);
+        const after = C.attackPlan(state, src, sel, target);
+        const done = realm.send >= target;
+        set('fillT' + i, done ? '✓ ' + k + '倍 そろった' : k + '倍に そろえる');
+        set('fillS' + i, '敵 ' + after.count + ' 匹・強さ ' + Math.round(after.strength * 100) + '%\n' +
+          (done ? '' : !fp.ok ? '小判が あと ' + Math.ceil(fp.cost - state.merit) + ' たりない' : fp.cost > 0 ? '小判 ' + fp.cost + (fp.moved ? ' (集める ' + fp.moved + ')' : '') : '集めるだけ (小判 0)'));
+        el.disabled = done || !fp.ok;
+      });
       act('minus').disabled = realm.send <= C.TROOP_UNIT;
       act('plus').disabled = realm.send >= C.troopsAt(state, src);
       act('attack').disabled = !C.canAttack(state, src, sel, realm.send);
@@ -3015,9 +3037,7 @@
         const plan = C.attackPlan(state, src, sel, realm.send);
         const times = plan.ratio >= 10 ? Math.round(plan.ratio) : Math.round(plan.ratio * 10) / 10;
         preview = '兵は 敵の ' + times + ' 倍 → 敵 ' + plan.count + ' 匹 ・ 強さ ' + Math.round(plan.strength * 100) + '%';
-        if (plan.ratio < 1) preview += '<br>敵より 少ないと 強くなるにゃ';
-        else if (plan.ratio < 1.5) preview += '<br>1.5 倍で 敵が 1 匹へる';
-        else if (plan.ratio < 3) preview += '<br>3 倍で もう 1 匹へる';
+        // 「1.5 倍で 敵が 1 匹へる」の添え書きはやめた (下の「○倍に そろえる」に、そろえたあとの敵の数が出る)
         rc = String(C.conquestReward(state, plan));
       }
       set('rcoin', rc);
@@ -3096,14 +3116,32 @@
     return true;
   }
 
-  function doBuyTroops(id) {
+  function doBuyTroops(id, count) {
     if (battleOpen()) return false;   // 合戦の最中は動かせない (途中で兵をよそへ移すと、兵を失わずに国が取れた)
-    const r = C.buyTroops(state, id);
+    const r = C.buyTroops(state, id, count);
     if (!r.ok) return false;
     state = r.state;
     saveSoon();
     realm.dirty = true;
     updateRealmSheet();
+    return true;
+  }
+
+  /** 攻める県 to に、守りの k 倍の兵をそろえる (集めて、足りないぶんを買う)。連れて行く数もそこに合わせる */
+  function doFill(to, k) {
+    if (battleOpen()) return false;
+    const src = C.attackSource(state, to);
+    if (!src) return false;
+    const target = C.troopsForRatio(state, to, k);
+    const r = C.fillTroops(state, src, target);
+    if (!r.ok) return false;
+    state = r.state;
+    realm.send = target;
+    saveSoon();
+    realm.dirty = true;
+    updateRealmSheet();
+    const p = r.plan;
+    if (p.need > 0) showToast(C.prefOf(src).name + 'に 兵 ' + target + (p.moved ? ' (集めた ' + p.moved + (p.buy ? '・買った ' + p.buy : '') + ')' : ' (買った ' + p.buy + ')'), 1800);
     return true;
   }
 
@@ -3406,6 +3444,7 @@
       selectPref: selectPref,
       selectedPref: function () { return realm.sel; },
       buyTroops: doBuyTroops,
+      fill: doFill,
       gather: doGather,
       attack: doAttack,
       setSend: function (n) { realm.send = n; updateRealmSheet(); },

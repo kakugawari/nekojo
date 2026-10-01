@@ -867,6 +867,14 @@ img { -webkit-user-drag: none; }
 .realm-sheet .sheet-row { display: flex; gap: 8px; }
 .realm-sheet .sheet-row > button { flex: 1 1 0; padding: 7px 8px; font-size: 13px; line-height: 1.25; border-radius: 14px; }
 .realm-sheet .sheet-row small { font-size: 10px; font-weight: 700; }
+/* 「○倍に そろえる」: 題と、そろえたあとの敵・かかる小判の 2 行 */
+.realm-sheet .sheet-row [data-v^="fillT"] { display: block; font-size: 13px; }
+.realm-sheet .sheet-row [data-v^="fillS"] { display: block; white-space: pre-line; margin-top: 1px; }
+@media (orientation: landscape) {
+  /* 横の札は幅が狭い: 「1.5倍に そろえる」が 1 行に入るように */
+  .realm-sheet .sheet-row > [data-act^="fill"] { padding: 6px 3px; }
+  .realm-sheet .sheet-row [data-v^="fillT"] { font-size: 12px; letter-spacing: -0.03em; }
+}
 .realm-sheet .send { display: flex; align-items: center; gap: 8px; }
 .realm-sheet .send-label { font-size: 11px; font-weight: 800; color: var(--ink-2); line-height: 1.1; flex: none; }
 .realm-sheet .send-count { min-width: 64px; text-align: center; font-weight: 900; font-size: 20px; }

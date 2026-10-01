@@ -1229,14 +1229,20 @@
   }
 
   function troopCost(count) { return TROOP_COST * Math.max(1, Math.round((count || TROOP_UNIT) / TROOP_UNIT)); }
-  function canBuyTroops(state, id) { return isMine(state, id) && state.merit >= TROOP_COST; }
-  /** 兵を 100 匹買って、その国に置く */
-  function buyTroops(state, id) {
-    if (!canBuyTroops(state, id)) return { ok: false, state: state };
-    const next = withRealm(state, function (r) { r.troops[id - 1] += TROOP_UNIT; });
-    next.merit = state.merit - TROOP_COST;
+  function canBuyTroops(state, id, count) {
+    const n = count || TROOP_UNIT;
+    return isMine(state, id) && n >= TROOP_UNIT && n % TROOP_UNIT === 0 && state.merit >= troopCost(n);
+  }
+  /** 兵を買って、その国に置く (count は 100 匹ずつ。省くと 100 匹) */
+  function buyTroops(state, id, count) {
+    const n = count || TROOP_UNIT;
+    if (!canBuyTroops(state, id, n)) return { ok: false, state: state };
+    const next = withRealm(state, function (r) { r.troops[id - 1] += n; });
+    next.merit = state.merit - troopCost(n);
     return { ok: true, state: next };
   }
+  /** いまの小判で買える兵の数 (100 匹ずつ) */
+  function affordableTroops(state) { return Math.floor(state.merit / TROOP_COST) * TROOP_UNIT; }
 
   /**
    * 自分の国から自分の国へ兵を移す (100 匹ずつ)。自分の国どうしがつながっていれば、遠くへも移せる
@@ -1276,6 +1282,52 @@
     return moved > 0 ? { ok: true, state: next, moved: moved } : { ok: false, state: state, moved: 0 };
   }
 
+  /**
+   * 攻めに出る国 src の兵を target 匹にそろえる手はず: まず、つながっている自分の国から足りないぶんだけ集め
+   * (兵の多い国から。攻められている国からは最後)、それでも足りないぶんを買う。
+   * 前は「兵を100 買う」を何度も押すしかなく、遠い国 (守り 1 万) の 3 倍をそろえるのに 300 回押すことになった
+   */
+  function fillPlan(state, src, target) {
+    const have = troopsAt(state, src);
+    const out = { target: target, need: Math.max(0, target - have), moves: [], moved: 0, buy: 0, cost: 0, ok: false };
+    if (!isMine(state, src)) return out;
+    if (out.need === 0) { out.ok = true; return out; }
+    const inv = state.realm.invasion;
+    const reach = ownReach(state, src);
+    const from = [];
+    for (let id = 1; id <= PREF_COUNT; id++) if (id !== src && reach[id] && troopsAt(state, id) > 0) from.push(id);
+    from.sort(function (a, b) {
+      const ia = inv && inv.to === a ? 1 : 0, ib = inv && inv.to === b ? 1 : 0;
+      return ia - ib || troopsAt(state, b) - troopsAt(state, a) || a - b;
+    });
+    let left = out.need;
+    from.forEach(function (id) {
+      if (left <= 0) return;
+      const n = Math.min(left, troopsAt(state, id));
+      out.moves.push([id, n]); out.moved += n; left -= n;
+    });
+    out.buy = left;
+    out.cost = left > 0 ? troopCost(left) : 0;
+    out.ok = state.merit >= out.cost;
+    return out;
+  }
+  function fillTroops(state, src, target) {
+    const plan = fillPlan(state, src, target);
+    if (!plan.ok) return { ok: false, state: state, plan: plan };
+    if (plan.need === 0) return { ok: true, state: state, plan: plan };
+    const next = withRealm(state, function (r) {
+      plan.moves.forEach(function (m) { r.troops[m[0] - 1] -= m[1]; r.troops[src - 1] += m[1]; });
+      r.troops[src - 1] += plan.buy;
+    });
+    next.merit = state.merit - plan.cost;
+    return { ok: true, state: next, plan: plan };
+  }
+  /** 守りの兵の ratio 倍 (敵が減る区切り: 1.5 倍で 1 匹、3 倍でもう 1 匹) になる、連れて行く兵の数 */
+  const RATIO_STEPS = [1.5, 3];
+  function troopsForRatio(state, to, ratio) {
+    return Math.max(TROOP_UNIT, Math.ceil(ratio * Math.max(TROOP_UNIT, troopsAt(state, to)) / TROOP_UNIT - 1e-9) * TROOP_UNIT);
+  }
+
   /** 攻める県のとなりにある自分の国のうち、兵がいちばん多い所 (無ければ null) */
   function attackSource(state, to) {
     const p = prefOf(to);
@@ -1299,7 +1351,7 @@
     const level = state.realm.level[to - 1];
     const ratio = sent / Math.max(TROOP_UNIT, garrison);
     const base = battleSize(level);
-    const count = Math.max(2, base - (ratio >= 1.5 ? 1 : 0) - (ratio >= 3 ? 1 : 0));
+    const count = Math.max(2, base - (ratio >= RATIO_STEPS[0] ? 1 : 0) - (ratio >= RATIO_STEPS[1] ? 1 : 0));
     const strength = Math.min(1.5, Math.max(0.7, Math.sqrt(1 / ratio)));
     const last = ownedCount(state) === PREF_COUNT - 1;   // 天下統一の最後の 1 国
     return {
@@ -1676,6 +1728,11 @@
     troopCost: troopCost,
     canBuyTroops: canBuyTroops,
     buyTroops: buyTroops,
+    affordableTroops: affordableTroops,
+    fillPlan: fillPlan,
+    fillTroops: fillTroops,
+    troopsForRatio: troopsForRatio,
+    RATIO_STEPS: RATIO_STEPS,
     canMoveTroops: canMoveTroops,
     moveTroops: moveTroops,
     gatherTroops: gatherTroops,
