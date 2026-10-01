@@ -657,7 +657,7 @@ async function run() {
         const cover = ['charge', 'mission', 'player'].filter((k) => { const a = R[k]; return a.left < pop.right && pop.left < a.right && a.top < pop.bottom && pop.top < a.bottom; });
         ok(cover.length === 0, `敵の頭の上 (当たったときの字が出る所) を、札が隠さない${cover.length ? ' (' + cover.join(',') + ')' : ''}`);
       }
-      ok(L.enterLeft >= L.w, `敵は画面の右の外から歩いてくる (ボス 9 匹も。出だしの左端 ${Math.round(L.enterLeft)} ≥ 幅 ${L.w})`);
+      ok(L.enterLeft >= L.w, `敵は画面の右の外から歩いてくる (ボス 10 匹も。出だしの左端 ${Math.round(L.enterLeft)} ≥ 幅 ${L.w})`);
       ok(await lp.evaluate(() => { const c = document.getElementById('fieldBg'); const d = c.getContext('2d').getImageData(c.width - 4, Math.floor(c.height * 0.3), 1, 1).data; return d[3] > 0; }),
         '背景が戦場の右端まで描かれている');
       await checkBattleBg(lp, '横');
@@ -1105,14 +1105,16 @@ async function run() {
       const tag = `${vw}x${vh}`;
       await bp.evaluate(() => { const a = window.__app; a.start(); a.closeStory(); });
       // 大将の前の敵は倒したことにして、大将が歩いてきて構えるまで待つ
-      const toBoss = async (r) => {
-        await bp.evaluate((r) => {
+      // look: 大将の姿を別のボスにする (段位の大将に出ないボス = 天下の北陸の大名の怨霊猫を見るため)
+      const toBoss = async (r, look) => {
+        await bp.evaluate(({ r, look }) => {
           const a = window.__app, R = window.Core.RANKS, old = a.battle();
           if (old && old.phase === 'fight') old.phase = 'done';   // 前の合戦は打ち切る (戦っている最中は出陣できない)
           // 段位はその値に直接置く (足し算だと、上の段位から下の段位へ戻せない)
           a.debugSetState((st) => Object.assign({}, st, { totalMerit: R[r].threshold, merit: R[r].threshold }));
           a.closeModals(); a.setTab('battle'); a.sortie();
-        }, r);
+          if (look) { const b = a.battle(), e = b.enemies[b.enemies.length - 1]; e.look = window.Core.bossLook(look); e.name = window.Core.BOSSES[look].name; }
+        }, { r, look });
         await bp.evaluate(() => { const b = window.__app.battle(); b.enemies.forEach((e, i) => { if (i < b.enemies.length - 1) { e.alive = false; e.hp = 0; e.state = 'down'; e.timer = 0.01; } }); b.current = b.enemies.length - 2; b.player.hp = b.player.maxHp = 99999; });
         await bp.waitForFunction(() => { const b = window.__app.battle(); const e = b && b.enemies[b.current]; return e && e.boss && e.state === 'idle' && window.__app.bossBox(); }, null, { timeout: 15000 }).catch(() => {});
         await bp.evaluate(() => { const e = window.__app.battle().enemies[window.__app.battle().current]; e.cd = 99; });
@@ -1157,6 +1159,22 @@ async function run() {
       const pDown = await pose();
       ok(pAtk === 'atk1' && pBack === 'stand' && pGuard === 'atk2' && pDown === 'down',
         `${tag}: 甲羅猫大将は、攻撃が当たった瞬間=攻撃 → 立ち絵に戻る / パンチを受け止める=シールド / 倒れる=やられた (${[pAtk, pBack, pGuard, pDown].join(' → ')})`);
+      // 怨霊猫 (天下の北陸の大名): 立ち絵が画面に収まり、主人公より大きい。
+      // ふつうの攻撃が当たった瞬間 = 攻撃2「怨霊召喚」、突進 = 攻撃1「怨霊の炎」(炎をまとって飛びかかる)
+      {
+        await toBoss(7, 'onryo');
+        const b = await bp.evaluate(() => window.__app.bossBox());
+        const fit = b && b.id === 'onryo' && b.pose === 'stand' && b.left >= b.minLeft && b.right <= b.w + 1 && (b.ground - b.bodyTop) >= 150 * b.s * (b.w > 600 ? 1.45 : 1.3);
+        ok(fit, `${tag}: 怨霊猫の立ち絵が出て、主人公より大きく、画面に収まる (${b ? b.id + ' 左 ' + Math.round(b.left) + '/' + Math.round(b.minLeft) + ' 右 ' + Math.round(b.right) + '/' + b.w : '出ない'})`);
+        await bp.evaluate(() => { const e = window.__app.battle().enemies[window.__app.battle().current]; e.state = 'windup'; e.timer = 0.02; });
+        await bp.waitForTimeout(150);
+        const pHit = await pose();
+        await bp.waitForTimeout(700);
+        await bp.evaluate(() => { const e = window.__app.battle().enemies[window.__app.battle().current]; e.state = 'rushWarn'; e.timer = 0.02; e.lured = false; });
+        await bp.waitForTimeout(120);
+        const pRush = await pose();
+        ok(pHit === 'atk2' && pRush === 'atk1', `${tag}: 怨霊猫は、攻撃が当たった瞬間=怨霊召喚 (攻撃2)、突進=怨霊の炎 (攻撃1) (${pHit} / ${pRush})`);
+      }
       await bc.close();
     }
 

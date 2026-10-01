@@ -23,7 +23,7 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'art', 'bosses');
 const OUT = path.join(ROOT, 'img');
-const IDS = ['kaze', 'kage-ninja', 'hime', 'koura', 'sumo', 'aka-oni', 'tengu', 'kori', 'kuro-maou'];
+const IDS = ['kaze', 'kage-ninja', 'hime', 'koura', 'sumo', 'aka-oni', 'tengu', 'kori', 'kuro-maou', 'onryo'];
 const POSES = ['stand', 'atk1', 'atk2', 'down'];   // 左上・右上・左下・右下
 const SCALE = 0.8;
 const QUALITY = 0.85;
@@ -36,7 +36,8 @@ const DOWN_ANCHOR = 0.5;
 const ANCHOR = {
   kaze: [0.58, 0.40, 0.22, 0.29], 'kage-ninja': [0.69, 0.54, 0.44, 0.36], hime: [0.51, 0.40, 0.47, 0.31],
   koura: [0.55, 0.64, 0.69, 0.33], sumo: [0.51, 0.56, 0.51, 0.31], 'aka-oni': [0.60, 0.46, 0.40, 0.24],
-  tengu: [0.57, 0.53, 0.60, 0.38], kori: [0.55, 0.46, 0.36, 0.27], 'kuro-maou': [0.51, 0.53, 0.44, 0.34]
+  tengu: [0.57, 0.53, 0.60, 0.38], kori: [0.55, 0.46, 0.36, 0.27], 'kuro-maou': [0.51, 0.53, 0.44, 0.34],
+  onryo: [0.55, 0.66, 0.49, 0.5]
 };
 // 塊を分ける前に消す四角 (元の絵の画素)。姫にゃんは名前の札がしっぽの先とつながって、体と同じ塊になっていた
 const ERASE = { hime: [[0, 0, 318, 122]] };

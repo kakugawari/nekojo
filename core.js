@@ -334,7 +334,8 @@
   const BOSSES = {
     kaze: { name: '風の射手' }, 'kage-ninja': { name: '影の忍猫' }, hime: { name: '姫にゃん' },
     koura: { name: '甲羅猫大将' }, sumo: { name: '大相撲猫' }, 'aka-oni': { name: '赤鬼猫' },
-    tengu: { name: '雷の猫天狗' }, kori: { name: '氷の大猫将' }, 'kuro-maou': { name: '黒猫大魔王' }
+    tengu: { name: '雷の猫天狗' }, kori: { name: '氷の大猫将' }, 'kuro-maou': { name: '黒猫大魔王' },
+    onryo: { name: '怨霊猫' }   // 段位の大将には出ない。天下の北陸の大名だけ
   };
   // 合戦の大将: 段位ごとに、弱そうな順。最初の段 (村の子猫) は「のら猫の親分」なので入れない
   const RANK_BOSS = [null, 'kaze', 'kage-ninja', 'hime', 'koura', 'sumo', 'aka-oni', 'tengu', 'kori', 'kuro-maou'];
@@ -1127,9 +1128,9 @@
     ['鹿児島', 7, 'しまづ にゃしひろ', [43, 45, 47], '薩摩', '火の山と勇ましい猫侍の国。海をこえると琉球にゃ。'],
     ['沖縄', 7, 'しょう にゃい王', [46], '琉球', '青い海とシーサーの国。いちばん南の王さまにゃ。']
   ];
-  // 大名の姿は地方ごとのボス (名前は県ごと)。北陸の怨霊猫は絵がまだ無いので、それまでは雷の猫天狗
+  // 大名の姿は地方ごとのボス (名前は県ごと)
   const HOKURIKU = ['新潟', '富山', '石川', '福井'], IGA_KOKA = ['三重', '滋賀'];
-  const HOKURIKU_BOSS = 'tengu';   // 怨霊猫の絵が届いたら 'onryo' にする
+  const HOKURIKU_BOSS = 'onryo';
   function prefBoss(name, region) {
     if (region <= 1) return 'kori';                 // 北海道・東北
     if (region === 2) return 'sumo';                // 関東

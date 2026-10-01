@@ -1514,7 +1514,7 @@ test('ボス: 合戦の大将は段位ごとに変わる。最初の段だけは
 
 test('ボス: 天下の大名は地方ごとの姿。名前は県ごと', () => {
   const lookOf = (name) => Core.PREFS.find((p) => p.name === name).look;
-  const want = { 北海道: 'kori', 青森: 'kori', 東京: 'sumo', 新潟: 'tengu', 愛知: 'tengu', 三重: 'kage-ninja', 滋賀: 'kage-ninja',
+  const want = { 北海道: 'kori', 青森: 'kori', 東京: 'sumo', 新潟: 'onryo', 富山: 'onryo', 石川: 'onryo', 福井: 'onryo', 長野: 'tengu', 愛知: 'tengu', 三重: 'kage-ninja', 滋賀: 'kage-ninja',
     京都: 'hime', 大阪: 'hime', 山口: 'kaze', 高知: 'koura', 鹿児島: 'aka-oni', 沖縄: 'aka-oni' };
   Object.keys(want).forEach((n) => assert.strictEqual(lookOf(n), 'boss-' + want[n], n));
   Core.PREFS.forEach((p) => assert.ok(Core.bossIdOf(p.look), p.name + ' の大名はボスの姿'));

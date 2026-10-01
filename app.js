@@ -705,13 +705,16 @@
   const bossPose = {};
   let lastBossPose = null;   // いちばん最後に描いたボスのポーズ (見張りが読む)
   const BOSS_POSE_TIME = 0.45;
-  function rushPose(id) { return id === 'koura' ? 'atk1' : 'atk2'; }   // 甲羅猫大将は「受け止める」(体当たり) で突っ込む
+  // 突進の絵: ふつうは攻撃2。甲羅猫大将は「受け止める」(体当たり)、怨霊猫は「怨霊の炎」(炎をまとって飛びかかる) が攻撃1
+  function rushPose(id) { return id === 'koura' || id === 'onryo' ? 'atk1' : 'atk2'; }
+  // ふつうの攻撃が当たった瞬間の絵: ふつうは攻撃1。怨霊猫は攻撃1 を突進に使うので、攻撃2「怨霊召喚」(怨霊が襲う)
+  function hitPose(id) { return id === 'onryo' ? 'atk2' : 'atk1'; }
   function markBossPose(b, ev) {
     const en = b.enemies.find(function (x) { return x.id === ev.id; });
     const id = en && C.bossIdOf(en.look);
     if (!id) return;
     let pose = null;
-    if (ev.type === 'playerHit') pose = en.state === 'rushBack' ? rushPose(id) : 'atk1';
+    if (ev.type === 'playerHit') pose = en.state === 'rushBack' ? rushPose(id) : hitPose(id);
     else if (ev.type === 'hit' && ev.armor && id === 'koura') pose = 'atk2';   // MAX でないパンチは半分: シールドで受け止める
     if (pose) bossPose[en.id] = { pose: pose, until: performance.now() / 1000 + BOSS_POSE_TIME };
   }
@@ -2699,37 +2702,45 @@
       // となりが大きい (青森のとなりの北海道など) と寄り足りないので、選んだ県が指で押せる大きさ (12px) までは寄る
       let cam = frameCamera([id].concat(around));
       if (shape.lr * cam.k < 12) cam = centerOn(shape.lx, shape.ly, 12 / shape.lr);
-      moveCamera(cam);
+      moveCamera(keepInView([id].concat(src ? [src] : []), clampCam(cam)));
     } else {
-      keepInView([id].concat(src ? [src] : []));
+      const now = realm.anim ? realm.anim.to : realm.cam;
+      const cam = keepInView([id].concat(src ? [src] : []), now);
+      if (cam !== now) moveCamera(cam);
     }
   }
 
   /**
-   * 県の名前の点が、飾りや札に隠れていない所に入っていなければ、いまの大きさのまま真ん中へずらす。
-   * 左下の案内の猫と吹き出しも、名前を隠す (隠れていない所の四角には入れていない) ので避ける
+   * 見る範囲 cam で、県の名前の点が飾りや札に隠れていない所に入っていなければ、同じ大きさのまま見える所の真ん中へずらした範囲を返す。
+   * 左下の案内の猫と吹き出しも名前を隠す。縦では札の上に乗っていて、隠れていない所の真ん中あたりに来るので、
+   * 「真ん中へ」だけでは吹き出しの下に入った。案内の猫より上 (横では右) の、広い方の真ん中へ寄せる
    */
-  function keepInView(ids) {
-    const cam = realm.anim ? realm.anim.to : realm.cam;
+  function keepInView(ids, cam) {
     const f = freeRect(), M = 16;
     const m = realmEls.map.getBoundingClientRect();
     const guide = [realmEls.bubble, realmEls.guideImg].map(function (el) {
       const b = el.getBoundingClientRect();
       return { x0: b.left - m.left - M, y0: b.top - m.top - M, x1: b.right - m.left + M, y1: b.bottom - m.top + M };
     });
+    const at = function (id) { const p = prefShapes[id - 1]; return { x: (p.lx - cam.x) * cam.k + realm.w / 2, y: (p.ly - cam.y) * cam.k + realm.h / 2 }; };
     const seen = function (id) {
-      const p = prefShapes[id - 1];
-      const x = (p.lx - cam.x) * cam.k + realm.w / 2, y = (p.ly - cam.y) * cam.k + realm.h / 2;
-      const underGuide = guide.some(function (g) { return x >= g.x0 && x <= g.x1 && y >= g.y0 && y <= g.y1; });
-      return !underGuide && x >= f.x0 + M && x <= f.x1 - M && y >= f.y0 + M && y <= f.y1 - M;
+      const q = at(id);
+      const underGuide = guide.some(function (g) { return q.x >= g.x0 && q.x <= g.x1 && q.y >= g.y0 && q.y <= g.y1; });
+      return !underGuide && q.x >= f.x0 + M && q.x <= f.x1 - M && q.y >= f.y0 + M && q.y <= f.y1 - M;
     };
-    if (ids.every(seen)) return;
+    if (ids.every(seen)) return cam;
+    // 見える所: 案内の猫より上か、右。広い方
+    const gTop = Math.min(guide[0].y0, guide[1].y0), gRight = Math.max(guide[0].x1, guide[1].x1);
+    const areas = [{ x0: f.x0, y0: f.y0, x1: f.x1, y1: Math.min(f.y1, gTop) }, { x0: Math.max(f.x0, gRight), y0: f.y0, x1: f.x1, y1: f.y1 }]
+      .filter(function (r) { return r.x1 - r.x0 >= 100 && r.y1 - r.y0 >= 100; });
+    const r = areas.length ? areas.reduce(function (a, b) { return (b.x1 - b.x0) * (b.y1 - b.y0) > (a.x1 - a.x0) * (a.y1 - a.y0) ? b : a; }) : f;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     ids.forEach(function (id) { const p = prefShapes[id - 1]; x0 = Math.min(x0, p.lx); x1 = Math.max(x1, p.lx); y0 = Math.min(y0, p.ly); y1 = Math.max(y1, p.ly); });
-    // 名前の点が全部入る大きさ (入らなければ、選んだ県だけ真ん中へ)
-    const fits = (x1 - x0) * cam.k <= f.x1 - f.x0 - 2 * M && (y1 - y0) * cam.k <= f.y1 - f.y0 - 2 * M;
+    // 名前の点が全部入る大きさなら全部の真ん中を、入らなければ選んだ県を、見える所の真ん中へ
+    const fits = (x1 - x0) * cam.k <= r.x1 - r.x0 - 2 * M && (y1 - y0) * cam.k <= r.y1 - r.y0 - 2 * M;
     const p0 = prefShapes[ids[0] - 1];
-    moveCamera(fits ? centerOn((x0 + x1) / 2, (y0 + y1) / 2, cam.k) : centerOn(p0.lx, p0.ly, cam.k));
+    const mx = fits ? (x0 + x1) / 2 : p0.lx, my = fits ? (y0 + y1) / 2 : p0.ly;
+    return clampCam({ x: mx - ((r.x0 + r.x1) / 2 - realm.w / 2) / cam.k, y: my - ((r.y0 + r.y1) / 2 - realm.h / 2) / cam.k, k: cam.k });
   }
 
   // ---- 札 (買う・集める・攻める)
