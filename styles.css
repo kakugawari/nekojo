@@ -614,7 +614,12 @@ img { -webkit-user-drag: none; }
 .cs-res b { font-variant-numeric: tabular-nums; font-size: 14px; }
 
 .cs-stage { position: relative; min-height: 0; overflow: hidden;
-  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 400' preserveAspectRatio='xMidYMax slice'><path d='M0 260 L90 190 L150 220 L250 120 L330 200 L420 150 L520 230 L600 160 L700 210 L800 170 L800 400 L0 400Z' fill='%23b9cbd6' opacity='.55'/><path d='M0 300 L120 240 L200 270 L300 210 L400 270 L480 230 L580 285 L680 240 L800 280 L800 400 L0 400Z' fill='%23cddbd8' opacity='.7'/><ellipse cx='130' cy='300' rx='150' ry='26' fill='%23fffaf0' opacity='.8'/><ellipse cx='640' cy='320' rx='190' ry='30' fill='%23fffaf0' opacity='.8'/><ellipse cx='420' cy='120' rx='90' ry='14' fill='%23fffaf0' opacity='.55'/></svg>") bottom center / 100% 72% no-repeat, linear-gradient(#dce9f0, #f2efe5 70%); }
+  /* もらった背景 (空・山・雲の海。1086x1448)。城の台が雲の海に浮くよう、下寄りを見せる。
+     すみに菊 (右上) と桜 (左下、施設の帯の上) を敷く。背景の層なので地図と建物の後ろになり、押すのもじゃましない */
+  background:
+    url(./img/u-kiku.webp) right -6px top 2px / 150px auto no-repeat,
+    url(./img/u-sakura.webp) left -4px bottom 50px / 150px auto no-repeat,
+    #cfe2f3 url('./img/castle-bg.jpg') center 62% / cover no-repeat; }
 #castleMap.castle-map { position: absolute; inset: 0; width: auto; height: auto; border: 0; border-radius: 0; box-shadow: none; background: transparent; margin: 0; max-width: none; }
 .cs-level { position: absolute; left: 8px; top: 4px; display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 5px;
   background: rgba(251,246,236,.9); border-radius: 18px; box-shadow: 0 3px 10px rgba(58,42,28,.14); pointer-events: none; }
@@ -630,7 +635,14 @@ img { -webkit-user-drag: none; }
 .cs-fac-title { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 800; white-space: nowrap; padding-right: 6px; color: var(--ink); }
 .cs-fac-paw { width: 32px; height: 32px; margin-left: -2px; }
 .cs-fac { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 2px; border-left: 1px solid var(--paper-edge); height: 26px; }
-.cs-fac img { width: 26px; height: 26px; object-fit: contain; flex: none; }
+/* 施設のしるしは、もらった紺一色の線画 (img/u-fac-*.webp。白い絵 + 透明度) を mask にして紺で塗る */
+.cs-fac-icon { width: 28px; height: 26px; flex: none; background: var(--navy); -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat; }
+.cs-fac[data-type="keep"] .cs-fac-icon { --icon: url(./img/u-fac-keep.webp); }
+.cs-fac[data-type="mansion"] .cs-fac-icon { --icon: url(./img/u-fac-mansion.webp); }
+.cs-fac[data-type="dojo"] .cs-fac-icon { --icon: url(./img/u-fac-dojo.webp); }
+.cs-fac[data-type="armory"] .cs-fac-icon { --icon: url(./img/u-fac-armory.webp); }
+.cs-fac[data-type="tower"] .cs-fac-icon { --icon: url(./img/u-fac-tower.webp); }
+.cs-fac[data-type="stable"] .cs-fac-icon { --icon: url(./img/u-fac-stable.webp); }
 .cs-fac > span { display: flex; flex-direction: column; min-width: 0; line-height: 1.05; }
 .cs-fac small { font-size: 9px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cs-fac b { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink); }

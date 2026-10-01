@@ -1,5 +1,7 @@
 /*
- * 城の画面の見本 (art/castle-mock.png, 1672x941) から、画面の飾りを切り出して img/u-*.webp に置く。
+ * 城の画面の見本 (art/castle-mock.png, 1672x941) と、あとからもらった絵 (art/castle-extras.png: 施設の帯のしるし・
+ * 桜と菊の飾り。背景はマゼンタ) から、画面の飾りを切り出して img/u-*.webp に置く。
+ * 城の背景 (art/castle-bg.png, 1086x1448) は JPEG 品質0.92 に焼き直して img/castle-bg.jpg に置く。
  *
  *   node tools/extract-castle-ui.js      (要 playwright。ブラウザの canvas で処理する)
  *
@@ -8,9 +10,12 @@
  *           透明度は「地の色からどれだけ離れているか」(紺の地に白い絵 / 金の地に紺の絵のどちらも)
  *   key   … 色つきの絵 (札・小判・木材・猫の丸・肉球の丸・梅の花)。四角のふちから、地の色に近い所をたどって抜く。
  *           絵と地の境目は、地の色からの離れ具合で半透明にする
+ *   magenta … マゼンタの地の上の色つきの絵 (桜・菊)。地の色からの離れ具合で抜き (60 以下は地、110 以上は絵)、
+ *           半透明の所は混ざった地の色を引いて元の色に戻す (ボスの切り出しと同じ)
  *   raw   … 四角のまま (タブの帯の波・選んだタブの金の札・建築するの金の札)。字やしるしの所は、行ごとに左右の色でつなぐ。
  *           選んだタブの札は、縦画面 (タブが下) 用に、角が上を向くよう回した物 (u-tab-on-up) も書き出す
- * すみの飾り (右下の菊・右上の桜) は、札のふちの線や雲がかかっているので切り出していない
+ * 施設の帯のしるしは、下の名前の札 (濃い紫) がしるしと同じような色なので、札より上で切る (y1 を札の上端の手前に)。
+ * 倉庫・庭園のしるしは、いまの帯に出さないので切り出していない
  *
  * 四角は元の絵の画素の位置。絵を差し替えたら測り直すこと (書き出す見本で、絵が切れていないか・字が入っていないかを見る)。
  */
@@ -18,7 +23,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
-const SRC = path.join(ROOT, 'art', 'castle-mock.png');
 const OUT = path.join(ROOT, 'img');
 
 const NAVY = [34, 54, 82];
@@ -50,13 +54,45 @@ const PIECES = [
   ['build', 'raw', 1222, 780, 1606, 866, { key: [[251, 245, 230]], fill: [1300, 792, 1520, 852] }],
 ];
 
+// あとからもらった絵 (マゼンタの地)
+const EXTRAS = [
+  ['fac-keep', 'mask', 42, 482, 200, 627, { bg: 'auto' }],
+  ['fac-mansion', 'mask', 242, 482, 418, 627, { bg: 'auto' }],
+  ['fac-dojo', 'mask', 846, 482, 1010, 627, { bg: 'auto' }],
+  ['fac-armory', 'mask', 1046, 482, 1224, 627, { bg: 'auto' }],
+  ['fac-tower', 'mask', 1252, 482, 1424, 627, { bg: 'auto' }],
+  ['fac-stable', 'mask', 1460, 482, 1630, 627, { bg: 'auto' }],
+  ['sakura', 'magenta', 36, 757, 490, 918],
+  ['kiku', 'magenta', 1148, 722, 1642, 922],
+];
+const SOURCES = [['castle-mock.png', PIECES], ['castle-extras.png', EXTRAS]];
+
 async function main() {
   let chromium;
   try { ({ chromium } = require('playwright')); } catch (e) { console.error('playwright が要ります'); process.exit(1); }
   const browser = await chromium.launch();
   const page = await browser.newPage();
-  const data = 'data:image/png;base64,' + fs.readFileSync(SRC).toString('base64');
-  const res = await page.evaluate(async ({ data, PIECES }) => {
+  const res = [];
+  for (const [file, pieces] of SOURCES) {
+    const data = 'data:image/png;base64,' + fs.readFileSync(path.join(ROOT, 'art', file)).toString('base64');
+    res.push(...await cut(page, data, pieces));
+  }
+  // 城の背景: そのまま JPEG に焼き直す (PNG 2.0MB)
+  const bgData = 'data:image/png;base64,' + fs.readFileSync(path.join(ROOT, 'art', 'castle-bg.png')).toString('base64');
+  const jpg = await page.evaluate(async (data) => {
+    const im = new Image(); im.src = data; await im.decode();
+    const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+    c.getContext('2d').drawImage(im, 0, 0);
+    return c.toDataURL('image/jpeg', 0.92);
+  }, bgData);
+  fs.writeFileSync(path.join(OUT, 'castle-bg.jpg'), Buffer.from(jpg.split(',')[1], 'base64'));
+  console.log('castle-bg.jpg   ', Math.round(fs.statSync(path.join(OUT, 'castle-bg.jpg')).size / 1024) + 'KB');
+  writeOut(res);
+  await browser.close();
+}
+
+function cut(page, data, PIECES) {
+  return page.evaluate(async ({ data, PIECES }) => {
     const im = new Image(); im.src = data; await im.decode();
     const W = im.width;
     const src = document.createElement('canvas'); src.width = W; src.height = im.height;
@@ -114,7 +150,7 @@ async function main() {
       let out = document.createElement('canvas'); out.width = w; out.height = h;
       const og = out.getContext('2d');
       if (how === 'mask') {
-        const bg = opt.bg; let far = 0;
+        const bg = opt.bg === 'auto' ? borderColor(d, w, h) : opt.bg; let far = 0;
         for (let i = 0; i < w * h; i++) far = Math.max(far, dist(d, i * 4, bg));
         for (let i = 0; i < w * h; i++) {
           const a = Math.max(0, Math.min(1, (dist(d, i * 4, bg) - 30) / (far * 0.7 - 30)));
@@ -140,6 +176,19 @@ async function main() {
             const [cx, cy, r] = opt.circle, e = r - Math.hypot(x0 + x + 0.5 - cx, y0 + (i - x) / w + 0.5 - cy);
             if (e < 1) d[i * 4 + 3] = Math.round(d[i * 4 + 3] * Math.max(0, e));
           }
+        }
+        og.putImageData(img, 0, 0); out = trim(out);
+      } else if (how === 'magenta') {
+        const bgc = borderColor(d, w, h);
+        for (let i = 0; i < w * h; i++) {
+          const a = Math.max(0, Math.min(1, (dist(d, i * 4, bgc) - 60) / 50));
+          if (a > 0.05 && a < 1) {
+            for (let k = 0; k < 3; k++) d[i * 4 + k] = Math.max(0, Math.min(255, (d[i * 4 + k] - (1 - a) * bgc[k]) / a));
+            // ふちに残る紫のにじみを抜く (赤と青が緑より強いぶんを減らす。葉のふちが紫に見えた)
+            const m = Math.min(d[i * 4], d[i * 4 + 2]) - d[i * 4 + 1];
+            if (m > 0) { d[i * 4] -= m * 0.7; d[i * 4 + 2] -= m * 0.7; }
+          }
+          d[i * 4 + 3] = Math.round(a * 255);
         }
         og.putImageData(img, 0, 0); out = trim(out);
       } else {
@@ -171,17 +220,19 @@ async function main() {
       return r;
     }).flat();
   }, { data, PIECES });
+}
+
+function writeOut(res) {
   for (const r of res) {
     fs.writeFileSync(path.join(OUT, 'u-' + r.name + '.webp'), Buffer.from(r.url.split(',')[1], 'base64'));
     console.log(('u-' + r.name).padEnd(16), r.w + 'x' + r.h);
   }
   const html = '<!doctype html><meta charset="utf-8"><body style="margin:0;font:12px sans-serif;display:flex;flex-wrap:wrap;gap:6px;padding:6px;background:#888">' +
-    res.map((r) => '<div style="padding:4px;text-align:center;background:' + (/^tab-|hammer/.test(r.name) ? '#22364f' : '#cfe3c8') +
+    res.map((r) => '<div style="padding:4px;text-align:center;background:' + (/^tab-|hammer|^fac-(?!paw)/.test(r.name) ? '#22364f' : '#cfe3c8') +
       '"><img src="' + r.url + '" style="display:block;width:' + r.w * 2 + 'px"><span>' + r.name + '</span></div>').join('') + '</body>';
   const previewPath = process.env.PARTS_PREVIEW || path.join(require('node:os').tmpdir(), 'castle-ui.html');
   fs.writeFileSync(previewPath, html);
   console.log('見本:', previewPath);
-  await browser.close();
 }
 
 main();

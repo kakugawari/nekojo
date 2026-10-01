@@ -872,12 +872,14 @@ async function run() {
       const pics = await cp.evaluate(async () => {
         const urls = [...document.querySelectorAll('#view-castle img')].filter((e) => /u-/.test(e.src)).map((e) => e.src);
         const b = document.getElementById('castleBuild');
-        const css = [getComputedStyle(b).borderImageSource, getComputedStyle(b.querySelector('.cs-build-icon')).webkitMaskImage];
-        for (const c of css) { const m = /url\("?([^")]+)"?\)/.exec(c); if (m) urls.push(m[1]); }
+        const css = [getComputedStyle(b).borderImageSource, getComputedStyle(b.querySelector('.cs-build-icon')).webkitMaskImage,
+          getComputedStyle(document.getElementById('castleStage')).backgroundImage,
+          ...[...document.querySelectorAll('#castleFacilities .cs-fac-icon')].map((e) => getComputedStyle(e).webkitMaskImage)];
+        for (const c of css) for (const m of c.matchAll(/url\("?([^")]+)"?\)/g)) urls.push(m[1]);
         const res = await Promise.all(urls.map((u) => new Promise((r) => { const im = new Image(); im.onload = () => r(im.naturalWidth > 0); im.onerror = () => r(false); im.src = u; })));
-        return { n: urls.length, bad: urls.filter((u, i) => !res[i]).map((u) => u.split('/').pop().slice(0, 30)) };
+        return { n: urls.length, urls, bad: urls.filter((u, i) => !res[i]).map((u) => u.split('/').pop().slice(0, 30)) };
       });
-      ok(pics.n >= 8 && pics.bad.length === 0, `${tag}: 見本から切り出した絵 ${pics.n} 枚が読めている${pics.bad.length ? ' (読めない: ' + pics.bad.join(', ') + ')' : ''}`);
+      ok(pics.n >= 17 && new Set(pics.urls).size === pics.n && pics.bad.length === 0, `${tag}: 見本から切り出した絵・背景・施設のしるし・飾り ${pics.n} 枚が読めている${pics.bad.length ? ' (読めない: ' + pics.bad.join(', ') + ')' : ''}`);
       await cc.close();
     }
 

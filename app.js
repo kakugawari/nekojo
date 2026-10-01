@@ -2241,7 +2241,7 @@
     els.castleFacilities.innerHTML = '<span class="cs-fac-title"><img class="cs-fac-paw" src="./img/u-fac-paw.webp" alt="">城内の施設</span>' +
       CASTLE_MAIN.map(function (t) {
         const def = C.BUILDINGS[t];
-        return '<span class="cs-fac" data-type="' + t + '"><img src="' + buildingImg(t).src + '" alt=""><span><small>' + def.name + '</small><b data-v="fac"></b></span></span>';
+        return '<span class="cs-fac" data-type="' + t + '"><i class="cs-fac-icon" aria-hidden="true"></i><span><small>' + def.name + '</small><b data-v="fac"></b></span></span>';
       }).join('');
     refreshCastle();
   }
