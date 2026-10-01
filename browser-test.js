@@ -1030,11 +1030,14 @@ async function run() {
             const q = (a) => document.querySelector('[data-act="' + a + '"]');
             const before = window.__app.battle();
             const started = window.__app.attack();
-            return { atk: q('attack') && q('attack').disabled, buy: q('buy') && q('buy').disabled, gather: q('gather') && q('gather').disabled,
-              back: !!q('back-battle') && !q('back-battle').disabled, started, same: window.__app.battle() === before };
+            const t0 = window.Core.troopsAt(window.__app.state(), 23);
+            const filled = window.__app.fill(14, 3);
+            return { atk: q('attack') && q('attack').disabled, fill0: q('fill0') && q('fill0').disabled, fill1: q('fill1') && q('fill1').disabled,
+              back: !!q('back-battle') && !q('back-battle').disabled, started, same: window.__app.battle() === before,
+              filled, moved: window.Core.troopsAt(window.__app.state(), 23) !== t0 };
           });
-          ok(lock.atk && lock.buy && lock.gather && lock.back && !lock.started && lock.same,
-            `${tag}: 合戦の最中に天下の画面へ来ても、攻める・兵を買う・集めるは押せず、「合戦に もどる」だけ押せる (${JSON.stringify(lock)})`);
+          ok(lock.atk && lock.fill0 && lock.fill1 && lock.back && !lock.started && lock.same && !lock.filled && !lock.moved,
+            `${tag}: 合戦の最中に天下の画面へ来ても、攻める・そろえる (兵を集める・買う) は押せず、「合戦に もどる」だけ押せる (${JSON.stringify(lock)})`);
           await rp.waitForTimeout(600);
           ok(await rp.evaluate(() => window.__app.state().realm.invasion.left) === l4, `${tag}: 迎え撃つ合戦を開いたまま天下の画面にいても、秒読みは止まったまま`);
           await rp.locator('[data-act="back-battle"]').tap();
