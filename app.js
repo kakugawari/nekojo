@@ -32,7 +32,9 @@
     vassalSlotCount: $('vassalSlotCount'), vassalsLocked: $('vassalsLocked'), vassalsContent: $('vassalsContent'),
     vassalList: $('vassalList'), btnRecruit: $('btnRecruit'),
     materialCountCastle: $('materialCountCastle'), castleLocked: $('castleLocked'), castleContent: $('castleContent'),
-    castleBanner: $('castleBanner'),
+    castleCoin: $('castleCoin'), castleLevel: $('castleLevel'), castleLevelFill: $('castleLevelFill'), castleLevelXp: $('castleLevelXp'),
+    castleFacilities: $('castleFacilities'), castleList: $('castleList'), castleBuilt: $('castleBuilt'), castleHint: $('castleHint'),
+    castleBuild: $('castleBuild'), castleBuildLabel: $('castleBuildLabel'),
     materialCountVillage: $('materialCountVillage'), villageLocked: $('villageLocked'), villageContent: $('villageContent'),
     popLabel: $('popLabel'), popFill: $('popFill'),
     toast: $('toast'), cutin: $('cutin'), invasionBar: $('invasionBar'),
@@ -1707,8 +1709,8 @@
 
   // ---------------------------------------------------------- 城と村の地図
   //
-  // 斜め上から見た 6x6 のマス。地面は大きさが変わったときだけ描き (map-bg)、
-  // 建物と歩くねこは奥から順に毎コマ描く (map-fg)。
+  // 斜め上から見たマス (村 6x6、城は 10x10 のうち城レベルで使える所だけ)。地面は大きさが変わったときだけ描き (map-bg)、
+  // 建物と歩くねこは奥から順に毎コマ描く (map-fg)。マスの番号はぜんぶのマスでの番号、描くときは使える土地の中の位置 (lx, ly)。
 
   const selected = { castle: null, village: null };
   const townMaps = { castle: makeTownMap('castle'), village: makeTownMap('village') };
@@ -1716,16 +1718,18 @@
   function makeTownMap(zone) {
     const root = $(zone + 'Map');
     const m = {
-      zone: zone, root: root,
+      zone: zone, root: root, fill: zone === 'castle',
       bg: root.querySelector('.map-bg'), fg: root.querySelector('.map-fg'),
-      w: 0, h: 0, dpr: 1, tw: 0, th: 0, ox: 0, oy: 0, walkers: []
+      w: 0, h: 0, dpr: 1, tw: 0, th: 0, ox: 0, oy: 0, walkers: [], area: null, N: C.MAP_SIZE
     };
     m.bgCtx = m.bg.getContext('2d');
     m.fgCtx = m.fg.getContext('2d');
     m.fg.addEventListener('pointerdown', function (e) {
       const r = m.fg.getBoundingClientRect();
       const idx = cellAt(m, e.clientX - r.left, e.clientY - r.top);
-      if (idx >= 0) selectCell(zone, idx);
+      if (idx < 0) return;
+      if (zone === 'castle') castleTapCell(idx);
+      else selectCell(zone, idx);
     });
     return m;
   }
@@ -1733,32 +1737,56 @@
   function sizeMap(m) {
     const w = m.root.clientWidth;
     if (!(w >= 1)) return; // 隠れている間は 0。前の大きさのまま
-    const N = C.MAP_SIZE;
-    const tw = (w - 12) / N;
-    const th = tw / 2;
-    const top = tw * 1.35; // 建物が上へはみ出す分
-    const h = Math.round(top + N * th + th * 0.9);
+    const area = C.openArea(state, m.zone);
+    const N = area.n;
+    let h, tw, oy;
+    if (m.fill) {
+      // 城: 入れ物いっぱい (高さは CSS で決まる)。下の施設の帯 (48px) をよけて、真ん中に置く
+      h = m.root.clientHeight;
+      if (!(h >= 1)) return;
+      const bottom = 52;
+      tw = Math.min((w - 16) / N, (h - bottom - 8) / (2.15 + N / 2));
+      const total = tw * (1.35 + N / 2 + 0.8);
+      oy = Math.max(4, (h - bottom - total) / 2) + tw * 1.35;
+    } else {
+      tw = (w - 12) / N;
+      oy = tw * 1.35; // 建物が上へはみ出す分
+      h = Math.round(oy + N * tw / 2 + tw / 2 * 0.9);
+    }
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-    if (w === m.w && h === m.h && dpr === m.dpr) return;
-    m.w = w; m.h = h; m.dpr = dpr; m.tw = tw; m.th = th; m.ox = w / 2; m.oy = top;
-    m.root.style.height = h + 'px';
+    const areaKey = area.o + ',' + area.n;
+    if (w === m.w && h === m.h && dpr === m.dpr && areaKey === m.areaKey) return;
+    // 土地が広がったら、歩いているねこは置き直す (位置は使える土地の中で持っているので)
+    if (m.areaKey && areaKey !== m.areaKey) m.walkers = [];
+    m.w = w; m.h = h; m.dpr = dpr; m.tw = tw; m.th = tw / 2; m.ox = w / 2; m.oy = oy; m.area = area; m.N = N; m.areaKey = areaKey;
+    if (!m.fill) m.root.style.height = h + 'px';
     [m.bg, m.fg].forEach(function (c) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); });
     drawGround(m);
   }
 
-  /** マスの上の頂点 (画面の位置) */
+  /** マスの番号 → 使える土地の中の位置 */
+  function localOf(m, i) {
+    const a = m.area || C.openArea(state, m.zone);
+    return { lx: (i % a.size) - a.o, ly: Math.floor(i / a.size) - a.o };
+  }
+  function indexOfLocal(m, lx, ly) { const a = m.area; return (ly + a.o) * a.size + (lx + a.o); }
+
+  /** マスの上の頂点 (画面の位置)。gx, gy は使える土地の中の位置 */
   function cellTop(m, gx, gy) {
     return { x: m.ox + (gx - gy) * m.tw / 2, y: m.oy + (gx + gy) * m.th / 2 };
   }
 
-  /** 画面の位置 → マスの番号 (外なら -1) */
+  /** 画面の位置 → マスの番号 (外なら -1)。土地のふちの少し外 (マスの半分まで) を押したときは、いちばん近いマス */
   function cellAt(m, x, y) {
+    if (!m.area) return -1;
     const dx = (x - m.ox) / (m.tw / 2);
     const dy = (y - m.oy) / (m.th / 2);
-    const gx = Math.floor((dy + dx) / 2);
-    const gy = Math.floor((dy - dx) / 2);
-    if (gx < 0 || gy < 0 || gx >= C.MAP_SIZE || gy >= C.MAP_SIZE) return -1;
-    return gy * C.MAP_SIZE + gx;
+    const fx = (dy + dx) / 2, fy = (dy - dx) / 2;
+    const N = m.N;
+    if (fx < -0.5 || fy < -0.5 || fx >= N + 0.5 || fy >= N + 0.5) return -1;
+    const gx = Math.max(0, Math.min(N - 1, Math.floor(fx)));
+    const gy = Math.max(0, Math.min(N - 1, Math.floor(fy)));
+    return indexOfLocal(m, gx, gy);
   }
 
   function diamond(ctx, m, gx, gy) {
@@ -1772,45 +1800,60 @@
   }
 
   function drawGround(m) {
-    const ctx = m.bgCtx, N = C.MAP_SIZE;
+    const ctx = m.bgCtx, N = m.N;
     ctx.setTransform(m.dpr, 0, 0, m.dpr, 0, 0);
     ctx.clearRect(0, 0, m.w, m.h);
     const castle = m.zone === 'castle';
     const L = { x: m.ox - N * m.tw / 2, y: m.oy + N * m.th / 2 };
     const B = { x: m.ox, y: m.oy + N * m.th };
     const Rr = { x: m.ox + N * m.tw / 2, y: m.oy + N * m.th / 2 };
-    const depth = m.th * 0.7;
+    const depth = m.th * (castle ? 1.1 : 0.7);
+    if (castle) {
+      // 台の影 (雲の上に浮かぶ見本のように、下にやわらかい影)
+      ctx.fillStyle = 'rgba(80,70,50,.16)';
+      ctx.beginPath(); ctx.ellipse(B.x, B.y + depth + m.th * 0.6, (Rr.x - L.x) * 0.48, m.th * 1.4, 0, 0, Math.PI * 2); ctx.fill();
+    }
     // 台の側面 (手前の2面)
-    ctx.fillStyle = castle ? '#8f8778' : '#a9794a';
+    ctx.fillStyle = castle ? '#9a9283' : '#a9794a';
     ctx.beginPath(); ctx.moveTo(L.x, L.y); ctx.lineTo(B.x, B.y); ctx.lineTo(B.x, B.y + depth); ctx.lineTo(L.x, L.y + depth); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = castle ? '#7a7366' : '#93673d';
+    ctx.fillStyle = castle ? '#837b6d' : '#93673d';
     ctx.beginPath(); ctx.moveTo(B.x, B.y); ctx.lineTo(Rr.x, Rr.y); ctx.lineTo(Rr.x, Rr.y + depth); ctx.lineTo(B.x, B.y + depth); ctx.closePath(); ctx.fill();
     if (castle) {
-      // 石垣の目地
-      ctx.strokeStyle = 'rgba(40,35,30,.25)';
+      // 石垣の目地 (縦と横)
+      ctx.strokeStyle = 'rgba(40,35,30,.28)';
       ctx.lineWidth = 1;
       for (let i = 1; i < 2 * N; i++) {
         const k = i / (2 * N);
         const ax = L.x + (Rr.x - L.x) * k;
         const ay = ax <= B.x ? L.y + (B.y - L.y) * ((ax - L.x) / (B.x - L.x)) : B.y + (Rr.y - B.y) * ((ax - B.x) / (Rr.x - B.x));
-        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax, ay + depth); ctx.stroke();
+        const off = (i % 2) * depth * 0.5;
+        ctx.beginPath(); ctx.moveTo(ax, ay + off); ctx.lineTo(ax, ay + off + depth * 0.5); ctx.stroke();
       }
+      [0.5].forEach(function (f) {
+        ctx.beginPath(); ctx.moveTo(L.x, L.y + depth * f); ctx.lineTo(B.x, B.y + depth * f); ctx.lineTo(Rr.x, Rr.y + depth * f); ctx.stroke();
+      });
     }
-    // マス
+    // マス (城は芝と石畳、村は草)
     for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) {
       diamond(ctx, m, gx, gy);
-      ctx.fillStyle = castle ? ((gx + gy) % 2 ? '#e4d8bd' : '#d9ccae') : ((gx + gy) % 2 ? '#a4d273' : '#96c865');
+      ctx.fillStyle = castle ? ((gx + gy) % 2 ? '#c9d9a0' : '#bfd296') : ((gx + gy) % 2 ? '#a4d273' : '#96c865');
       ctx.fill();
-      ctx.strokeStyle = castle ? 'rgba(120,100,70,.25)' : 'rgba(60,110,40,.22)';
+      ctx.strokeStyle = castle ? 'rgba(90,110,60,.22)' : 'rgba(60,110,40,.22)';
       ctx.lineWidth = 1;
       ctx.stroke();
     }
-    // 村は草のつぶつぶ、城は砂利
+    if (castle) {
+      // 台のふち (石の縁どり)
+      const T = { x: m.ox, y: m.oy };
+      ctx.strokeStyle = '#b8ad97'; ctx.lineWidth = Math.max(2, m.tw * 0.07);
+      ctx.beginPath(); ctx.moveTo(T.x, T.y); ctx.lineTo(Rr.x, Rr.y); ctx.lineTo(B.x, B.y); ctx.lineTo(L.x, L.y); ctx.closePath(); ctx.stroke();
+    }
+    // 村は草のつぶつぶ、城は芝のつぶつぶ
     const R = C.mulberry32(castle ? 11 : 22);
-    for (let i = 0; i < 220; i++) {
+    for (let i = 0; i < 40 * N; i++) {
       const gx = R() * N, gy = R() * N;
       const x = m.ox + (gx - gy) * m.tw / 2, y = m.oy + (gx + gy) * m.th / 2;
-      ctx.fillStyle = castle ? 'rgba(110,95,70,.25)' : (i % 3 ? 'rgba(70,130,50,.35)' : 'rgba(255,255,220,.35)');
+      ctx.fillStyle = castle ? (i % 3 ? 'rgba(90,120,60,.28)' : 'rgba(255,255,230,.35)') : (i % 3 ? 'rgba(70,130,50,.35)' : 'rgba(255,255,220,.35)');
       ctx.fillRect(x, y, 2, castle ? 1.5 : 2);
     }
   }
@@ -1833,16 +1876,17 @@
   }
 
   function emptyCells(zone) {
-    const out = [];
-    state[zone].cells.forEach(function (c, i) { if (!c) out.push(i); });
-    return out;
+    return C.openCells(state, zone).filter(function (i) { return !state[zone].cells[i]; });
   }
 
+  /** 歩く先 (使える土地の中の位置)。空きマスの中から */
   function pickTarget(zone) {
+    const m = townMaps[zone];
     const empty = emptyCells(zone);
-    const N = C.MAP_SIZE;
-    const i = empty.length ? empty[Math.floor(Math.random() * empty.length)] : Math.floor(Math.random() * N * N);
-    return { gx: (i % N) + 0.3 + Math.random() * 0.4, gy: Math.floor(i / N) + 0.3 + Math.random() * 0.4 };
+    const all = C.openCells(state, zone);
+    const i = empty.length ? empty[Math.floor(Math.random() * empty.length)] : all[Math.floor(Math.random() * all.length)];
+    const p = localOf(m, i);
+    return { gx: p.lx + 0.3 + Math.random() * 0.4, gy: p.ly + 0.3 + Math.random() * 0.4 };
   }
 
   function updateWalkers(m, dt) {
@@ -1878,22 +1922,29 @@
     ctx.setTransform(m.dpr, 0, 0, m.dpr, 0, 0);
     ctx.clearRect(0, 0, m.w, m.h);
     const t = now / 1000;
-    const N = C.MAP_SIZE;
 
     const sel = selected[m.zone];
     if (sel !== null) {
-      diamond(ctx, m, sel % N, Math.floor(sel / N));
-      ctx.fillStyle = 'rgba(255,226,122,' + (0.35 + 0.2 * Math.sin(t * 5)) + ')';
+      const sp = localOf(m, sel);
+      diamond(ctx, m, sp.lx, sp.ly);
+      ctx.fillStyle = 'rgba(255,226,122,' + (0.55 + 0.2 * Math.sin(t * 5)) + ')';
       ctx.fill();
       ctx.strokeStyle = '#b98b34';
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 3;
       ctx.stroke();
     }
 
     const items = [];
     state[m.zone].cells.forEach(function (type, i) {
-      if (type) items.push({ depth: (i % N) + Math.floor(i / N) + 1, type: type, i: i });
+      if (!type) return;
+      const p = localOf(m, i);
+      items.push({ depth: p.lx + p.ly + 1, type: type, i: i, lx: p.lx, ly: p.ly });
     });
+    // 城: 建てる物と場所を選んでいる間は、その場所に薄く建てて見せる
+    if (m.zone === 'castle' && castleSel.type && sel !== null && !state.castle.cells[sel]) {
+      const p = localOf(m, sel);
+      items.push({ depth: p.lx + p.ly + 1, type: castleSel.type, i: sel, lx: p.lx, ly: p.ly, ghost: true });
+    }
     m.walkers.forEach(function (wk) { items.push({ depth: wk.gx + wk.gy, walker: wk }); });
     items.sort(function (a, b) { return a.depth - b.depth; });
 
@@ -1919,11 +1970,23 @@
       const def = C.BUILDINGS[it.type];
       const im = imgs[def.img];
       if (!ready(im)) return;
-      const top = cellTop(m, it.i % N, Math.floor(it.i / N));
+      const top = cellTop(m, it.lx, it.ly);
       const sz = buildingSize(m, it.type, im);
       const bottom = top.y + m.th * (def.big ? 1.25 : 1.1);
+      if (it.ghost) { ctx.globalAlpha = 0.7 + 0.15 * Math.sin(t * 5); }
       ctx.drawImage(im, top.x - sz.w / 2, bottom - sz.h, sz.w, sz.h);
+      ctx.globalAlpha = 1;
     });
+    // 選んだマスのふちは、手前の建物に隠れないよう、いちばん上にもう一度描く (点線)
+    if (sel !== null) {
+      const sp = localOf(m, sel);
+      diamond(ctx, m, sp.lx, sp.ly);
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = 'rgba(185,139,52,.95)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 
   function effectChips(zone) {
@@ -1955,18 +2018,25 @@
     if (!unlocked) { naviSay(lockedEl, 'worry', lockedMessage(zone)); return; }
     sizeMap(townMaps[zone]);
     updateTownNumbers(zone);
-    if (zone === 'castle') {
-      els.castleBanner.hidden = !C.isCastleComplete(state);
-      els.castleBanner.textContent = '🎉 お城の完成にゃ!';
-    }
+    if (zone === 'castle') { renderCastlePanel(); return; }
     $(zone + 'Effects').innerHTML = effectChips(zone).map(function (c) { return '<span>' + c + '</span>'; }).join('');
     renderSheet(zone);
   }
 
   function updateTownNumbers(zone) {
     const matText = '資材 ' + Math.floor(state.materials);
-    if (zone === 'castle') els.materialCountCastle.textContent = matText;
-    else {
+    if (zone === 'castle') {
+      const set = function (el, t) { if (el.textContent !== t) el.textContent = t; };
+      set(els.materialCountCastle, String(Math.floor(state.materials)));
+      set(els.castleCoin, String(Math.floor(state.merit)));
+      // 城レベル: 次の段までの経験値 (建てた物の値段の合計)
+      const lv = C.castleLevelInfo(state);
+      set(els.castleLevel, String(lv.level));
+      set(els.castleLevelXp, lv.next === null ? lv.xp + ' (いちばん上)' : lv.xp + ' / ' + lv.next);
+      const f = lv.next === null ? 1 : (lv.xp - lv.from) / (lv.next - lv.from);
+      const fw = Math.round(Math.max(0, Math.min(1, f)) * 100) + '%';
+      if (els.castleLevelFill.style.width !== fw) els.castleLevelFill.style.width = fw;
+    } else {
       els.materialCountVillage.textContent = matText;
       const cap = C.villageCapacity(state);
       els.popLabel.textContent = '村人猫 ' + Math.floor(state.village.population) + ' / ' + cap + ' 匹';
@@ -2036,8 +2106,109 @@
     refreshSheet(zone);
   }
 
+  // ---- 城の「建築・強化」の一覧 (見本の右の紺の札)。建てる物を選び、地図で場所を押し、「建築する」
+  const castleSel = { type: null };
+  const CASTLE_TYPES = Object.keys(C.BUILDINGS).filter(function (t) { return C.BUILDINGS[t].zone === 'castle'; });
+  const CASTLE_MAIN = CASTLE_TYPES.filter(function (t) { return !C.BUILDINGS[t].deco; });
+
+  /** 一覧と施設の帯を作る (開いたとき・建てたときだけ。数字は refreshCastle で書き換える) */
+  function renderCastlePanel() {
+    els.castleList.innerHTML = '';
+    CASTLE_TYPES.forEach(function (t) {
+      const def = C.BUILDINGS[t];
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'cs-card';
+      card.dataset.type = t;
+      card.innerHTML = '<img alt=""><span class="cs-card-main"><span class="cs-card-name"></span><span class="cs-card-effect"></span>' +
+        '<span class="cs-card-cost"><span aria-hidden="true">🪵</span> <b data-v="cost"></b><i data-v="count"></i></span></span><span class="cs-card-go" aria-hidden="true">›</span>';
+      card.querySelector('img').src = imgs[def.img].src;
+      card.querySelector('.cs-card-name').textContent = def.name;
+      card.querySelector('.cs-card-effect').textContent = def.deco ? 'かざり (にぎわい)' : def.effect;
+      card.addEventListener('click', function () { castleChoose(t); });
+      els.castleList.appendChild(card);
+    });
+    // 下の帯: 城内の施設 (効き目のある建物の数)
+    els.castleFacilities.innerHTML = '<span class="cs-fac-title"><span class="cs-fac-paw" aria-hidden="true">🐾</span>城内の施設</span>' +
+      CASTLE_MAIN.map(function (t) {
+        const def = C.BUILDINGS[t];
+        return '<span class="cs-fac" data-type="' + t + '"><img src="' + imgs[def.img].src + '" alt=""><span><small>' + def.name + '</small><b data-v="fac"></b></span></span>';
+      }).join('');
+    refreshCastle();
+  }
+
+  /** 一覧の値段・数・押せるか、「建築する」と案内の字、建っている物の札を書き換える (作り直さない) */
+  function refreshCastle() {
+    const sel = selected.castle;
+    const type = castleSel.type;
+    els.castleList.querySelectorAll('.cs-card').forEach(function (card) {
+      const t = card.dataset.type, def = C.BUILDINGS[t];
+      const n = C.countBuildings(state, t);
+      const full = def.max !== null && n >= def.max;
+      const cost = String(C.buildingCost(state, t));
+      const count = def.max !== null ? n + '/' + def.max : '';
+      const c = card.querySelector('[data-v="cost"]'); if (c.textContent !== cost) c.textContent = cost;
+      const k = card.querySelector('[data-v="count"]'); if (k.textContent !== count) k.textContent = count;
+      card.disabled = full;
+      card.classList.toggle('poor', !full && state.materials < C.buildingCost(state, t));
+      card.classList.toggle('on', t === type);
+    });
+    els.castleFacilities.querySelectorAll('.cs-fac').forEach(function (el) {
+      const t = el.dataset.type, def = C.BUILDINGS[t];
+      const txt = C.countBuildings(state, t) + '/' + def.max;
+      const b = el.querySelector('[data-v="fac"]'); if (b.textContent !== txt) b.textContent = txt;
+    });
+    // 建っている物を選んでいるときは、その札 (取り壊す) を一覧の上に出す
+    const built = sel !== null ? state.castle.cells[sel] : null;
+    if (els.castleBuilt.dataset.cell !== String(built ? sel : '')) {
+      els.castleBuilt.dataset.cell = built ? String(sel) : '';
+      els.castleBuilt.hidden = !built;
+      els.castleBuilt.innerHTML = '';
+      if (built) {
+        const def = C.BUILDINGS[built];
+        els.castleBuilt.innerHTML = '<img alt=""><div><div class="cs-built-name"></div><div class="cs-built-effect"></div></div>';
+        els.castleBuilt.querySelector('img').src = imgs[def.img].src;
+        els.castleBuilt.querySelector('.cs-built-name').textContent = def.name;
+        els.castleBuilt.querySelector('.cs-built-effect').textContent = def.deco ? C.DECO_EFFECT : def.effect;
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'btn-paper demolish';
+        del.textContent = '取り壊す (資材 +' + Math.floor(def.cost / 2) + ')';
+        del.addEventListener('click', function () { doDemolish('castle', sel); });
+        els.castleBuilt.querySelector('div').appendChild(del);
+      }
+    }
+    // 「建築する」: 建てる物と空いた場所がそろい、資材が足りれば押せる
+    let label = '建築する', hint = '', ok = false;
+    const emptySel = sel !== null && !built;
+    if (!type) hint = emptySel ? '一覧から 建てる物を えらぶにゃ' : built ? '' : '建てる物を えらんで、地図の 空いたマスを 押すにゃ';
+    else if (!emptySel) hint = '「' + C.BUILDINGS[type].name + '」を どこに建てる? 地図の 空いたマスを 押すにゃ';
+    else {
+      const need = C.buildingCost(state, type) - state.materials;
+      if (need > 0) { label = '資材が あと ' + Math.ceil(need) + ' たりない'; }
+      else { label = '建築する ・ 資材 ' + C.buildingCost(state, type); ok = C.canPlaceBuilding(state, 'castle', sel, type); }
+      hint = ok ? '「' + C.BUILDINGS[type].name + '」を ここに建てるにゃ' : '';
+    }
+    if (els.castleBuildLabel.textContent !== label) els.castleBuildLabel.textContent = label;
+    els.castleBuild.disabled = !ok;
+    if (els.castleHint.textContent !== hint) els.castleHint.textContent = hint;
+  }
+
+  function castleChoose(type) {
+    castleSel.type = castleSel.type === type ? null : type;
+    // 建っている物を選んでいたら外す (建てる場所を選び直す)
+    if (selected.castle !== null && state.castle.cells[selected.castle]) selected.castle = null;
+    refreshCastle();
+  }
+
+  function castleTapCell(idx) {
+    selected.castle = selected.castle === idx ? null : idx;
+    refreshCastle();
+  }
+
   /** 資材が増えたときは、札を作り直さずに押せるかどうかと値段だけ直す (押している最中に札が入れ替わらないように) */
   function refreshSheet(zone) {
+    if (zone === 'castle') { refreshCastle(); return; }
     const idx = selected[zone];
     if (idx === null) return;
     $(zone + 'Sheet').querySelectorAll('.build-card').forEach(function (card) {
@@ -2055,9 +2226,17 @@
     if (r.ok) {
       state = r.state;
       selected[zone] = null;
+      // 城: 同じ物を続けて建てられるように、選んだ物はそのまま (上限に届いたら外す)
+      if (zone === 'castle') {
+        const def = C.BUILDINGS[type];
+        if (def.max !== null && C.countBuildings(state, type) >= def.max) castleSel.type = null;
+      }
       renderTownView(zone);
       saveSoon();
-      if (!was && C.isCastleComplete(state)) showToast('🎉 お城の完成にゃ!', 3200);
+      if (r.leveledUp) {
+        const lv = C.castleLevel(state), a = C.openArea(state, 'castle');
+        showToast('🏯 城レベル ' + lv + '! ' + (lv > 1 && C.CASTLE_LEVELS[lv - 1].open > C.CASTLE_LEVELS[lv - 2].open ? '土地が ' + a.n + 'x' + a.n + ' に広がった' : 'りっぱになった'), 3000);
+      } else if (!was && C.isCastleComplete(state)) showToast('🎉 お城の完成にゃ!', 3200);
       else showToast(C.BUILDINGS[type].name + 'を建てた!', 1400);
     }
     return r.ok;
@@ -3332,6 +3511,7 @@
     els.btnResume.addEventListener('click', resumeBattle);
     els.btnRetreat.addEventListener('click', retreat);
     els.btnRecruit.addEventListener('click', doRecruit);
+    els.castleBuild.addEventListener('click', function () { if (castleSel.type && selected.castle !== null) doPlaceBuilding('castle', selected.castle, castleSel.type); });
     Object.keys(tabEls).forEach(function (tab) {
       tabEls[tab].addEventListener('click', function () { switchTab(tab); });
     });
@@ -3425,9 +3605,11 @@
       cellPoint: function (zone, idx) {
         const m = townMaps[zone];
         const r = m.fg.getBoundingClientRect();
-        const t = cellTop(m, idx % C.MAP_SIZE, Math.floor(idx / C.MAP_SIZE));
-        return { x: r.left + t.x, y: r.top + t.y + m.th / 2 };
+        const p = localOf(m, idx);
+        const t = cellTop(m, p.lx, p.ly);
+        return { x: r.left + t.x, y: r.top + t.y + m.th / 2, tw: m.tw };
       },
+      castleType: function () { return castleSel.type; },
       debugAddMerit: function (n) {
         const res = C.addMerit(state, n);
         state = res.state;

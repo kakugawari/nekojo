@@ -526,35 +526,49 @@ async function run() {
       await phone.waitForTimeout(60);
       return phone.evaluate((z) => window.__app.selected(z), zone);
     };
-    // 押した場所の読み取りが合っているか: 真ん中だけでなく、四隅のマスでも確かめる
+    // 押した場所の読み取りが合っているか: 真ん中だけでなく、使える土地 (はじめは 10x10 の真ん中 8x8) の四隅でも確かめる
     const picks = [];
-    for (const idx of [0, 5, 30, 35, 14]) {
+    for (const idx of [11, 18, 81, 88, 44]) {
       const got = await tapCell('castle', idx);
       picks.push(idx + '→' + got);
       await tapCell('castle', idx); // もう一度押して閉じる
     }
     ok(picks.every((p) => { const [a, b] = p.split('→'); return a === b; }), `マスを指で押すと、そのマスが選ばれる (${picks.join(' ')})`);
+    const cards = await phone.evaluate(() => [...document.querySelectorAll('#castleList .cs-card')].map((c) => c.dataset.type));
+    ok(cards.includes('keep') && cards.includes('flags') && !cards.includes('house'), `「建築・強化」の一覧には城の建物だけが並ぶ (${cards.length}種)`);
+    ok(await phone.evaluate(() => [...document.querySelectorAll('#castleList .cs-card img')].every((im) => im.naturalWidth > 20)), '一覧に施設の絵が出る');
+    // 建てる物を選ぶ → 地図で場所を押す → 「建築する」
+    const castleUi = () => phone.evaluate(() => ({ label: document.getElementById('castleBuildLabel').textContent, off: document.getElementById('castleBuild').disabled, hint: document.getElementById('castleHint').textContent }));
+    await phone.locator('.cs-card[data-type="keep"]').tap();
+    const u1 = await castleUi();
+    ok(u1.off && /空いたマス/.test(u1.hint), `建てる物を選ぶと、地図で場所を押すように案内が出る (まだ建てられない) (${u1.hint})`);
+    await tapCell('castle', 44);
+    const u2 = await castleUi();
+    ok(!u2.off && /資材 300/.test(u2.label), `場所を押すと「建築する」が押せるようになり、値段が出る (${u2.label})`);
+    await phone.locator('#castleBuild').tap();
+    await phone.waitForTimeout(100);
+    const built = await phone.evaluate(() => ({ cell: window.__app.state().castle.cells[44], lv: document.getElementById('castleLevel').textContent,
+      fac: document.querySelector('.cs-fac[data-type="keep"] [data-v="fac"]').textContent, keepOff: document.querySelector('.cs-card[data-type="keep"]').disabled, toast: document.getElementById('toast').textContent }));
+    ok(built.cell === 'keep' && built.fac === '1/1' && built.keepOff, `「建築する」でお城が建ち、下の施設の帯が 1/1、一覧のお城は押せなくなる (${built.fac})`);
+    ok(built.lv === '2' && /城レベル 2/.test(built.toast), `建てると城レベルの経験値が入り、レベルが上がると知らせが出る (レベル ${built.lv}・${built.toast})`);
 
-    await tapCell('castle', 14);
-    ok(await phone.evaluate(() => !document.getElementById('castleSheet').hidden), '空きマスを押すと、建てる物の札が出る');
-    const cards = await phone.evaluate(() => [...document.querySelectorAll('#castleSheet .build-card')].map((c) => c.dataset.type));
-    ok(cards.includes('keep') && !cards.includes('house'), `城の札には城の建物だけが並ぶ (${cards.length}種)`);
-    const cardImgs = await phone.evaluate(() => [...document.querySelectorAll('#castleSheet .build-card img')].every((im) => im.naturalWidth > 20));
-    ok(cardImgs, '札に施設の絵が出る');
-    await phone.locator('#castleSheet .build-card[data-type="keep"]').tap();
-    await phone.waitForTimeout(80);
-    ok(await phone.evaluate(() => window.__app.state().castle.cells[14] === 'keep' && !document.getElementById('castleBanner').hidden),
-      'お城を建てると、お城完成の札が出る');
-    ok(await phone.evaluate(() => [...document.querySelectorAll('#castleEffects span')].some((s) => s.textContent.includes('小判'))),
-      '建てた物の効果が、地図の下に出る');
-
-    await tapCell('castle', 14);
-    ok(await phone.evaluate(() => !!document.querySelector('#castleSheet .demolish')), '建っているマスを押すと、取り壊しの札が出る');
+    await tapCell('castle', 44);
+    ok(await phone.evaluate(() => !document.getElementById('castleBuilt').hidden && !!document.querySelector('#castleBuilt .demolish')), '建っているマスを押すと、取り壊しの札が出る');
     const mat0 = await phone.evaluate(() => window.__app.state().materials);
-    await phone.locator('#castleSheet .demolish').tap();
+    await phone.locator('#castleBuilt .demolish').tap();
     await phone.waitForTimeout(60);
-    const afterDemolish = await phone.evaluate(() => ({ cell: window.__app.state().castle.cells[14], mat: window.__app.state().materials }));
-    ok(afterDemolish.cell === null && afterDemolish.mat > mat0, '取り壊すとマスが空き、資材が少し戻る');
+    const afterDemolish = await phone.evaluate(() => ({ cell: window.__app.state().castle.cells[44], mat: window.__app.state().materials, built: document.getElementById('castleBuilt').hidden }));
+    ok(afterDemolish.cell === null && afterDemolish.mat > mat0 && afterDemolish.built, '取り壊すとマスが空き、資材が少し戻る');
+    // 城レベルが上がると土地が広がる: 8x8 → 9x9 (いちばん奥の角 0 が押せるようになる)
+    {
+      const before = await phone.evaluate(() => { const p = window.__app.cellPoint('castle', 11); return p.tw; });
+      await phone.evaluate(() => window.__app.debugSetState((s) => Object.assign({}, s, { castle: Object.assign({}, s.castle, { xp: 400 }) })));
+      await phone.waitForTimeout(100);
+      const got0 = await tapCell('castle', 0);
+      const after = await phone.evaluate(() => window.__app.cellPoint('castle', 11).tw);
+      ok(got0 === 0 && after < before, `城レベル 3 で土地が 9x9 に広がり、広がった角のマスも押せる (マスの幅 ${before.toFixed(1)} → ${after.toFixed(1)}px)`);
+      await tapCell('castle', 0);
+    }
 
     await phone.locator('#tab-village').tap();
     await phone.waitForTimeout(100);
@@ -758,6 +772,47 @@ async function run() {
         `${tag}: 予告の間に猫じゃらしを指で押すと、樽へ突っ込んで目を回す (こちらは無傷・樽はこわれる)`);
       ok(after.ready, `${tag}: 目を回している間は、猫パンチのボタンが光る (今だ!)`);
       await yc.close();
+    }
+
+    // ------------------------------------------------ 城の画面 (見本: 上に札と資源、地図と城レベル・施設の帯、右 (縦は下) に「建築・強化」)
+    section('城の画面 (見本の並び。縦と横)');
+    for (const [vw, vh, safe, sf] of [[430, 932, ':root{--safe-t:59px;--safe-b:34px}', { t: 59, r: 0, b: 34 }], [932, 430, ':root{--safe-l:59px;--safe-r:59px;--safe-b:21px}', { t: 0, r: 59, b: 21 }]]) {
+      const cc = await browser.newContext({ ...device, viewport: { width: vw, height: vh } });
+      const cp = await cc.newPage();
+      cp.on('pageerror', (e) => errors.push('城: ' + e.message));
+      await cp.bringToFront();
+      await cp.goto(URL);
+      await cp.waitForFunction(() => window.__app);
+      await cp.addStyleTag({ content: safe });
+      const tag = `${vw}x${vh}`;
+      await cp.evaluate(() => { const a = window.__app; a.start(); a.closeStory(); a.debugAddMerit(10000); a.closeModals(); a.debugSetMaterials(3000); a.setTab('castle'); });
+      await cp.waitForTimeout(300);
+      for (const xp of [0, 1200]) {
+        await cp.evaluate((x) => window.__app.debugSetState((s) => Object.assign({}, s, { castle: Object.assign({}, s.castle, { xp: x }) })), xp);
+        await cp.waitForTimeout(150);
+        const L = await cp.evaluate(() => {
+          const r = (q) => { const b = document.querySelector(q).getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
+          const open = window.Core.openArea(window.__app.state(), 'castle');
+          const corners = [[0, 0], [open.n - 1, 0], [0, open.n - 1], [open.n - 1, open.n - 1]].map(([x, y]) => (y + open.o) * 10 + (x + open.o));
+          return { head: r('.cs-head'), stage: r('#castleStage'), panel: r('#castlePanel'), build: r('#castleBuild'), level: r('#castleLevelCard'), fac: r('#castleFacilities'),
+            tabs: r('#tabbar'), n: open.n, pts: corners.map((i) => window.__app.cellPoint('castle', i)), list: (() => { const e = document.getElementById('castleList'); return { sh: e.scrollHeight, ch: e.clientHeight }; })() };
+        });
+        const inside = (a, b) => a.l >= b.l - 1 && a.r <= b.r + 1 && a.t >= b.t - 1 && a.b <= b.b + 1;
+        const hit = (p, b) => p.x >= b.l && p.x <= b.r && p.y >= b.t && p.y <= b.b;
+        const screen = vw < vh ? { l: 0, t: sf.t, r: vw, b: L.tabs.t } : { l: L.tabs.r, t: 0, r: vw - sf.r, b: vh - sf.b };
+        const bad = [];
+        if (!inside(L.panel, screen)) bad.push('札が画面の外');
+        if (!inside(L.build, L.panel) || !inside(L.build, screen)) bad.push('建築するが札の外');
+        if (!inside(L.head, { l: screen.l, t: screen.t, r: screen.r, b: screen.b })) bad.push('上の帯が画面の外');
+        if (L.pts.some((p) => !hit(p, L.stage))) bad.push('土地の角が地図の外');
+        if (L.pts.some((p) => hit(p, L.level) || hit(p, L.fac))) bad.push('土地の角が城レベルの札か施設の帯の下');
+        if (vw < vh ? L.panel.t < L.stage.b - 1 : L.panel.l < L.stage.r - 1) bad.push('札が地図に重なる');
+        ok(bad.length === 0, `${tag}: 城レベル ${xp ? 5 : 1} (${L.n}x${L.n}) で、土地の四隅が見え、札・建築する・上の帯が画面に収まる${bad.length ? ' (' + bad.join('・') + ')' : ''}`);
+      }
+      // 一覧は札の中で送れる (送らなくても「建築する」は見えている)
+      const sc = await cp.evaluate(() => { const e = document.getElementById('castleList'); e.scrollTop = 9999; return { top: e.scrollTop, last: (() => { const c = e.lastElementChild.getBoundingClientRect(), b = e.getBoundingClientRect(); return c.bottom <= b.bottom + 1; })() }; });
+      ok(sc.last, `${tag}: 一覧は札の中で送れて、いちばん下の物まで見られる`);
+      await cc.close();
     }
 
     // ------------------------------------------------ 天下 (日本地図の国とり)

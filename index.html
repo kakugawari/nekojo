@@ -156,22 +156,39 @@
     </div>
   </section>
 
-  <!-- ================================================= 城 -->
-  <section class="view view-page" id="view-castle" data-view="castle" hidden>
-    <div class="page-head">
-      <h2 class="tag-title">城</h2>
-      <div class="page-sub" id="materialCountCastle">資材 0</div>
-    </div>
+  <!-- ================================================= 城 (見本: 上に「城」の札と資源、真ん中に城の地図、右 (縦は下) に「建築・強化」の一覧) -->
+  <section class="view castle-view" id="view-castle" data-view="castle" hidden>
     <div class="locked-art paper" id="castleLocked" hidden>
       <img src="./img/b-castle.png" alt="">
       <div class="navi-say"><img class="navi-img" data-pose="worry" alt="" draggable="false"><p class="navi-bubble"></p></div>
     </div>
-    <div id="castleContent" class="page-body" hidden>
-      <p class="castle-banner" id="castleBanner" hidden></p>
-      <div class="town-map" id="castleMap"><canvas class="map-bg"></canvas><canvas class="map-fg"></canvas></div>
-      <div class="navi-say navi-small map-hint"><img class="navi-img" data-pose="walk" alt="" draggable="false"><p class="navi-bubble">マスを押すと、建てる物を選べるにゃ</p></div>
-      <div class="town-effects" id="castleEffects"></div>
-      <div class="build-sheet paper" id="castleSheet" hidden></div>
+    <div class="castle-body" id="castleContent" hidden>
+      <div class="cs-head">
+        <h2 class="cs-title"><span class="cs-paw" aria-hidden="true">🐾</span>城</h2>
+        <div class="cs-res">
+          <span class="cs-res-item"><span class="cs-res-icon" aria-hidden="true">🪵</span>資材 <b id="materialCountCastle">0</b></span>
+          <span class="cs-res-item"><img class="cs-res-icon" src="./img/r-coin.png" alt="">小判 <b id="castleCoin">0</b></span>
+        </div>
+      </div>
+      <div class="cs-stage" id="castleStage">
+        <div class="town-map castle-map" id="castleMap"><canvas class="map-bg"></canvas><canvas class="map-fg"></canvas></div>
+        <div class="cs-level" id="castleLevelCard">
+          <img class="cs-level-icon" src="./img/face-smile.png" alt="">
+          <div class="cs-level-main">
+            <div class="cs-level-name">城レベル <b id="castleLevel">1</b></div>
+            <div class="cs-bar"><i id="castleLevelFill"></i></div>
+            <div class="cs-level-xp" id="castleLevelXp">0 / 150</div>
+          </div>
+        </div>
+        <div class="cs-facilities" id="castleFacilities"></div>
+      </div>
+      <aside class="cs-panel" id="castlePanel">
+        <div class="cs-panel-head"><span aria-hidden="true">✿</span> 建築・強化</div>
+        <div class="cs-built" id="castleBuilt" hidden></div>
+        <div class="cs-list" id="castleList"></div>
+        <p class="cs-hint" id="castleHint"></p>
+        <button type="button" class="btn-gold cs-build" id="castleBuild"><span class="cs-build-icon" aria-hidden="true">🔨</span><span id="castleBuildLabel">建築する</span></button>
+      </aside>
     </div>
   </section>
 

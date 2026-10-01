@@ -596,6 +596,83 @@ img { -webkit-user-drag: none; }
 .castle-banner { margin: 0; text-align: center; font-weight: 900; color: var(--red); font-size: 16px; }
 .castle-banner[hidden] { display: none; }
 
+/* --------------------------------------------------------- 城 (見本: 上に「城」の札と資源、真ん中に城の地図と城レベル・施設の帯、
+   右 (縦は下) に紺の見出しの「建築・強化」の一覧と金の「建築する」)。地図は入れ物いっぱいで、大きさは JS が決める */
+.castle-view { position: relative; overflow: hidden; background: linear-gradient(#e4edf1, #f6f1e4 55%, #efe3cb); }
+.castle-view .locked-art { margin: 30px 14px 0; }
+.castle-body { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) minmax(0, 46%); }
+.castle-body[hidden] { display: none; }
+.cs-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 4px; position: relative; z-index: 2; }
+.cs-title {
+  margin: 0; display: inline-flex; align-items: center; gap: 8px; padding: 3px 20px 3px 4px;
+  background: var(--paper); border: 2px solid var(--gold-edge); border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--gold-2) inset, 0 3px 8px rgba(58,42,28,.15);
+  font-size: 23px; font-weight: 900; color: var(--ink); letter-spacing: .12em; line-height: 1.2;
+}
+.cs-paw { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 17px;
+  background: radial-gradient(circle at 40% 35%, #fff3c8, #e9c46a); border: 2px solid var(--gold-edge); letter-spacing: 0; }
+.cs-res { margin-left: auto; display: flex; gap: 12px; padding: 5px 14px; background: var(--paper); border: 2px solid var(--gold-edge);
+  border-radius: 999px; font-weight: 800; font-size: 13px; color: var(--ink); box-shadow: 0 3px 8px rgba(58,42,28,.12); }
+.cs-res-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.cs-res-icon { width: 18px; height: 18px; font-size: 15px; line-height: 18px; text-align: center; }
+.cs-res b { font-variant-numeric: tabular-nums; font-size: 14px; }
+
+.cs-stage { position: relative; min-height: 0; overflow: hidden;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 400' preserveAspectRatio='xMidYMax slice'><path d='M0 260 L90 190 L150 220 L250 120 L330 200 L420 150 L520 230 L600 160 L700 210 L800 170 L800 400 L0 400Z' fill='%23b9cbd6' opacity='.55'/><path d='M0 300 L120 240 L200 270 L300 210 L400 270 L480 230 L580 285 L680 240 L800 280 L800 400 L0 400Z' fill='%23cddbd8' opacity='.7'/><ellipse cx='130' cy='300' rx='150' ry='26' fill='%23fffaf0' opacity='.8'/><ellipse cx='640' cy='320' rx='190' ry='30' fill='%23fffaf0' opacity='.8'/><ellipse cx='420' cy='120' rx='90' ry='14' fill='%23fffaf0' opacity='.55'/></svg>") bottom center / 100% 72% no-repeat, linear-gradient(#dce9f0, #f2efe5 70%); }
+#castleMap.castle-map { position: absolute; inset: 0; width: auto; height: auto; border: 0; border-radius: 0; box-shadow: none; background: transparent; margin: 0; max-width: none; }
+.cs-level { position: absolute; left: 8px; top: 4px; display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 5px;
+  background: rgba(251,246,236,.9); border-radius: 18px; box-shadow: 0 3px 10px rgba(58,42,28,.14); pointer-events: none; }
+.cs-level-icon { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; object-position: 50% 20%;
+  background: radial-gradient(circle at 40% 35%, #fff3c8, #e9c46a); border: 2px solid var(--gold-edge); }
+.cs-level-name { font-weight: 800; font-size: 13px; color: var(--ink); }
+.cs-level-name b { font-size: 19px; margin-left: 2px; }
+.cs-bar { width: 118px; height: 9px; border-radius: 9px; background: var(--navy); overflow: hidden; margin-top: 2px; }
+.cs-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #f6e2a8, #e9c46a); border-radius: 9px; }
+.cs-level-xp { font-size: 11px; text-align: center; color: var(--ink-2); font-weight: 700; margin-top: 1px; }
+.cs-facilities { position: absolute; left: 8px; right: 8px; bottom: 6px; height: 40px; display: flex; align-items: center; gap: 0; padding: 0 8px 0 4px;
+  background: rgba(251,246,236,.95); border: 2px solid var(--gold-edge); border-radius: 999px; pointer-events: none; overflow: hidden;
+  box-shadow: 0 3px 10px rgba(58,42,28,.14); }
+.cs-fac-title { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 800; white-space: nowrap; padding-right: 6px; color: var(--ink); }
+.cs-fac-paw { width: 28px; height: 28px; border-radius: 50%; background: var(--navy); color: #fff; display: grid; place-items: center; font-size: 14px; }
+.cs-fac { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 2px; border-left: 1px solid var(--paper-edge); height: 26px; }
+.cs-fac img { width: 26px; height: 26px; object-fit: contain; flex: none; }
+.cs-fac > span { display: flex; flex-direction: column; min-width: 0; line-height: 1.05; }
+.cs-fac small { font-size: 9px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-fac b { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink); }
+
+.cs-panel { display: flex; flex-direction: column; min-height: 0; margin: 0 6px; background: var(--paper);
+  border: 2px solid var(--navy); border-bottom: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -3px 12px rgba(58,42,28,.14); overflow: hidden; }
+.cs-panel-head { background: linear-gradient(var(--navy), var(--navy-2)); color: #fff; font-weight: 900; font-size: 16px; padding: 7px 14px;
+  letter-spacing: .1em; flex: none; }
+.cs-panel-head span { color: var(--gold); margin-right: 4px; }
+.cs-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; -webkit-overflow-scrolling: touch; }
+.cs-card { flex: none; display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 6px; background: #fffdf7; border: 1.5px solid var(--paper-edge);
+  border-radius: 12px; text-align: left; font: inherit; color: inherit; box-shadow: 0 2px 4px rgba(58,42,28,.08); }
+.cs-card img { width: 58px; height: 48px; object-fit: contain; flex: none; }
+.cs-card-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cs-card-name { font-weight: 900; font-size: 14px; color: var(--ink); }
+.cs-card-effect { font-size: 11px; color: var(--ink-2); line-height: 1.3; }
+.cs-card-cost { font-size: 12px; font-weight: 800; color: var(--ink); display: flex; gap: 2px; align-items: center; }
+.cs-card-cost i { margin-left: auto; font-style: normal; color: var(--gold-edge); font-size: 12px; }
+.cs-card-go { font-size: 24px; line-height: 1; color: var(--navy); flex: none; }
+.cs-card.on { border-color: var(--gold-edge); background: #fff4d6; box-shadow: 0 0 0 2px var(--gold) inset, 0 2px 6px rgba(185,139,52,.3); }
+.cs-card.poor .cs-card-cost b { color: var(--red); }
+.cs-card:disabled { opacity: .45; }
+.cs-built { flex: none; display: flex; gap: 10px; align-items: center; margin: 8px 8px 0; padding: 6px 8px; background: #fff4d6; border: 2px solid var(--gold-edge); border-radius: 12px; }
+.cs-built[hidden] { display: none; }
+.cs-built img { width: 64px; height: 54px; object-fit: contain; flex: none; }
+.cs-built-name { font-weight: 900; font-size: 15px; }
+.cs-built-effect { font-size: 11px; color: var(--ink-2); margin: 2px 0 4px; }
+.cs-built .demolish { padding: 5px 10px; font-size: 12px; border-radius: 10px; }
+.cs-hint { flex: none; margin: 0; padding: 2px 10px 0; font-size: 12px; color: var(--ink-2); font-weight: 700; min-height: 1.5em; text-align: center; }
+.cs-build { flex: none; margin: 4px 10px 8px; padding: 9px 10px; font-size: 17px; font-weight: 900; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 14px; }
+.cs-build-icon { font-size: 18px; }
+@media (orientation: portrait) {
+  /* 縦は幅が狭いので、施設の帯は絵と数だけ */
+  .cs-fac small { display: none; }
+  .cs-fac-title { font-size: 10px; }
+}
+
 /* 城と村の地図。高さは幅から JS が決める (斜めのマスの比が決まっているので) */
 .town-map {
   position: relative;
@@ -1292,6 +1369,14 @@ img { -webkit-user-drag: none; }
   .locked-art { display: flex; align-items: center; justify-content: center; gap: 10px; }
   .locked-art > img { width: 46%; }
   .locked-art .navi-say { margin-top: 0; }
+
+  /* 城: 見本と同じ並び。上に札と資源、左に地図、右に「建築・強化」 */
+  .castle-body { grid-template-columns: minmax(0, 1fr) 292px; grid-template-rows: auto minmax(0, 1fr); }
+  .cs-head { grid-column: 1 / -1; padding: 6px calc(10px + var(--safe-r)) 2px 10px; }
+  .cs-stage { grid-column: 1; grid-row: 2; margin-bottom: var(--safe-b); }
+  .cs-panel { grid-column: 2; grid-row: 2; margin: 0 calc(8px + var(--safe-r)) calc(6px + var(--safe-b)) 0; border-bottom: 2px solid var(--navy); border-radius: 16px; }
+  .castle-view .locked-art { margin: calc(20px + var(--safe-t)) calc(14px + var(--safe-r)) 0 14px; }
+  .cs-build { font-size: 15px; padding: 8px 6px; }
 
   /* 天下: 地図を左いっぱい、札を右に */
   /* 天下: 札は右 (見本と同じ)。「あと ○ 国」の帯は札の下、案内の猫は左下 */

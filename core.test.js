@@ -160,7 +160,7 @@ test('壊れた保存データでも初期状態として読み込める', () =>
   const restored = Core.deserialize('{"merit": "abc", "vassals": "oops"}');
   assert.strictEqual(restored.merit, 0);
   assert.deepStrictEqual(restored.vassals, []);
-  assert.strictEqual(restored.castle.cells.length, Core.MAP_CELLS);
+  assert.strictEqual(restored.castle.cells.length, Core.CASTLE_CELLS);
 });
 
 test('古い保存データに新しい項目が無くても補われる', () => {
@@ -168,7 +168,7 @@ test('古い保存データに新しい項目が無くても補われる', () =>
   assert.strictEqual(restored.merit, 500);
   assert.strictEqual(restored.village.population, 0);
   assert.strictEqual(restored.village.cells.length, Core.MAP_CELLS);
-  assert.strictEqual(restored.castle.cells.length, Core.MAP_CELLS);
+  assert.strictEqual(restored.castle.cells.length, Core.CASTLE_CELLS);
 });
 
 // ---------------------------------------------------------- 合戦
@@ -863,6 +863,8 @@ test('家臣の名前は、空いている名前があればかぶらない', ()
 function townState(extra) {
   return stateAt(5000, Object.assign({ materials: 100000 }, extra || {})); // 城主
 }
+/** 城の使える土地 (はじめは 10x10 の真ん中 8x8) の n 番目のマス */
+const CC = (n) => Core.openCells(Core.createInitialState(1), 'castle')[n];
 function build(s, zone, idx, type) {
   const r = Core.placeBuilding(s, zone, idx, type);
   assert.strictEqual(r.ok, true, `${type} を ${zone}[${idx}] に建てられるはず`);
@@ -871,15 +873,15 @@ function build(s, zone, idx, type) {
 
 test('城と村: 城主になるまで建てられない', () => {
   const s = stateAt(1000, { materials: 100000 });
-  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 0, 'keep'), false);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', CC(0), 'keep'), false);
   assert.strictEqual(Core.canPlaceBuilding(s, 'village', 0, 'house'), false);
 });
 
 test('城と村: 建物は決まった場所にしか建てられない (お城は城、民家は村)', () => {
   const s = townState();
   assert.strictEqual(Core.canPlaceBuilding(s, 'village', 0, 'keep'), false);
-  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 0, 'house'), false);
-  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 0, 'keep'), true);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', CC(0), 'house'), false);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', CC(0), 'keep'), true);
   assert.strictEqual(Core.canPlaceBuilding(s, 'village', 0, 'house'), true);
 });
 
@@ -891,16 +893,16 @@ test('城と村: 空いているマスにしか建てられない。マスの外
 });
 
 test('城と村: 数に上限のある建物 (お城は1つ)', () => {
-  let s = build(townState(), 'castle', 0, 'keep');
-  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 1, 'keep'), false);
+  let s = build(townState(), 'castle', CC(0), 'keep');
+  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', CC(1), 'keep'), false);
   assert.strictEqual(Core.isCastleComplete(s), true);
 });
 
 test('城と村: 資材が足りないと建てられず、建てると資材が減る', () => {
   const poor = townState({ materials: 10 });
-  assert.strictEqual(Core.placeBuilding(poor, 'castle', 0, 'keep').ok, false);
+  assert.strictEqual(Core.placeBuilding(poor, 'castle', CC(0), 'keep').ok, false);
   const s0 = townState({ materials: 1000 });
-  const r = Core.placeBuilding(s0, 'castle', 0, 'keep');
+  const r = Core.placeBuilding(s0, 'castle', CC(0), 'keep');
   assert.strictEqual(r.state.materials, 1000 - Core.BUILDINGS.keep.cost);
 });
 
@@ -916,13 +918,13 @@ test('城と村: 民家は建てるほど高くなり、村人猫の上限が増
 });
 
 test('城と村: 取り壊すとマスが空き、元の値段の半分が戻る', () => {
-  let s = build(townState({ materials: 1000 }), 'castle', 3, 'armory');
+  let s = build(townState({ materials: 1000 }), 'castle', CC(3), 'armory');
   const before = s.materials;
-  const r = Core.demolish(s, 'castle', 3);
+  const r = Core.demolish(s, 'castle', CC(3));
   assert.strictEqual(r.ok, true);
-  assert.strictEqual(r.state.castle.cells[3], null);
+  assert.strictEqual(r.state.castle.cells[CC(3)], null);
   assert.strictEqual(r.state.materials, before + Math.floor(Core.BUILDINGS.armory.cost / 2));
-  assert.strictEqual(Core.demolish(r.state, 'castle', 3).ok, false, '空きマスは取り壊せない');
+  assert.strictEqual(Core.demolish(r.state, 'castle', CC(3)).ok, false, '空きマスは取り壊せない');
 });
 
 test('城と村: 民家を壊して上限を割ったら、村人猫は上限まで減る', () => {
@@ -935,16 +937,16 @@ test('城と村: 民家を壊して上限を割ったら、村人猫は上限ま
 test('城と村の効果: 猫侍の屋敷で家臣の枠が増える', () => {
   const s = townState();
   const base = Core.vassalSlots(s);
-  assert.strictEqual(Core.vassalSlots(build(s, 'castle', 0, 'mansion')), base + 2);
+  assert.strictEqual(Core.vassalSlots(build(s, 'castle', CC(0), 'mansion')), base + 2);
 });
 
 test('城と村の効果: 武器屋でパンチ、見張り台と温泉で体力、お城と商店で手柄が増える', () => {
   const s = townState();
   const b0 = Core.createBattle(s, Core.mulberry32(1));
-  let t = build(s, 'castle', 0, 'armory');
-  t = build(t, 'castle', 1, 'tower');
+  let t = build(s, 'castle', CC(0), 'armory');
+  t = build(t, 'castle', CC(1), 'tower');
   t = build(t, 'village', 0, 'onsen');
-  t = build(t, 'castle', 2, 'keep');
+  t = build(t, 'castle', CC(2), 'keep');
   t = build(t, 'village', 1, 'shop');
   const b1 = Core.createBattle(t, Core.mulberry32(1));
   assert.strictEqual(b1.player.atk, Math.round(b0.player.atk * 1.15));
@@ -960,8 +962,8 @@ test('城と村の効果: 訓練場で自主練、厩舎で普請、工房で資
   const meritGain = (x) => Core.tick(x, 10).merit - x.merit;
   const matGain = (x) => Core.tick(x, 10).materials - x.materials;
   const m0 = meritGain(s), g0 = matGain(s);
-  assert.ok(meritGain(build(s, 'castle', 0, 'dojo')) > m0 * 1.4, '訓練場');
-  assert.ok(matGain(build(s, 'castle', 0, 'stable')) > g0 * 1.1, '厩舎');
+  assert.ok(meritGain(build(s, 'castle', CC(0), 'dojo')) > m0 * 1.4, '訓練場');
+  assert.ok(matGain(build(s, 'castle', CC(0), 'stable')) > g0 * 1.1, '厩舎');
   const w = build(s, 'village', 0, 'workshop');
   assert.ok(matGain(w) > g0 * 1.4, '工房');
 });
@@ -976,6 +978,51 @@ test('城と村の効果: 田んぼとかざりで村人猫が早く増える (�
   assert.strictEqual(Core.townEffects(d).growthMul, 1.5, 'かざり20個でも +50% まで');
 });
 
+test('城: 10x10 のマスのうち、はじめは真ん中の 8x8 だけ使える。城レベルが上がると 9x9 → 10x10 に広がる', () => {
+  let s = townState();
+  assert.strictEqual(s.castle.cells.length, 100);
+  assert.deepStrictEqual(Core.openArea(s, 'castle'), { o: 1, n: 8, size: 10 });
+  assert.strictEqual(Core.openCells(s, 'castle').length, 64);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 0, 'flags'), false, 'いちばん奥の角 (まだ使えない)');
+  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 11, 'flags'), true, '8x8 の奥の角');
+  assert.strictEqual(Core.openArea(s, 'village').n, 6, '村は 6x6 のまま');
+  // 建てると経験値 (値段ぶん) が入り、区切りを越えるとレベルが上がる
+  assert.strictEqual(Core.castleLevel(s), 1);
+  let r = Core.placeBuilding(s, 'castle', CC(0), 'keep');   // 300
+  assert.ok(r.ok && r.leveledUp);
+  assert.strictEqual(r.state.castle.xp, 300);
+  assert.strictEqual(Core.castleLevel(r.state), 2);
+  r = Core.placeBuilding(r.state, 'castle', CC(1), 'armory'); // 420 → レベル 3 (9x9)
+  assert.ok(r.leveledUp && Core.castleLevel(r.state) === 3);
+  s = r.state;
+  assert.deepStrictEqual(Core.openArea(s, 'castle'), { o: 0, n: 9, size: 10 });
+  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 0, 'flags'), true, '広がった所に建てられる');
+  assert.strictEqual(s.castle.cells[CC(0)], 'keep', '前に建てた物はそのまま (広がっても前の土地を含む)');
+  // 取り壊しても経験値は減らない
+  const d = Core.demolish(s, 'castle', CC(1)).state;
+  assert.strictEqual(d.castle.xp, 420);
+  // いちばん上の段で 10x10
+  const top = Object.assign({}, s, { castle: Object.assign({}, s.castle, { xp: Core.CASTLE_LEVELS[Core.CASTLE_LEVELS.length - 1].xp }) });
+  assert.deepStrictEqual(Core.openArea(top, 'castle'), { o: 0, n: 10, size: 10 });
+  assert.strictEqual(Core.castleLevelInfo(top).next, null);
+  const info = Core.castleLevelInfo(s);
+  assert.deepStrictEqual([info.level, info.xp, info.from, info.next], [3, 420, 400, 700]);
+});
+
+test('城: 前の版 (城 6x6) の保存データは、真ん中へ引っ越し、建っている物の値段から城レベルが決まる', () => {
+  const cells = new Array(36).fill(null);
+  cells[0] = 'keep'; cells[7] = 'mansion'; cells[35] = 'flags';   // 6x6 の (0,0)・(1,1)・(5,5)
+  const s = Core.sanitizeState({ merit: 5000, totalMerit: 5000, castle: { cells } });
+  assert.strictEqual(s.castle.cells.length, 100);
+  assert.strictEqual(s.castle.cells[2 * 10 + 2], 'keep', '(0,0) → (2,2)');
+  assert.strictEqual(s.castle.cells[3 * 10 + 3], 'mansion');
+  assert.strictEqual(s.castle.cells[7 * 10 + 7], 'flags');
+  assert.ok([22, 33, 77].every((i) => Core.isOpenCell(s, 'castle', i)), '引っ越した先は使える土地の中');
+  assert.strictEqual(s.castle.xp, 300 + 60 + 5);
+  assert.strictEqual(Core.castleLevel(s), 2);
+  assert.deepStrictEqual(Core.sanitizeState(JSON.parse(JSON.stringify(s))), s, '新しい形は読み直しても変わらない');
+});
+
 test('前の版の保存データ (城4x4・家の数) は、新しいマスへ引っ越す', () => {
   const old = {
     merit: 5000, totalMerit: 5000, materials: 10,
@@ -983,7 +1030,7 @@ test('前の版の保存データ (城4x4・家の数) は、新しいマスへ�
     castle: { cells: ['keep', 'barracks', null, 'storehouse', 'well', 'wall'].concat(new Array(10).fill(null)) }
   };
   const s = Core.sanitizeState(old);
-  assert.strictEqual(s.castle.cells.length, Core.MAP_CELLS);
+  assert.strictEqual(s.castle.cells.length, Core.CASTLE_CELLS);
   assert.strictEqual(Core.countBuildings(s, 'keep'), 1);
   assert.strictEqual(Core.countBuildings(s, 'mansion'), 1, '長屋 → 猫侍の屋敷');
   assert.strictEqual(Core.countBuildings(s, 'stonewall'), 1, '塀 → 城の石垣');

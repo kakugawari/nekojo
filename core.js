@@ -929,12 +929,51 @@
 
   // ---------------------------------------------------------- 城と村 (マスに建てる)
   //
-  // 城と村は、それぞれ 6x6 のマス。1 マスに 1 つ建てる。建物ごとに建てられる場所 (zone) が決まっている。
+  // 村は 6x6 のマス、城は 10x10 のマス (はじめは真ん中の 8x8 だけ使え、城レベルが上がると 9x9 → 10x10 と広がる)。
+  // 1 マスに 1 つ建てる。建物ごとに建てられる場所 (zone) が決まっている。
   // 効果は townEffects にまとめ、家臣の枠・時の流れ・合戦の強さから読む。
 
-  const MAP_SIZE = 6;
+  const MAP_SIZE = 6;                         // 村
   const MAP_CELLS = MAP_SIZE * MAP_SIZE;
+  const CASTLE_SIZE = 10;                     // 城 (いちばん広がったとき)
+  const CASTLE_CELLS = CASTLE_SIZE * CASTLE_SIZE;
   const ZONES = ['castle', 'village'];
+  function zoneSize(zone) { return zone === 'castle' ? CASTLE_SIZE : MAP_SIZE; }
+
+  // 城レベル: 城に建てた物の値段の合計 (経験値。取り壊しても減らない) で上がる。上がると使える土地が広がる。
+  // 前の 6x6 は狭かった (いただいた声)。お城と、効き目のある建物を全部建てると 1180 なので、最後の段はかざりも建てて届く
+  const CASTLE_LEVELS = [
+    { xp: 0, open: 8 }, { xp: 150, open: 8 }, { xp: 400, open: 9 }, { xp: 700, open: 9 }, { xp: 1200, open: 10 }
+  ];
+  function castleXp(state) { return (state.castle && state.castle.xp) || 0; }
+  function castleLevel(state) {
+    const xp = castleXp(state);
+    let lv = 1;
+    CASTLE_LEVELS.forEach(function (l, i) { if (xp >= l.xp) lv = i + 1; });
+    return lv;
+  }
+  /** 城レベルの経験値: いまの段のはじめ・次の段まで (最後の段なら next は null) */
+  function castleLevelInfo(state) {
+    const lv = castleLevel(state);
+    return { level: lv, xp: castleXp(state), from: CASTLE_LEVELS[lv - 1].xp, next: lv < CASTLE_LEVELS.length ? CASTLE_LEVELS[lv].xp : null, max: CASTLE_LEVELS.length };
+  }
+  /** 使える土地 (正方形): 左上のマス o と一辺 n。広がっても、前の土地を含むように真ん中から広げる */
+  function openArea(state, zone) {
+    if (zone !== 'castle') return { o: 0, n: MAP_SIZE, size: MAP_SIZE };
+    const n = CASTLE_LEVELS[castleLevel(state) - 1].open;
+    return { o: Math.floor((CASTLE_SIZE - n) / 2), n: n, size: CASTLE_SIZE };
+  }
+  function isOpenCell(state, zone, i) {
+    const a = openArea(state, zone);
+    const gx = i % a.size, gy = Math.floor(i / a.size);
+    return i >= 0 && i < a.size * a.size && gx >= a.o && gx < a.o + a.n && gy >= a.o && gy < a.o + a.n;
+  }
+  /** 使える土地のマスの番号 (奥から順) */
+  function openCells(state, zone) {
+    const a = openArea(state, zone), out = [];
+    for (let gy = a.o; gy < a.o + a.n; gy++) for (let gx = a.o; gx < a.o + a.n; gx++) out.push(gy * a.size + gx);
+    return out;
+  }
 
   const BUILDINGS = {
     // 城
@@ -1012,7 +1051,7 @@
     const def = BUILDINGS[type];
     if (!def || def.zone !== zone || ZONES.indexOf(zone) < 0) return false;
     if (!isTownUnlocked(state)) return false;
-    if (!(cellIndex >= 0 && cellIndex < MAP_CELLS)) return false;
+    if (!isOpenCell(state, zone, cellIndex)) return false;
     if (state[zone].cells[cellIndex] !== null) return false;
     if (def.max !== null && countBuildings(state, type) >= def.max) return false;
     return state.materials >= buildingCost(state, type);
@@ -1025,7 +1064,14 @@
     cells[cellIndex] = type;
     const next = Object.assign({}, state, { materials: state.materials - cost });
     next[zone] = Object.assign({}, state[zone], { cells: cells });
-    return { ok: true, state: next, cost: cost };
+    // 城に建てると、城レベルの経験値が入る (値段ぶん)
+    let leveledUp = false;
+    if (zone === 'castle') {
+      const lv = castleLevel(state);
+      next.castle.xp = castleXp(state) + cost;
+      leveledUp = castleLevel(next) > lv;
+    }
+    return { ok: true, state: next, cost: cost, leveledUp: leveledUp };
   }
 
   /** 取り壊す。建てたときの元の値段の半分が戻る */
@@ -1544,7 +1590,7 @@
       storySeen: false,
       hero: { hp: 0, atk: 0 },
       village: { population: 0, cells: new Array(MAP_CELLS).fill(null) },
-      castle: { cells: new Array(MAP_CELLS).fill(null) },
+      castle: { cells: new Array(CASTLE_CELLS).fill(null), xp: 0 },
       realm: null
     };
   }
@@ -1607,24 +1653,32 @@
         skill: VASSAL_SKILLS[v.skill] ? v.skill : SKILL_KEYS[v.id % SKILL_KEYS.length]
       };
     }) : base.vassals;
-    out.castle = { cells: new Array(MAP_CELLS).fill(null) };
+    out.castle = { cells: new Array(CASTLE_CELLS).fill(null), xp: 0 };
     out.village = {
       population: (raw.village && Number.isFinite(raw.village.population)) ? Math.max(0, raw.village.population) : 0,
       cells: new Array(MAP_CELLS).fill(null)
     };
     const put = function (zone, type) {
-      const i = out[zone].cells.indexOf(null);
-      if (i >= 0) out[zone].cells[i] = type;
+      const i = openCells(out, zone).find(function (k) { return out[zone].cells[k] === null; });
+      if (i !== undefined) out[zone].cells[i] = type;
     };
     const oldCastle = raw.castle && Array.isArray(raw.castle.cells) ? raw.castle.cells : [];
-    if (oldCastle.length === MAP_CELLS) {
-      oldCastle.forEach(function (c, i) { if (BUILDINGS[c] && BUILDINGS[c].zone === 'castle') out.castle.cells[i] = c; });
+    const isCastle = function (c) { return BUILDINGS[c] && BUILDINGS[c].zone === 'castle'; };
+    if (oldCastle.length === CASTLE_CELLS) {
+      oldCastle.forEach(function (c, i) { if (isCastle(c)) out.castle.cells[i] = c; });
+    } else if (oldCastle.length === MAP_CELLS) {
+      // 前の版 (城 6x6) から: 真ん中へ置く (はじめに使える 8x8 の内側。並びはそのまま)
+      const off = (CASTLE_SIZE - MAP_SIZE) / 2;
+      oldCastle.forEach(function (c, i) { if (isCastle(c)) out.castle.cells[(Math.floor(i / MAP_SIZE) + off) * CASTLE_SIZE + (i % MAP_SIZE) + off] = c; });
     } else {
       // 前の版 (城 4x4・家は数だけ) からの引っ越し。似た役目の建物に置き換える
       const OLD = { keep: ['castle', 'keep'], barracks: ['castle', 'mansion'], wall: ['castle', 'stonewall'],
         storehouse: ['village', 'workshop'], well: ['village', 'well'] };
       oldCastle.forEach(function (c) { if (OLD[c]) put(OLD[c][0], OLD[c][1]); });
     }
+    // 城レベルの経験値。前の版には無いので、いま建っている物の値段から決める (建ててあるのにレベル 1 にならないように)
+    const builtXp = out.castle.cells.reduce(function (n, c) { return n + (c ? BUILDINGS[c].cost : 0); }, 0);
+    out.castle.xp = raw.castle && Number.isFinite(raw.castle.xp) ? Math.max(builtXp, raw.castle.xp) : builtXp;
     const oldVillage = raw.village && Array.isArray(raw.village.cells) ? raw.village.cells : null;
     if (oldVillage && oldVillage.length === MAP_CELLS) {
       oldVillage.forEach(function (c, i) { if (BUILDINGS[c] && BUILDINGS[c].zone === 'village') out.village.cells[i] = c; });
@@ -1690,6 +1744,15 @@
 
     MAP_SIZE: MAP_SIZE,
     MAP_CELLS: MAP_CELLS,
+    CASTLE_SIZE: CASTLE_SIZE,
+    CASTLE_CELLS: CASTLE_CELLS,
+    CASTLE_LEVELS: CASTLE_LEVELS,
+    zoneSize: zoneSize,
+    castleLevel: castleLevel,
+    castleLevelInfo: castleLevelInfo,
+    openArea: openArea,
+    isOpenCell: isOpenCell,
+    openCells: openCells,
     ZONES: ZONES,
     BUILDINGS: BUILDINGS,
     DECO_EFFECT: DECO_EFFECT,
