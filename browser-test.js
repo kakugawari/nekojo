@@ -924,6 +924,34 @@ async function run() {
       await tc.close();
     }
 
+    // ------------------------------------------------ 村は「増える所」: 村人猫が兵に志願し、商店で小判が入る
+    section('村 (兵と小判を生む)');
+    {
+      const vc = await browser.newContext({ ...device, viewport: { width: 430, height: 932 } });
+      const vp = await vc.newPage();
+      vp.on('pageerror', (e) => errors.push('村: ' + e.message));
+      await vp.goto(URL);
+      await vp.waitForFunction(() => window.__app);
+      await vp.addStyleTag({ content: ':root{--safe-t:59px;--safe-b:34px}' });
+      await vp.evaluate(() => { const a = window.__app; a.start(); a.closeStory(); a.debugAddMerit(6000); a.closeModals(); a.debugSetMaterials(100000); a.setTab('village');
+        for (let i = 0; i < 5; i++) a.build('village', i, 'house'); a.build('village', 5, 'shop'); });
+      await vp.evaluate(() => window.__app.debugSetState((s) => Object.assign({}, s, { village: Object.assign({}, s.village, { population: 50, recruits: 340 }) })));
+      await vp.waitForTimeout(400);
+      const v1 = await vp.evaluate(() => ({ t: document.getElementById('popTroops').textContent, c: document.getElementById('popCoins').textContent }));
+      ok(/兵の見習い 34\d\/2000/.test(v1.t) && /小判 \+\d/.test(v1.c), `村の画面に、兵の見習いと商いの小判が出る (${v1.t} / ${v1.c})`);
+      await vp.evaluate(() => { window.__app.setTab('realm'); window.__app.startRealm(23); });
+      await vp.waitForTimeout(400);
+      await vp.evaluate(() => window.__app.selectPref(23));
+      await vp.waitForTimeout(500);
+      const r = await vp.evaluate(() => ({ troops: window.Core.troopsAt(window.__app.state(), 23), v: (document.querySelector('#realmSheet [data-v="village"]') || {}).textContent || '' }));
+      ok(r.troops === 800 && /村から 兵 \+\d/.test(r.v), `国を任されると、待っていた見習い 300 匹がはじめの国へ (兵 ${r.troops})。札に「${r.v}」`);
+      await vp.evaluate(() => window.__app.setTab('village'));
+      await vp.waitForTimeout(300);
+      const v2 = await vp.evaluate(() => document.getElementById('popTroops').textContent);
+      ok(/→ 愛知/.test(v2), `国を任されたあとは、村の画面に兵の行き先が出る (${v2})`);
+      await vc.close();
+    }
+
     // ------------------------------------------------ 天下 (日本地図の国とり)
     section('天下 (日本地図で、となりの大名を倒して天下統一)');
     for (const [vw, vh, safe] of [[430, 932, ':root{--safe-t:59px;--safe-b:34px}'], [932, 430, ':root{--safe-l:59px;--safe-r:59px;--safe-b:21px}']]) {

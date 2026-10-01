@@ -1014,8 +1014,8 @@
     farm: { zone: 'village', name: '農場', img: 'b-farm', cost: 40, max: 4, effect: '村人の集める資材 +50%' },
     rice: { zone: 'village', name: '田んぼ', img: 'b-rice', cost: 30, max: 4, effect: '村人猫が早く増える +30%' },
     workshop: { zone: 'village', name: '工房', img: 'b-workshop', cost: 80, max: 4, effect: '資材 +50%' },
-    shop: { zone: 'village', name: '商店', img: 'b-shop', cost: 90, max: 2, effect: '合戦の手柄 +10%' },
-    onsen: { zone: 'village', name: '温泉', img: 'b-onsen', cost: 150, max: 1, effect: '合戦の体力 +20%' },
+    shop: { zone: 'village', name: '商店', img: 'b-shop', cost: 90, max: 2, effect: '村人猫が商いをして、小判が入る' },
+    onsen: { zone: 'village', name: '温泉', img: 'b-onsen', cost: 150, max: 1, effect: '兵に志願する村人猫 +50%' },
     well: { zone: 'village', name: '井戸', img: 'b-well', cost: 20, max: 2, effect: '村人猫の上限 +3' },
     sakura: { zone: 'village', name: '桜の木', img: 'b-sakura', cost: 25, max: null, deco: true },
     garden: { zone: 'village', name: '庭', img: 'b-garden', cost: 25, max: null, deco: true },
@@ -1082,8 +1082,11 @@
       matMul: 1 + 0.5 * n('workshop'),
       growthMul: 1 + 0.3 * n('rice') + Math.min(0.5, 0.05 * countDeco(state)),
       atkMul: 1 + 0.15 * n('armory'),
-      hpMul: 1 + 0.1 * n('tower') + 0.2 * n('onsen'),
-      meritMul: 1 + 0.2 * n('keep') + 0.1 * n('shop')
+      hpMul: 1 + 0.1 * n('tower'),
+      meritMul: 1 + 0.2 * n('keep'),
+      // 村は「増える所」: 村人猫が兵に志願し (温泉で増える)、商店で小判が入る。合戦を強くする効き目は城だけ
+      recruitMul: 1 + 0.5 * n('onsen'),
+      shops: n('shop')
     };
   }
 
@@ -1132,6 +1135,24 @@
       if (village.population > cap) next.village = Object.assign({}, village, { population: cap });
     }
     return { ok: true, state: next, refund: refund };
+  }
+
+  // 村から生まれる兵と小判 (1 秒あたり)。村人猫 1 匹で、兵に志願するのが RECRUIT_PER_POP 匹、
+  // 商店 1 軒につき小判 SHOP_COIN_PER_POP。兵は 100 匹そろうごとに、天下のはじめに任された国へ行く。
+  // 天下で国を任される前は、見習いとして RECRUIT_WAIT_CAP 匹まで村で待つ
+  const RECRUIT_PER_POP = 0.005;
+  const SHOP_COIN_PER_POP = 0.0025;
+  const RECRUIT_WAIT_CAP = 2000;
+
+  function villageOutput(state) {
+    const fx = townEffects(state);
+    const pop = isTownUnlocked(state) ? state.village.population : 0;
+    return {
+      troops: pop * RECRUIT_PER_POP * fx.recruitMul,
+      coins: pop * SHOP_COIN_PER_POP * fx.shops,
+      waiting: state.village.recruits || 0,
+      home: hasRealm(state) ? state.realm.home : null
+    };
   }
 
   function villageCapacity(state) {
@@ -1629,14 +1650,35 @@
       village = Object.assign({}, state.village, { population: population });
     }
 
+    // 村から: 兵の志願と商いの小判 (この間の村人猫の数は、増える前と後の真ん中で数える)
+    const out = villageOutput(Object.assign({}, state, { village: Object.assign({}, village, { population: (state.village.population + village.population) / 2 }) }));
+    let realm = state.realm;
+    if (out.troops > 0) {
+      let waiting = (village.recruits || 0) + out.troops * dt;
+      if (realm && realm.home) {
+        // 100 匹そろうごとに、はじめに任された国 (取られることがない) へ
+        const go = Math.floor(waiting / TROOP_UNIT) * TROOP_UNIT;
+        if (go > 0) {
+          const troops = realm.troops.slice();
+          troops[realm.home - 1] += go;
+          realm = Object.assign({}, realm, { troops: troops });
+          waiting -= go;
+        }
+      } else {
+        waiting = Math.min(RECRUIT_WAIT_CAP, waiting);
+      }
+      village = Object.assign({}, village, { recruits: waiting });
+    }
+
     // 取った国からの年貢 (小判だけ。経験値にはならない)
     const tax = ownedCount(state) * TAX_PER_PREF;
 
     return Object.assign({}, state, {
-      merit: state.merit + (meritGain + tax) * dt,
+      merit: state.merit + (meritGain + tax + out.coins) * dt,
       totalMerit: state.totalMerit + meritGain * dt,
       materials: state.materials + materialGain * fx.matMul * dt,
-      village: village
+      village: village,
+      realm: realm
     });
   }
 
@@ -1653,7 +1695,7 @@
       battlesWon: 0,
       storySeen: false,
       hero: { hp: 0, atk: 0 },
-      village: { population: 0, cells: new Array(MAP_CELLS).fill(null) },
+      village: { population: 0, recruits: 0, cells: new Array(MAP_CELLS).fill(null) },
       castle: { cells: new Array(CASTLE_CELLS).fill(null), xp: 0 },
       realm: null
     };
@@ -1720,6 +1762,7 @@
     out.castle = { cells: new Array(CASTLE_CELLS).fill(null), xp: 0 };
     out.village = {
       population: (raw.village && Number.isFinite(raw.village.population)) ? Math.max(0, raw.village.population) : 0,
+      recruits: (raw.village && Number.isFinite(raw.village.recruits)) ? Math.max(0, raw.village.recruits) : 0,
       cells: new Array(MAP_CELLS).fill(null)
     };
     const put = function (zone, type) {
@@ -1760,6 +1803,7 @@
     }
     out.village.population = Math.min(out.village.population, villageCapacity(out));
     out.realm = sanitizeRealm(raw.realm);
+    if (!out.realm) out.village.recruits = Math.min(RECRUIT_WAIT_CAP, out.village.recruits);
     return out;
   }
 
@@ -1869,6 +1913,8 @@
     prefLevelFor: prefLevelFor,
     startRealm: startRealm,
     troopCost: troopCost,
+    villageOutput: villageOutput,
+    RECRUIT_WAIT_CAP: RECRUIT_WAIT_CAP,
     canBuyTroops: canBuyTroops,
     buyTroops: buyTroops,
     affordableTroops: affordableTroops,

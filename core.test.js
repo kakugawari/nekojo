@@ -940,18 +940,67 @@ test('城と村の効果: 猫侍の屋敷で家臣の枠が増える', () => {
   assert.strictEqual(Core.vassalSlots(build(s, 'castle', CC(0), 'mansion')), base + 2);
 });
 
-test('城と村の効果: 武器屋でパンチ、見張り台と温泉で体力、お城と商店で手柄が増える', () => {
+test('城と村の効果: 武器屋でパンチ、見張り台で体力、お城で手柄が増える。村の商店・温泉は合戦を強くしない', () => {
   const s = townState();
   const b0 = Core.createBattle(s, Core.mulberry32(1));
   let t = build(s, 'castle', CC(0), 'armory');
   t = build(t, 'castle', CC(1), 'tower');
-  t = build(t, 'village', 0, 'onsen');
   t = build(t, 'castle', CC(2), 'keep');
-  t = build(t, 'village', 1, 'shop');
   const b1 = Core.createBattle(t, Core.mulberry32(1));
   assert.strictEqual(b1.player.atk, Math.round(b0.player.atk * 1.15));
-  assert.strictEqual(b1.player.maxHp, Math.round(b0.player.maxHp * 1.3));
-  assert.strictEqual(b1.enemies[0].reward, Math.round(b0.enemies[0].reward * 1.3));
+  assert.strictEqual(b1.player.maxHp, Math.round(b0.player.maxHp * 1.1));
+  assert.strictEqual(b1.enemies[0].reward, Math.round(b0.enemies[0].reward * 1.2));
+  // 村は「増える所」。合戦を強くする効き目は城だけ (城と村の役割を分けた)
+  const v = build(build(t, 'village', 0, 'onsen'), 'village', 1, 'shop');
+  const b2 = Core.createBattle(v, Core.mulberry32(1));
+  assert.deepStrictEqual([b2.player.atk, b2.player.maxHp, b2.enemies[0].reward], [b1.player.atk, b1.player.maxHp, b1.enemies[0].reward]);
+});
+
+test('村: 村人猫が兵に志願する。天下で国を任される前は、見習いとして 2000 匹まで村で待つ', () => {
+  // 民家 5 軒で上限 50 匹。村人猫 50 匹
+  let s = townState();
+  for (let i = 30; i < 35; i++) s = build(s, 'village', i, 'house');
+  s = Object.assign({}, s, { village: Object.assign({}, s.village, { population: 50 }) });
+  const out = Core.villageOutput(s);
+  assert.ok(Math.abs(out.troops - 0.25) < 1e-9, `村人猫 50 匹で 1 秒に 0.25 匹 (${out.troops})`);
+  const a = Core.tick(s, 60);
+  assert.ok(Math.abs(a.village.recruits - 15) < 1e-6, `1 分で 15 匹待つ (${a.village.recruits})`);
+  const b = Core.tick(s, 8 * 3600);
+  assert.strictEqual(b.village.recruits, Core.RECRUIT_WAIT_CAP, '待つのは 2000 匹まで');
+  // 国を任されると、100 匹そろうごとに、はじめの国へ行く (端数は村に残る)
+  const r = Core.startRealm(b, 23, Core.mulberry32(1)).state;
+  const t0 = Core.troopsAt(r, 23);
+  const c = Core.tick(r, 1);
+  assert.strictEqual(Core.troopsAt(c, 23) - t0, 2000, '待っていた 2000 匹がはじめの国へ');
+  assert.ok(c.village.recruits > 0 && c.village.recruits < 100, `端数は村に残る (${c.village.recruits})`);
+  assert.strictEqual(Core.troopsAt(c, 23) % 100, 0, '兵は 100 匹ずつ');
+  const d = Core.tick(c, 1200);
+  assert.strictEqual(Core.troopsAt(d, 23) - Core.troopsAt(c, 23), 300, '20 分で 300 匹 (村人猫 50 匹)');
+});
+
+test('村: 温泉で志願する兵が 1.5 倍、商店 1 軒ごとに村人猫の数に応じた小判が入る (経験値にはならない)', () => {
+  let s = townState();
+  for (let i = 30; i < 35; i++) s = build(s, 'village', i, 'house');
+  s = Object.assign({}, s, { village: Object.assign({}, s.village, { population: 50 }) });
+  const t0 = Core.villageOutput(s).troops;
+  assert.ok(Math.abs(Core.villageOutput(build(s, 'village', 0, 'onsen')).troops - t0 * 1.5) < 1e-9, '温泉');
+  assert.strictEqual(Core.villageOutput(s).coins, 0, '商店が無いと小判は入らない');
+  const one = build(s, 'village', 0, 'shop'), two = build(one, 'village', 1, 'shop');
+  assert.ok(Math.abs(Core.villageOutput(one).coins - 0.125) < 1e-9, `村人猫 50 匹・商店 1 軒で 1 秒に小判 0.125 (${Core.villageOutput(one).coins})`);
+  assert.ok(Math.abs(Core.villageOutput(two).coins - 0.25) < 1e-9, '2 軒で倍');
+  const a = Core.tick(two, 100);
+  assert.ok(Math.abs(a.merit - two.merit - 25) < 1e-6, `100 秒で小判が 25 入る (${(a.merit - two.merit).toFixed(1)})`);
+  assert.strictEqual(a.totalMerit, two.totalMerit, '経験値にはならない');
+});
+
+test('村: 見習いの兵は保存して読み直しても残り、国を任される前なら 2000 匹までに直す', () => {
+  const s = townState();
+  const raw = JSON.parse(JSON.stringify(Object.assign({}, s, { village: Object.assign({}, s.village, { recruits: 5000 }) })));
+  assert.strictEqual(Core.sanitizeState(raw).village.recruits, Core.RECRUIT_WAIT_CAP);
+  raw.village.recruits = 123.5;
+  assert.strictEqual(Core.sanitizeState(raw).village.recruits, 123.5);
+  raw.village.recruits = 'x';
+  assert.strictEqual(Core.sanitizeState(raw).village.recruits, 0);
 });
 
 test('城と村の効果: 訓練場で自主練、厩舎で普請、工房で資材ぜんぶが増える', () => {

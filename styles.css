@@ -755,6 +755,7 @@ img { -webkit-user-drag: none; }
 
 .pop { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 .pop-label { font-weight: 800; font-size: 14px; }
+.pop-out { display: flex; flex-direction: column; gap: 2px; font-size: 12px; font-weight: 800; color: var(--ink-2); }
 
 /* --------------------------------------------------------- 天下 (日本地図の国とり)
    見本の絵 (art/realm-mock.png) に合わせる: 地図は画面いっぱい、左上に墨の題字、上に紺の数の帯と「もどる」、

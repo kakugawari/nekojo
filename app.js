@@ -238,7 +238,7 @@
   function lockedMessage(tab) {
     if (tab === 'vassals') return '「' + C.RANKS[C.VASSAL_UNLOCK_RANK].name + '」になると、仲間を持てるようになるにゃ。';
     if (tab === 'realm') return '「' + C.RANKS[C.REALM_UNLOCK_RANK].name + '」になると、お殿様から 国をひとつ任されるにゃ。\nとなりの国の大名を倒して、天下統一をめざそう!';
-    return '「' + C.RANKS[C.CASTLE_UNLOCK_RANK].name + '」になると、自分の城と村を持てるにゃ。';
+    return '「' + C.RANKS[C.CASTLE_UNLOCK_RANK].name + '」になると、自分の城と村を持てるにゃ。城で強くなって、村で兵と小判を増やすにゃ。';
   }
 
   /** 合戦が始まっていて、まだ決着していない (ほかの画面へ行っている間も含む) */
@@ -1548,7 +1548,7 @@
     if (prev < C.COUNTER_RANK && idx >= C.COUNTER_RANK) tips.push('<b>新しい技「カウンター」</b><br>ためて待って、赤い「!」で はなすにゃ');
     if (prev < C.YUDO_RANK && idx >= C.YUDO_RANK) tips.push('<b>新しい技「誘導」</b><br>ボス猫が「!!」で突進してきたら、猫じゃらしで 樽へ!');
     if (prev < C.REALM_UNLOCK_RANK && idx >= C.REALM_UNLOCK_RANK) tips.push('<b>🗾 国をひとつ任されたにゃ!</b><br>「天下」の地図で、天下統一をめざそう');
-    if (prev < C.CASTLE_UNLOCK_RANK && idx >= C.CASTLE_UNLOCK_RANK) tips.push('<b>城と村を持てるようになったにゃ!</b>');
+    if (prev < C.CASTLE_UNLOCK_RANK && idx >= C.CASTLE_UNLOCK_RANK) tips.push('<b>城と村を持てるようになったにゃ!</b> 城は合戦と家臣を強くして、村は兵と小判を増やすにゃ');
     els.rankUpText.innerHTML = text;
     const rankNavi = $('rankNavi');
     rankNavi.hidden = !tips.length;
@@ -2086,6 +2086,9 @@
     return [sel];
   }
 
+  /** 1 秒あたりの量を「1 分あたり」の字に (10 未満は小数 1 けた) */
+  function perMin(x) { const m = x * 60; return m < 10 ? String(Math.round(m * 10) / 10) : String(Math.round(m)); }
+
   function effectChips(zone) {
     const fx = C.townEffects(state);
     const pct = function (mul) { return Math.round((mul - 1) * 100); };
@@ -2102,6 +2105,8 @@
       if (fx.matMul > 1) chips.push('資材 +' + pct(fx.matMul) + '%');
       if (fx.popMatMul > 1) chips.push('村人の資材 +' + pct(fx.popMatMul) + '%');
       if (fx.growthMul > 1) chips.push('増え方 +' + pct(fx.growthMul) + '%');
+      if (fx.recruitMul > 1) chips.push('兵の志願 +' + pct(fx.recruitMul) + '%');
+      if (fx.shops) chips.push('商店 ' + fx.shops + ' 軒');
     }
     return chips;
   }
@@ -2138,6 +2143,13 @@
       const cap = C.villageCapacity(state);
       els.popLabel.textContent = '村人猫 ' + Math.floor(state.village.population) + ' / ' + cap + ' 匹';
       els.popFill.style.width = Math.min(100, state.village.population / cap * 100) + '%';
+      // 村は「増える所」: 村人猫が兵に志願し、商店で小判が入る
+      const vo = C.villageOutput(state);
+      const set = function (id, t) { const el = $(id); if (el.textContent !== t) el.textContent = t; el.hidden = !t; };
+      set('popTroops', vo.home
+        ? '⚔ 兵 +' + perMin(vo.troops) + '/分 → ' + C.prefOf(vo.home).name + ' (100 匹ずつ。いま ' + Math.floor(vo.waiting) + ')'
+        : '⚔ 兵の見習い ' + Math.floor(vo.waiting) + '/' + C.RECRUIT_WAIT_CAP + ' 匹 ・ 国を任されたら そこへ');
+      set('popCoins', vo.coins > 0 ? '🪙 商いの小判 +' + perMin(vo.coins) + '/分' : '');
     }
   }
 
@@ -3199,12 +3211,12 @@
     } else if (mode === 'overview') {
       head('<img src="' + imgs['stage3'].src + '" alt="" class="face">', '天下統一まで あと <b data-v="left"></b> 国', '現在の状況');
       add('', 'rs-progress').dataset.v = 'progress';
-      add('<span data-v="owned"></span><span data-v="troops"></span><span data-v="tax"></span>', 'sheet-stats');
+      add('<span data-v="owned"></span><span data-v="troops"></span><span data-v="tax"></span><span data-v="village"></span>', 'sheet-stats');
       add('赤い点線の国に 攻め込めるにゃ。国を押してね。兵が多いほど、合戦の敵が へって 弱くなる。', 'rs-desc', 'p');
     } else if (mode === 'mine') {
       const home = state.realm.home === sel;
       head(castleImg, pref.name + ' <i>🐾</i>', pref.kuni + 'の国 (' + (home ? 'はじめに任された国' : '自分の国') + ')');
-      add('<span data-v="here"></span><span data-v="troops"></span>', 'sheet-stats');
+      add('<span data-v="here"></span><span data-v="troops"></span>' + (home ? '<span data-v="village"></span>' : ''), 'sheet-stats');
       add(pref.desc, 'rs-desc flavor', 'p');
       // 兵を買う: 100 匹・1000 匹・買えるだけ (前は 100 匹ずつ何度も押すしかなかった)
       const row = add('', 'sheet-row');
@@ -3314,6 +3326,10 @@
     set('owned', '自分の国 ' + C.ownedCount(state));
     set('troops', '兵 ぜんぶで ' + C.totalTroops(state));
     set('tax', '年貢 +' + Math.round(C.ownedCount(state) * C.TAX_PER_PREF * 60) + ' 小判/分');
+    // 村から志願する兵 (はじめに任された国へ来る)。村がまだ無いうちは出さない
+    const vt = C.villageOutput(state).troops;
+    const ve = box.querySelector('[data-v="village"]');
+    if (ve) { set('village', vt > 0 ? '村から 兵 +' + perMin(vt) + '/分' : ''); ve.hidden = !(vt > 0); }
     const prog = box.querySelector('[data-v="progress"]');
     if (prog) {
       // 地方ごとの丸: その地方をぜんぶ取ったら光る
