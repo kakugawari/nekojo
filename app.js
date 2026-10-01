@@ -1927,6 +1927,76 @@
     });
   }
 
+  /**
+   * 城と村の建物 (と、選んでいる間の薄い建物) を、奥から順に並べる。地面の物 (道・池・土台) は建物より先 (建物の下に敷く物なので)。
+   * 2x2 の物は左上のマスから 2 マスぶん
+   */
+  function buildingItems(m, ghostType, ghostCell) {
+    const items = [];
+    const itemOf = function (type, i, ghost) {
+      const p = localOf(m, i), k = C.sizeOf(type);
+      const ground = C.BUILDINGS[type].ground;
+      return { depth: (ground ? -1000 : 0) + p.lx + p.ly + k, type: type, i: i, lx: p.lx, ly: p.ly, k: k, ghost: ghost };
+    };
+    state[m.zone].cells.forEach(function (type, i) {
+      if (type && C.BUILDINGS[type]) items.push(itemOf(type, i, false));
+    });
+    if (ghostType) items.push(itemOf(ghostType, ghostCell, true));
+    items.sort(function (a, b) { return a.depth - b.depth; });
+    return items;
+  }
+
+  /** 建物の絵を描く四角 (画面の位置)。絵が読めていなければ null */
+  function itemRect(m, it) {
+    const def = C.BUILDINGS[it.type];
+    const im = buildingImg(it.type);
+    if (!ready(im)) return null;
+    const k = it.k || 1;
+    const top = cellTop(m, it.lx, it.ly);   // 使うマス (k x k) のいちばん奥の頂点。真ん中は奥から k/2 マス
+    const foot = top.y + m.th * k;          // 使うマスのいちばん手前の頂点
+    const sz = buildingSize(m, it.type, im);
+    // 地面の物は、絵の石垣の側面ぶん (高さの 2 割ほど) を手前の頂点より下へ出す。建物は足もとを手前の頂点のすこし上に
+    const bottom = def.ground ? foot + sz.h * 0.2 : top.y + m.th * (def.big ? 1.25 : 1.1);
+    return { im: im, x: top.x - sz.w / 2, y: bottom - sz.h, w: sz.w, h: sz.h };
+  }
+
+  function drawItem(ctx, m, it, t) {
+    const r = itemRect(m, it);
+    if (!r) return;
+    if (it.ghost) ctx.globalAlpha = 0.7 + 0.15 * Math.sin(t * 5);
+    ctx.drawImage(r.im, r.x, r.y, r.w, r.h);
+    ctx.globalAlpha = 1;
+  }
+
+  /** 歩くねこの絵の四角と、足もとの奥行き */
+  function walkerRect(m, wk, t) {
+    const im = imgs[wk.look];
+    if (!ready(im)) return null;
+    const x = m.ox + (wk.gx - wk.gy) * m.tw / 2;
+    const y = m.oy + (wk.gx + wk.gy) * m.th / 2;
+    const h = m.tw * 0.42;
+    const w = h * im.naturalWidth / im.naturalHeight;
+    const bob = wk.moving ? Math.abs(Math.sin(t * 9 + wk.phase)) * 3 : 0;
+    return { im: im, x: x, y: y, w: w, h: h, bob: bob };
+  }
+
+  function drawWalker(ctx, wk, r) {
+    ctx.fillStyle = 'rgba(60,40,20,.22)';
+    ctx.beginPath(); ctx.ellipse(r.x, r.y, r.w * 0.32, r.w * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.save();
+    ctx.translate(r.x, r.y - r.bob);
+    if (wk.flip) ctx.scale(-1, 1);
+    ctx.drawImage(r.im, -r.w / 2, -r.h, r.w, r.h);
+    ctx.restore();
+  }
+
+  /**
+   * 建っている物は、変わったときだけ別の絵 (m.cache) に描いておく。毎コマは、その絵を貼り、歩くねこを描き、
+   * ねこより手前の建物だけを、ねこの四角の中に切り抜いて描き直す (ねこが建物の後ろへ隠れるように)。
+   * 前は毎コマ全部を描いていて、城の 10x10 を全部うめると CPU4倍遅で 97コマ/2秒 (49fps) に落ちた。
+   * マスを選んでいる間 (光らせる・薄く建てて見せる) は、前と同じく全部を描く (さわっている間だけ)
+   */
+  let forceFullTownDraw = false;   // 見張りが、描いておいた絵を使う描き方と、全部を描く描き方を見比べるため
   function drawTownMap(m, now) {
     if (!m.w) return;
     const ctx = m.fgCtx;
@@ -1936,6 +2006,45 @@
 
     const sel = selected[m.zone];
     const selCells = selectedCells(m.zone);
+    const walkers = m.walkers.map(function (wk) { return { wk: wk, depth: wk.gx + wk.gy, r: walkerRect(m, wk, t) }; })
+      .filter(function (w) { return w.r; }).sort(function (a, b) { return a.depth - b.depth; });
+
+    if (sel === null && !forceFullTownDraw) {
+      // 建っている物の絵: 変わったとき (建てた・壊した・天守の姿・大きさ・絵が読めた) だけ描き直す
+      const nReady = IMG_NAMES.filter(function (n) { return ready(imgs[n]); }).length;
+      const key = state[m.zone].cells.join() + '|' + (m.zone === 'castle' ? C.keepStyle(state) : '') + '|' + m.w + 'x' + m.h + '@' + m.dpr + '|' + m.areaKey + '|' + nReady;
+      if (!m.cache) { m.cache = document.createElement('canvas'); m.cacheCtx = m.cache.getContext('2d'); }
+      if (m.cacheKey !== key) {
+        m.cacheKey = key;
+        m.cache.width = m.fg.width; m.cache.height = m.fg.height;
+        const cc = m.cacheCtx;
+        cc.setTransform(m.dpr, 0, 0, m.dpr, 0, 0);
+        cc.clearRect(0, 0, m.w, m.h);
+        m.items = buildingItems(m, null, null);
+        m.items.forEach(function (it) { it.rect = itemRect(m, it); drawItem(cc, m, it, t); });
+        m.cacheDraws = (m.cacheDraws || 0) + 1;
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(m.cache, 0, 0);
+      ctx.setTransform(m.dpr, 0, 0, m.dpr, 0, 0);
+      walkers.forEach(function (w) {
+        drawWalker(ctx, w.wk, w.r);
+        // ねこの四角 (影も含む) にかかる、ねこより手前の建物を、その四角の中だけ描き直す
+        const bx = w.r.x - Math.max(w.r.w / 2, w.r.w * 0.32), by = w.r.y - w.r.bob - w.r.h, bw = Math.max(w.r.w, w.r.w * 0.64), bh = w.r.h + w.r.bob + w.r.w * 0.12;
+        const front = m.items.filter(function (it) {
+          const r = it.rect;
+          return it.depth > w.depth && r && r.x < bx + bw && r.x + r.w > bx && r.y < by + bh && r.y + r.h > by;
+        });
+        if (!front.length) return;
+        ctx.save();
+        ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.clip();
+        front.forEach(function (it) { drawItem(ctx, m, it, t); });
+        ctx.restore();
+      });
+      return;
+    }
+
+    // マスを選んでいる間: 光らせるマス → 建物と歩くねこを奥から順に → 選んだマスのふち (点線)
     selCells.forEach(function (i) {
       const sp = localOf(m, i);
       diamond(ctx, m, sp.lx, sp.ly);
@@ -1945,55 +2054,14 @@
       ctx.lineWidth = 3;
       ctx.stroke();
     });
-
-    const items = [];
-    // 地面の物 (道・池・土台) は建物より先に描く (建物の下に敷く物なので)。2x2 の物は左上のマスから 2 マスぶん
-    const itemOf = function (type, i, ghost) {
-      const p = localOf(m, i), k = C.sizeOf(type);
-      const ground = C.BUILDINGS[type].ground;
-      return { depth: (ground ? -1000 : 0) + p.lx + p.ly + k, type: type, i: i, lx: p.lx, ly: p.ly, k: k, ghost: ghost };
-    };
-    state[m.zone].cells.forEach(function (type, i) {
-      if (type && C.BUILDINGS[type]) items.push(itemOf(type, i, false));
-    });
     // 城: 建てる物と場所を選んでいる間は、その場所に薄く建てて見せる (置けない所なら出さない)
-    if (m.zone === 'castle' && castleSel.type && sel !== null && C.canPlaceBuilding(Object.assign({}, state, { materials: Infinity }), 'castle', sel, castleSel.type)) {
-      items.push(itemOf(castleSel.type, sel, true));
-    }
-    m.walkers.forEach(function (wk) { items.push({ depth: wk.gx + wk.gy, walker: wk }); });
+    const ghost = m.zone === 'castle' && castleSel.type && C.canPlaceBuilding(Object.assign({}, state, { materials: Infinity }), 'castle', sel, castleSel.type);
+    const items = buildingItems(m, ghost ? castleSel.type : null, sel);
+    walkers.forEach(function (w) { items.push({ depth: w.depth, walker: w }); });
     items.sort(function (a, b) { return a.depth - b.depth; });
-
     items.forEach(function (it) {
-      if (it.walker) {
-        const wk = it.walker;
-        const im = imgs[wk.look];
-        if (!ready(im)) return;
-        const x = m.ox + (wk.gx - wk.gy) * m.tw / 2;
-        const y = m.oy + (wk.gx + wk.gy) * m.th / 2;
-        const h = m.tw * 0.42;
-        const w = h * im.naturalWidth / im.naturalHeight;
-        const bob = wk.moving ? Math.abs(Math.sin(t * 9 + wk.phase)) * 3 : 0;
-        ctx.fillStyle = 'rgba(60,40,20,.22)';
-        ctx.beginPath(); ctx.ellipse(x, y, w * 0.32, w * 0.12, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.save();
-        ctx.translate(x, y - bob);
-        if (wk.flip) ctx.scale(-1, 1);
-        ctx.drawImage(im, -w / 2, -h, w, h);
-        ctx.restore();
-        return;
-      }
-      const def = C.BUILDINGS[it.type];
-      const im = buildingImg(it.type);
-      if (!ready(im)) return;
-      const k = it.k || 1;
-      const top = cellTop(m, it.lx, it.ly);   // 使うマス (k x k) のいちばん奥の頂点。真ん中は奥から k/2 マス
-      const cx = top.x, foot = top.y + m.th * k;   // 使うマスのいちばん手前の頂点
-      const sz = buildingSize(m, it.type, im);
-      // 地面の物は、絵の石垣の側面ぶん (高さの 2 割ほど) を手前の頂点より下へ出す。建物は足もとを手前の頂点のすこし上に
-      const bottom = def.ground ? foot + sz.h * 0.2 : top.y + m.th * (def.big ? 1.25 : 1.1);
-      if (it.ghost) { ctx.globalAlpha = 0.7 + 0.15 * Math.sin(t * 5); }
-      ctx.drawImage(im, cx - sz.w / 2, bottom - sz.h, sz.w, sz.h);
-      ctx.globalAlpha = 1;
+      if (it.walker) drawWalker(ctx, it.walker.wk, it.walker.r);
+      else drawItem(ctx, m, it, t);
     });
     // 選んだマスのふちは、手前の建物に隠れないよう、いちばん上にもう一度描く (点線)
     selCells.forEach(function (i) {
@@ -3691,6 +3759,16 @@
         return { x: r.left + t.x, y: r.top + t.y + m.th / 2, tw: m.tw };
       },
       castleType: function () { return castleSel.type; },
+      /** 建っている物の絵を描き直した回数 (マスを選んでいない間は、変わったときだけ増えるはず) */
+      townCacheDraws: function (zone) { return townMaps[zone].cacheDraws || 0; },
+      /** 全部を描く描き方にする (見比べ用) */
+      townFullDraw: function (on) { forceFullTownDraw = !!on; },
+      /** 歩くねこを止める (見比べ用)。止めた位置を返す */
+      freezeWalkers: function (zone, pos) {
+        const m = townMaps[zone];
+        m.walkers.forEach(function (wk, i) { if (pos && pos[i]) { wk.gx = pos[i][0]; wk.gy = pos[i][1]; } wk.tx = wk.gx; wk.ty = wk.gy; wk.wait = 1e9; wk.moving = false; });
+        return m.walkers.map(function (wk) { return [wk.gx, wk.gy]; });
+      },
       keepStyle: doKeepStyle,
       debugAddMerit: function (n) {
         const res = C.addMerit(state, n);

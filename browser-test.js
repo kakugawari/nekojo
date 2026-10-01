@@ -837,6 +837,34 @@ async function run() {
         if (vw < vh ? L.panel.t < L.stage.b - 1 : L.panel.l < L.stage.r - 1) bad.push('札が地図に重なる');
         ok(bad.length === 0, `${tag}: 城レベル ${xp ? 5 : 1} (${L.n}x${L.n}) で、土地の四隅が見え、札・建築する・上の帯が画面に収まる${bad.length ? ' (' + bad.join('・') + ')' : ''}`);
       }
+      // 建っている物は、変わったときだけ描いておき、毎コマは貼るだけ (歩くねこの手前の建物だけ切り抜いて描き直す)。
+      // 前は毎コマ全部を描いていて、10x10 を全部うめると CPU4倍遅で 97コマ/2秒に落ちた (いまは 121)
+      {
+        await cp.evaluate(() => window.__app.debugSetState((s) => {
+          const c = new Array(100).fill(null); c[44] = 'keep'; c[45] = 'mansion'; c[54] = 'drum'; c[55] = 'archery'; c[34] = 'gate'; c[64] = 'teahouse'; c[43] = 'csakura'; c[53] = 'bridge'; c[22] = 'base'; c[23] = '+22'; c[32] = '+22'; c[33] = '+22';
+          const v = []; for (let k = 0; k < 8; k++) v.push({ id: k + 1, name: 'n' + k, level: 1, job: 'training', look: k % 2 ? 'cat-chatora' : 'cat-gray', skill: 'heal' });
+          return Object.assign({}, s, { castle: { cells: c, xp: 1200 }, vassals: v });
+        }));
+        await cp.waitForTimeout(300);
+        const d0 = await cp.evaluate(() => window.__app.townCacheDraws('castle'));
+        await cp.waitForTimeout(500);
+        const d1 = await cp.evaluate(() => window.__app.townCacheDraws('castle'));
+        ok(d1 === d0, `${tag}: 何も変わらない間は、建物を描き直さない (0.5 秒で ${d1 - d0} 回)`);
+        // ねこを建物の奥・手前・間に止め、描いておいた絵を使う描き方と、全部を描く描き方を画素で見比べる
+        await cp.evaluate(() => window.__app.freezeWalkers('castle', [[4.5, 3.6], [3.7, 4.5], [5.5, 4.4], [4.5, 6.9], [6.4, 5.5], [3.4, 5.5], [5.6, 3.4], [4.4, 4.9]]));
+        const grab = () => cp.evaluate(async () => { await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const c = document.querySelector('#castleMap .map-fg'); return Array.from(c.getContext('2d').getImageData(0, 0, c.width, c.height).data); });
+        const cached = await grab();
+        await cp.evaluate(() => window.__app.townFullDraw(true));
+        const full = await grab();
+        await cp.evaluate(() => window.__app.townFullDraw(false));
+        let big = 0;
+        for (let i = 0; i < cached.length; i += 4) {
+          const dd = Math.max(Math.abs(cached[i] - full[i]), Math.abs(cached[i + 1] - full[i + 1]), Math.abs(cached[i + 2] - full[i + 2]), Math.abs(cached[i + 3] - full[i + 3]));
+          if (dd > 60) big++;
+        }
+        // 実測: 5 画素 (切り抜きのふち)。手前の建物を描き直さないと 1046 画素
+        ok(big < 100, `${tag}: 歩くねこは、手前の建物の後ろに隠れる (全部を描いたときと ${big} 画素しかちがわない)`);
+      }
       // 一覧は札の中で送れる (送らなくても「建築する」は見えている)
       const sc = await cp.evaluate(() => { const e = document.getElementById('castleList'); e.scrollTop = 9999; return { top: e.scrollTop, last: (() => { const c = e.lastElementChild.getBoundingClientRect(), b = e.getBoundingClientRect(); return c.bottom <= b.bottom + 1; })() }; });
       ok(sc.last, `${tag}: 一覧は札の中で送れて、いちばん下の物まで見られる`);
