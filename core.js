@@ -976,17 +976,39 @@
   }
 
   const BUILDINGS = {
-    // 城
-    keep: { zone: 'castle', name: 'お城', img: 'b-castle', cost: 300, max: 1, big: true, effect: 'お城の完成! 合戦の手柄 +20%' },
-    mansion: { zone: 'castle', name: '猫侍の屋敷', img: 'b-mansion', cost: 60, max: 4, effect: '家臣の枠 +2' },
-    dojo: { zone: 'castle', name: '訓練場', img: 'b-dojo', cost: 80, max: 2, effect: '自主練の手柄 +50%' },
-    armory: { zone: 'castle', name: '武器屋', img: 'b-armory', cost: 120, max: 2, effect: '猫パンチ +15%' },
-    tower: { zone: 'castle', name: '見張り台', img: 'b-tower', cost: 50, max: 2, effect: '合戦の体力 +10%' },
-    stable: { zone: 'castle', name: '厩舎', img: 'b-stable', cost: 70, max: 2, effect: '普請の資材 +25%' },
+    // 城 (絵はもらった城のパーツ art/castle-parts.png から切り出した img/c-*.webp。お城は天守の姿を選べる: KEEP_STYLES)
+    keep: { zone: 'castle', name: 'お城', img: 'c-keep-normal', cost: 300, max: 1, big: true, effect: 'お城の完成! 合戦の手柄 +20%' },
+    mansion: { zone: 'castle', name: '猫侍の屋敷', img: 'c-barracks', cost: 60, max: 4, effect: '家臣の枠 +2' },
+    dojo: { zone: 'castle', name: '訓練場', img: 'c-dojo', cost: 80, max: 2, effect: '自主練の手柄 +50%' },
+    armory: { zone: 'castle', name: '武器屋', img: 'c-smithy', cost: 120, max: 2, effect: '猫パンチ +15%' },
+    tower: { zone: 'castle', name: '見張り台', img: 'c-yagura', cost: 50, max: 2, effect: '合戦の体力 +10%' },
+    stable: { zone: 'castle', name: '厩舎', img: 'c-stable', cost: 70, max: 2, effect: '普請の資材 +25%' },
+    // 城のかざり (建物)。効き目はにぎわいだけ
+    gate: { zone: 'castle', name: '門', img: 'c-gate', cost: 30, max: null, deco: true },
+    storehouse: { zone: 'castle', name: '倉庫', img: 'c-storehouse', cost: 25, max: null, deco: true },
+    ricehouse: { zone: 'castle', name: '米蔵', img: 'c-ricehouse', cost: 25, max: null, deco: true },
+    merchant: { zone: 'castle', name: '商人屋', img: 'c-merchant', cost: 30, max: null, deco: true },
+    drum: { zone: 'castle', name: '太鼓櫓', img: 'c-drum', cost: 35, max: null, deco: true },
+    archery: { zone: 'castle', name: '弓場', img: 'c-archery', cost: 30, max: null, deco: true },
+    kobo: { zone: 'castle', name: '工房', img: 'c-workshop', cost: 25, max: null, deco: true },
+    teahouse: { zone: 'castle', name: '茶屋', img: 'c-teahouse', cost: 25, max: null, deco: true },
+    csakura: { zone: 'castle', name: '桜の木', img: 'c-sakura', cost: 15, max: null, deco: true },
+    bamboo: { zone: 'castle', name: '竹林', img: 'c-bamboo', cost: 10, max: null, deco: true },
+    field: { zone: 'castle', name: '畑', img: 'c-field', cost: 10, max: null, deco: true },
+    flags: { zone: 'castle', name: 'のぼり', img: 'c-nobori', cost: 5, max: null, deco: true },
+    fence: { zone: 'castle', name: '柵', img: 'c-fence', cost: 8, max: null, deco: true },
     stonewall: { zone: 'castle', name: '城の石垣', img: 'b-stonewall', cost: 10, max: null, deco: true },
-    fence: { zone: 'castle', name: '柵', img: 'b-fence', cost: 8, max: null, deco: true },
-    flags: { zone: 'castle', name: '旗', img: 'b-flags', cost: 5, max: null, deco: true },
     torch: { zone: 'castle', name: 'たいまつ', img: 'b-torch', cost: 5, max: null, deco: true },
+    // 城の地面のかざり (土台のパーツ)。建物の下に敷く。大きな土台は 2x2 マス (size: 2)
+    road: { zone: 'castle', name: '道', img: 'c-road-curve', cost: 5, max: null, deco: true, ground: true },
+    stairs: { zone: 'castle', name: '石段', img: 'c-stairs', cost: 10, max: null, deco: true, ground: true },
+    bridge: { zone: 'castle', name: '橋', img: 'c-bridge', cost: 20, max: null, deco: true, ground: true },
+    pond: { zone: 'castle', name: '池', img: 'c-pond', cost: 20, max: null, deco: true, ground: true },
+    cgarden: { zone: 'castle', name: '庭園', img: 'c-garden', cost: 25, max: null, deco: true, ground: true },
+    base: { zone: 'castle', name: '石垣の台', img: 'c-base', cost: 40, max: null, deco: true, ground: true, size: 2 },
+    baseStep: { zone: 'castle', name: '段差のある台', img: 'c-base-step', cost: 50, max: null, deco: true, ground: true, size: 2 },
+    basePond: { zone: 'castle', name: '池のある台', img: 'c-base-pond', cost: 50, max: null, deco: true, ground: true, size: 2 },
+    baseCross: { zone: 'castle', name: '十字の台', img: 'c-base-cross', cost: 50, max: null, deco: true, ground: true, size: 2 },
     // 村
     house: { zone: 'village', name: '民家', img: 'b-house', cost: 30, costStep: 20, max: null, effect: '村人猫の上限 +8' },
     farm: { zone: 'village', name: '農場', img: 'b-farm', cost: 40, max: 4, effect: '村人の集める資材 +50%' },
@@ -1008,6 +1030,24 @@
   };
   const DECO_EFFECT = 'にぎわい (村人猫が少し早く増える)';
 
+  // 2x2 の物は、左上 (奥) のマスに種類を、ほかの 3 マスに '+<左上のマス>' の印を入れる
+  function sizeOf(type) { return (BUILDINGS[type] && BUILDINGS[type].size) || 1; }
+  function isPartMark(c) { return typeof c === 'string' && c.charAt(0) === '+'; }
+  /** その物が使うマス (左上 anchor から size x size)。ぜんぶのマスの外にはみ出すなら null */
+  function footprint(zone, anchor, size) {
+    const N = zoneSize(zone), gx = anchor % N, gy = Math.floor(anchor / N);
+    if (gx + size > N || gy + size > N) return null;
+    const out = [];
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) out.push((gy + y) * N + gx + x);
+    return out;
+  }
+  /** マスに建っている物の左上のマス (印のマスなら元のマス)。空きなら -1 */
+  function anchorOf(state, zone, i) {
+    const c = state[zone].cells[i];
+    if (!c) return -1;
+    return isPartMark(c) ? Number(c.slice(1)) : i;
+  }
+
   function isTownUnlocked(state) {
     return rankIndexOf(state) >= CASTLE_UNLOCK_RANK;
   }
@@ -1021,7 +1061,7 @@
   function countDeco(state) {
     let n = 0;
     ZONES.forEach(function (z) {
-      state[z].cells.forEach(function (c) { if (c && BUILDINGS[c].deco) n++; });
+      state[z].cells.forEach(function (c) { if (c && BUILDINGS[c] && BUILDINGS[c].deco) n++; });
     });
     return n;
   }
@@ -1051,8 +1091,8 @@
     const def = BUILDINGS[type];
     if (!def || def.zone !== zone || ZONES.indexOf(zone) < 0) return false;
     if (!isTownUnlocked(state)) return false;
-    if (!isOpenCell(state, zone, cellIndex)) return false;
-    if (state[zone].cells[cellIndex] !== null) return false;
+    const fp = footprint(zone, cellIndex, sizeOf(type));
+    if (!fp || !fp.every(function (i) { return isOpenCell(state, zone, i) && state[zone].cells[i] === null; })) return false;
     if (def.max !== null && countBuildings(state, type) >= def.max) return false;
     return state.materials >= buildingCost(state, type);
   }
@@ -1061,7 +1101,7 @@
     if (!canPlaceBuilding(state, zone, cellIndex, type)) return { ok: false, state: state };
     const cost = buildingCost(state, type);
     const cells = state[zone].cells.slice();
-    cells[cellIndex] = type;
+    footprint(zone, cellIndex, sizeOf(type)).forEach(function (i) { cells[i] = i === cellIndex ? type : '+' + cellIndex; });
     const next = Object.assign({}, state, { materials: state.materials - cost });
     next[zone] = Object.assign({}, state[zone], { cells: cells });
     // 城に建てると、城レベルの経験値が入る (値段ぶん)
@@ -1077,11 +1117,12 @@
   /** 取り壊す。建てたときの元の値段の半分が戻る */
   function demolish(state, zone, cellIndex) {
     if (ZONES.indexOf(zone) < 0) return { ok: false, state: state };
-    const type = state[zone].cells[cellIndex];
-    if (!type) return { ok: false, state: state };
+    const anchor = anchorOf(state, zone, cellIndex);   // 2x2 の物は、どのマスを押しても丸ごと
+    const type = anchor >= 0 ? state[zone].cells[anchor] : null;
+    if (!type || !BUILDINGS[type]) return { ok: false, state: state };
     const refund = Math.floor(BUILDINGS[type].cost / 2);
     const cells = state[zone].cells.slice();
-    cells[cellIndex] = null;
+    footprint(zone, anchor, sizeOf(type)).forEach(function (i) { cells[i] = null; });
     const next = Object.assign({}, state, { materials: state.materials + refund });
     next[zone] = Object.assign({}, state[zone], { cells: cells });
     let village = next.village;
@@ -1099,6 +1140,29 @@
 
   function isCastleComplete(state) {
     return countBuildings(state, 'keep') >= 1;
+  }
+
+  // 天守の姿 (見た目だけ。強さは同じ)。城レベルと天下統一で開き、開いた物から選べる
+  const KEEP_STYLES = [
+    { id: 'normal', name: '通常の天守' }, { id: 'white', name: '白壁の天守' }, { id: 'black', name: '黒の天守' },
+    { id: 'blue', name: '青の天守', level: 2 }, { id: 'red', name: '赤の天守', level: 3 }, { id: 'sakura', name: '桜の装飾', level: 5 },
+    { id: 'gold', name: '金のシャチホコ', unify: true }, { id: 'moon', name: '月見の天守', unify: true }
+  ];
+  function keepStyleOf(id) { return KEEP_STYLES.find(function (k) { return k.id === id; }) || null; }
+  /** 開いているか (城レベルは下がらない・天下統一は取り消されないので、記録から決めても閉じない) */
+  function isKeepStyleOpen(state, id) {
+    const k = keepStyleOf(id);
+    if (!k) return false;
+    if (k.unify) return !!(state.realm && state.realm.unified);
+    return castleLevel(state) >= (k.level || 1);
+  }
+  function keepStyle(state) {
+    const id = state.castle && state.castle.keepStyle;
+    return id && isKeepStyleOpen(state, id) ? id : 'normal';
+  }
+  function setKeepStyle(state, id) {
+    if (!isKeepStyleOpen(state, id)) return { ok: false, state: state };
+    return { ok: true, state: Object.assign({}, state, { castle: Object.assign({}, state.castle, { keepStyle: id }) }) };
   }
 
   // ---------------------------------------------------------- 天下 (日本地図の国とり)
@@ -1677,8 +1741,17 @@
       oldCastle.forEach(function (c) { if (OLD[c]) put(OLD[c][0], OLD[c][1]); });
     }
     // 城レベルの経験値。前の版には無いので、いま建っている物の値段から決める (建ててあるのにレベル 1 にならないように)
-    const builtXp = out.castle.cells.reduce(function (n, c) { return n + (c ? BUILDINGS[c].cost : 0); }, 0);
+    // 2x2 の物の印を作り直す (印は読み捨てて、左上のマスの種類から引き直す。重なる物は捨てる)
+    out.castle.cells = out.castle.cells.map(function (c) { return isPartMark(c) ? null : c; });
+    out.castle.cells.forEach(function (c, i) {
+      if (!c || sizeOf(c) === 1) return;
+      const fp = footprint('castle', i, sizeOf(c));
+      if (!fp || fp.some(function (k) { return k !== i && out.castle.cells[k] !== null; })) { out.castle.cells[i] = null; return; }
+      fp.forEach(function (k) { if (k !== i) out.castle.cells[k] = '+' + i; });
+    });
+    const builtXp = out.castle.cells.reduce(function (n, c) { return n + (c && BUILDINGS[c] ? BUILDINGS[c].cost : 0); }, 0);
     out.castle.xp = raw.castle && Number.isFinite(raw.castle.xp) ? Math.max(builtXp, raw.castle.xp) : builtXp;
+    if (raw.castle && keepStyleOf(raw.castle.keepStyle)) out.castle.keepStyle = raw.castle.keepStyle;
     const oldVillage = raw.village && Array.isArray(raw.village.cells) ? raw.village.cells : null;
     if (oldVillage && oldVillage.length === MAP_CELLS) {
       oldVillage.forEach(function (c, i) { if (BUILDINGS[c] && BUILDINGS[c].zone === 'village') out.village.cells[i] = c; });
@@ -1753,6 +1826,13 @@
     openArea: openArea,
     isOpenCell: isOpenCell,
     openCells: openCells,
+    sizeOf: sizeOf,
+    footprint: footprint,
+    anchorOf: anchorOf,
+    KEEP_STYLES: KEEP_STYLES,
+    isKeepStyleOpen: isKeepStyleOpen,
+    keepStyle: keepStyle,
+    setKeepStyle: setKeepStyle,
     ZONES: ZONES,
     BUILDINGS: BUILDINGS,
     DECO_EFFECT: DECO_EFFECT,

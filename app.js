@@ -50,14 +50,22 @@
   const IMG_NAMES = ['stage0', 'stage1', 'stage2', 'stage3', 'cat-normal', 'cat-chatora', 'cat-kuro', 'cat-gray', 'cat-red',
     'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-jarashi', 'pose-punch', 'b-villager',
     'r-coin', 'r-catcoin', 'r-swords', 'r-tag-strength', 'r-tag-reward',
-    'guide-main', 'guide-stand', 'guide-walk', 'guide-hello', 'guide-cheer', 'guide-worry']
-    .concat(Object.keys(C.BUILDINGS).map(function (t) { return C.BUILDINGS[t].img; }));
+    'guide-main', 'guide-stand', 'guide-walk', 'guide-hello', 'guide-cheer', 'guide-worry',
+    'b-castle', 'b-sakura', 'b-house', 'b-farm', 'b-woodfence', 'b-nobori']   // 戦場の組み立てた景色・天下の札・出世の札で使う (城の建物の絵は c-* になった)
+    .concat(Object.keys(C.BUILDINGS).map(function (t) { return C.BUILDINGS[t].img; }))
+    .concat(C.KEEP_STYLES.map(function (k) { return 'c-keep-' + k.id; }))
+    .filter(function (n, i, a) { return a.indexOf(n) === i; });
   const imgs = {};
   IMG_NAMES.forEach(function (n) {
     const im = new Image();
-    im.src = './img/' + n + '.png';
+    im.src = './img/' + n + (n.indexOf('c-') === 0 ? '.webp' : '.png');   // 城のパーツ (c-*) は透明を残すため WebP
     imgs[n] = im;
   });
+  /** 建物の絵。お城は選んだ天守の姿 */
+  function buildingImg(type) {
+    if (type === 'keep') return imgs['c-keep-' + C.keepStyle(state)] || imgs[C.BUILDINGS.keep.img];
+    return imgs[C.BUILDINGS[type].img];
+  }
   const ready = (im) => im && im.complete && im.naturalWidth > 0;
 
   // ---------------------------------------------------------- ボスの絵 (img/boss-<名前>-<ポーズ>.webp。大きさと足もとは boss-art.js)
@@ -1860,8 +1868,11 @@
 
   function buildingSize(m, type, im) {
     const def = C.BUILDINGS[type];
-    // 施設の絵は、ふつうの建物が幅 190px ほど。それを 1 マスの 1.3 倍に合わせ、小物は小さいまま
-    const w = def.big ? m.tw * 2.2 : im.naturalWidth * (m.tw * 1.3 / 190);
+    let w;
+    if (def.ground) w = m.tw * C.sizeOf(type) * 1.04;                    // 地面の物: 使うマスの幅ぴったり
+    else if (def.big) w = m.tw * (def.img.indexOf('c-') === 0 ? 1.9 : 2.2);  // お城 (天守)
+    else if (def.img.indexOf('c-') === 0) w = im.naturalWidth * (m.tw / 112); // 城のパーツの絵は、ふつうの建物が幅 140px ほど (1 マスの 1.25 倍)
+    else w = im.naturalWidth * (m.tw * 1.3 / 190);                        // 施設の絵は、ふつうの建物が幅 190px ほど
     return { w: w, h: w * im.naturalHeight / im.naturalWidth };
   }
 
@@ -1924,26 +1935,30 @@
     const t = now / 1000;
 
     const sel = selected[m.zone];
-    if (sel !== null) {
-      const sp = localOf(m, sel);
+    const selCells = selectedCells(m.zone);
+    selCells.forEach(function (i) {
+      const sp = localOf(m, i);
       diamond(ctx, m, sp.lx, sp.ly);
       ctx.fillStyle = 'rgba(255,226,122,' + (0.55 + 0.2 * Math.sin(t * 5)) + ')';
       ctx.fill();
       ctx.strokeStyle = '#b98b34';
       ctx.lineWidth = 3;
       ctx.stroke();
-    }
+    });
 
     const items = [];
+    // 地面の物 (道・池・土台) は建物より先に描く (建物の下に敷く物なので)。2x2 の物は左上のマスから 2 マスぶん
+    const itemOf = function (type, i, ghost) {
+      const p = localOf(m, i), k = C.sizeOf(type);
+      const ground = C.BUILDINGS[type].ground;
+      return { depth: (ground ? -1000 : 0) + p.lx + p.ly + k, type: type, i: i, lx: p.lx, ly: p.ly, k: k, ghost: ghost };
+    };
     state[m.zone].cells.forEach(function (type, i) {
-      if (!type) return;
-      const p = localOf(m, i);
-      items.push({ depth: p.lx + p.ly + 1, type: type, i: i, lx: p.lx, ly: p.ly });
+      if (type && C.BUILDINGS[type]) items.push(itemOf(type, i, false));
     });
-    // 城: 建てる物と場所を選んでいる間は、その場所に薄く建てて見せる
-    if (m.zone === 'castle' && castleSel.type && sel !== null && !state.castle.cells[sel]) {
-      const p = localOf(m, sel);
-      items.push({ depth: p.lx + p.ly + 1, type: castleSel.type, i: sel, lx: p.lx, ly: p.ly, ghost: true });
+    // 城: 建てる物と場所を選んでいる間は、その場所に薄く建てて見せる (置けない所なら出さない)
+    if (m.zone === 'castle' && castleSel.type && sel !== null && C.canPlaceBuilding(Object.assign({}, state, { materials: Infinity }), 'castle', sel, castleSel.type)) {
+      items.push(itemOf(castleSel.type, sel, true));
     }
     m.walkers.forEach(function (wk) { items.push({ depth: wk.gx + wk.gy, walker: wk }); });
     items.sort(function (a, b) { return a.depth - b.depth; });
@@ -1968,25 +1983,39 @@
         return;
       }
       const def = C.BUILDINGS[it.type];
-      const im = imgs[def.img];
+      const im = buildingImg(it.type);
       if (!ready(im)) return;
-      const top = cellTop(m, it.lx, it.ly);
+      const k = it.k || 1;
+      const top = cellTop(m, it.lx, it.ly);   // 使うマス (k x k) のいちばん奥の頂点。真ん中は奥から k/2 マス
+      const cx = top.x, foot = top.y + m.th * k;   // 使うマスのいちばん手前の頂点
       const sz = buildingSize(m, it.type, im);
-      const bottom = top.y + m.th * (def.big ? 1.25 : 1.1);
+      // 地面の物は、絵の石垣の側面ぶん (高さの 2 割ほど) を手前の頂点より下へ出す。建物は足もとを手前の頂点のすこし上に
+      const bottom = def.ground ? foot + sz.h * 0.2 : top.y + m.th * (def.big ? 1.25 : 1.1);
       if (it.ghost) { ctx.globalAlpha = 0.7 + 0.15 * Math.sin(t * 5); }
-      ctx.drawImage(im, top.x - sz.w / 2, bottom - sz.h, sz.w, sz.h);
+      ctx.drawImage(im, cx - sz.w / 2, bottom - sz.h, sz.w, sz.h);
       ctx.globalAlpha = 1;
     });
     // 選んだマスのふちは、手前の建物に隠れないよう、いちばん上にもう一度描く (点線)
-    if (sel !== null) {
-      const sp = localOf(m, sel);
+    selCells.forEach(function (i) {
+      const sp = localOf(m, i);
       diamond(ctx, m, sp.lx, sp.ly);
       ctx.setLineDash([5, 4]);
       ctx.strokeStyle = 'rgba(185,139,52,.95)';
       ctx.lineWidth = 2.5;
       ctx.stroke();
       ctx.setLineDash([]);
-    }
+    });
+  }
+
+  /** 光らせるマス: 建っている物を選んでいればその物のマス全部、建てる物を選んでいればそれが使うマス (2x2 なら 4 つ) */
+  function selectedCells(zone) {
+    const sel = selected[zone];
+    if (sel === null) return [];
+    if (zone !== 'castle') return [sel];
+    const a = C.anchorOf(state, 'castle', sel);
+    if (a >= 0) return C.footprint('castle', a, C.sizeOf(state.castle.cells[a])) || [sel];
+    if (castleSel.type) return (C.footprint('castle', sel, C.sizeOf(castleSel.type)) || [sel]).filter(function (i) { return C.isOpenCell(state, 'castle', i); });
+    return [sel];
   }
 
   function effectChips(zone) {
@@ -2114,17 +2143,29 @@
   /** 一覧と施設の帯を作る (開いたとき・建てたときだけ。数字は refreshCastle で書き換える) */
   function renderCastlePanel() {
     els.castleList.innerHTML = '';
-    CASTLE_TYPES.forEach(function (t) {
+    const groupOf = function (t) { const d = C.BUILDINGS[t]; return !d.deco ? '建物' : d.ground ? '地面 (道・池・土台)' : 'かざり'; };
+    let lastGroup = '';
+    CASTLE_TYPES.slice().sort(function (a, b) {
+      const o = ['建物', 'かざり', '地面 (道・池・土台)'];
+      return o.indexOf(groupOf(a)) - o.indexOf(groupOf(b));
+    }).forEach(function (t) {
       const def = C.BUILDINGS[t];
+      if (groupOf(t) !== lastGroup) {
+        lastGroup = groupOf(t);
+        const h = document.createElement('div');
+        h.className = 'cs-group';
+        h.textContent = lastGroup;
+        els.castleList.appendChild(h);
+      }
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'cs-card';
       card.dataset.type = t;
       card.innerHTML = '<img alt=""><span class="cs-card-main"><span class="cs-card-name"></span><span class="cs-card-effect"></span>' +
         '<span class="cs-card-cost"><span aria-hidden="true">🪵</span> <b data-v="cost"></b><i data-v="count"></i></span></span><span class="cs-card-go" aria-hidden="true">›</span>';
-      card.querySelector('img').src = imgs[def.img].src;
+      card.querySelector('img').src = buildingImg(t).src;
       card.querySelector('.cs-card-name').textContent = def.name;
-      card.querySelector('.cs-card-effect').textContent = def.deco ? 'かざり (にぎわい)' : def.effect;
+      card.querySelector('.cs-card-effect').textContent = def.deco ? (def.ground ? (C.sizeOf(t) > 1 ? '地面 (2x2 マス)・' : '地面・') + 'にぎわい' : 'かざり (にぎわい)') : def.effect;
       card.addEventListener('click', function () { castleChoose(t); });
       els.castleList.appendChild(card);
     });
@@ -2132,7 +2173,7 @@
     els.castleFacilities.innerHTML = '<span class="cs-fac-title"><span class="cs-fac-paw" aria-hidden="true">🐾</span>城内の施設</span>' +
       CASTLE_MAIN.map(function (t) {
         const def = C.BUILDINGS[t];
-        return '<span class="cs-fac" data-type="' + t + '"><img src="' + imgs[def.img].src + '" alt=""><span><small>' + def.name + '</small><b data-v="fac"></b></span></span>';
+        return '<span class="cs-fac" data-type="' + t + '"><img src="' + buildingImg(t).src + '" alt=""><span><small>' + def.name + '</small><b data-v="fac"></b></span></span>';
       }).join('');
     refreshCastle();
   }
@@ -2158,29 +2199,32 @@
       const txt = C.countBuildings(state, t) + '/' + def.max;
       const b = el.querySelector('[data-v="fac"]'); if (b.textContent !== txt) b.textContent = txt;
     });
-    // 建っている物を選んでいるときは、その札 (取り壊す) を一覧の上に出す
-    const built = sel !== null ? state.castle.cells[sel] : null;
-    if (els.castleBuilt.dataset.cell !== String(built ? sel : '')) {
-      els.castleBuilt.dataset.cell = built ? String(sel) : '';
+    // 建っている物を選んでいるときは、その札 (取り壊す) を一覧の上に出す。お城なら天守の姿も選べる
+    const anchor = sel !== null ? C.anchorOf(state, 'castle', sel) : -1;
+    const built = anchor >= 0 ? state.castle.cells[anchor] : null;
+    const builtKey = built ? anchor + ':' + C.keepStyle(state) + ':' + C.castleLevel(state) : '';
+    if (els.castleBuilt.dataset.key !== builtKey) {
+      els.castleBuilt.dataset.key = builtKey;
       els.castleBuilt.hidden = !built;
       els.castleBuilt.innerHTML = '';
       if (built) {
         const def = C.BUILDINGS[built];
-        els.castleBuilt.innerHTML = '<img alt=""><div><div class="cs-built-name"></div><div class="cs-built-effect"></div></div>';
-        els.castleBuilt.querySelector('img').src = imgs[def.img].src;
+        els.castleBuilt.innerHTML = '<div class="cs-built-row"><img alt=""><div><div class="cs-built-name"></div><div class="cs-built-effect"></div></div></div>';
+        els.castleBuilt.querySelector('img').src = buildingImg(built).src;
         els.castleBuilt.querySelector('.cs-built-name').textContent = def.name;
         els.castleBuilt.querySelector('.cs-built-effect').textContent = def.deco ? C.DECO_EFFECT : def.effect;
         const del = document.createElement('button');
         del.type = 'button';
         del.className = 'btn-paper demolish';
         del.textContent = '取り壊す (資材 +' + Math.floor(def.cost / 2) + ')';
-        del.addEventListener('click', function () { doDemolish('castle', sel); });
-        els.castleBuilt.querySelector('div').appendChild(del);
+        del.addEventListener('click', function () { doDemolish('castle', anchor); });
+        els.castleBuilt.querySelector('.cs-built-row > div').appendChild(del);
+        if (built === 'keep') els.castleBuilt.appendChild(keepStylePicker());
       }
     }
     // 「建築する」: 建てる物と空いた場所がそろい、資材が足りれば押せる
     let label = '建築する', hint = '', ok = false;
-    const emptySel = sel !== null && !built;
+    const emptySel = sel !== null && !state.castle.cells[sel];
     if (!type) hint = emptySel ? '一覧から 建てる物を えらぶにゃ' : built ? '' : '建てる物を えらんで、地図の 空いたマスを 押すにゃ';
     else if (!emptySel) hint = '「' + C.BUILDINGS[type].name + '」を どこに建てる? 地図の 空いたマスを 押すにゃ';
     else {
@@ -2194,6 +2238,38 @@
     if (els.castleHint.textContent !== hint) els.castleHint.textContent = hint;
   }
 
+  /** 天守の姿を選ぶ札 (開いていない物は封の印と、開く条件) */
+  function keepStylePicker() {
+    const box = document.createElement('div');
+    box.className = 'cs-styles';
+    const cur = C.keepStyle(state);
+    C.KEEP_STYLES.forEach(function (k) {
+      const open = C.isKeepStyleOpen(state, k.id);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cs-style' + (k.id === cur ? ' on' : '') + (open ? '' : ' locked');
+      b.dataset.style = k.id;
+      b.disabled = !open;
+      b.innerHTML = '<img alt=""><small></small>';
+      b.querySelector('img').src = imgs['c-keep-' + k.id].src;
+      b.querySelector('small').textContent = open ? k.name.replace('の天守', '') : k.unify ? '天下統一' : '城Lv' + k.level;
+      b.title = k.name;
+      b.addEventListener('click', function () { doKeepStyle(k.id); });
+      box.appendChild(b);
+    });
+    return box;
+  }
+
+  function doKeepStyle(id) {
+    const r = C.setKeepStyle(state, id);
+    if (!r.ok) return false;
+    state = r.state;
+    saveSoon();
+    renderCastlePanel();
+    showToast(C.KEEP_STYLES.find(function (k) { return k.id === id; }).name + 'に した!', 1400);
+    return true;
+  }
+
   function castleChoose(type) {
     castleSel.type = castleSel.type === type ? null : type;
     // 建っている物を選んでいたら外す (建てる場所を選び直す)
@@ -2202,7 +2278,10 @@
   }
 
   function castleTapCell(idx) {
-    selected.castle = selected.castle === idx ? null : idx;
+    // 2x2 の物のどのマスを押しても、同じ物を選んだことにする (もう一度押すと閉じる)
+    const a = C.anchorOf(state, 'castle', idx);
+    const cur = selected.castle !== null ? C.anchorOf(state, 'castle', selected.castle) : -1;
+    selected.castle = (selected.castle === idx || (a >= 0 && a === cur)) ? null : idx;
     refreshCastle();
   }
 
@@ -2235,7 +2314,9 @@
       saveSoon();
       if (r.leveledUp) {
         const lv = C.castleLevel(state), a = C.openArea(state, 'castle');
-        showToast('🏯 城レベル ' + lv + '! ' + (lv > 1 && C.CASTLE_LEVELS[lv - 1].open > C.CASTLE_LEVELS[lv - 2].open ? '土地が ' + a.n + 'x' + a.n + ' に広がった' : 'りっぱになった'), 3000);
+        const style = C.KEEP_STYLES.find(function (k) { return k.level === lv; });
+        showToast('🏯 城レベル ' + lv + '! ' + (lv > 1 && C.CASTLE_LEVELS[lv - 1].open > C.CASTLE_LEVELS[lv - 2].open ? '土地が ' + a.n + 'x' + a.n + ' に広がった' : 'りっぱになった') +
+          (style ? ' (天守の姿「' + style.name + '」が えらべる)' : ''), 3400);
       } else if (!was && C.isCastleComplete(state)) showToast('🎉 お城の完成にゃ!', 3200);
       else showToast(C.BUILDINGS[type].name + 'を建てた!', 1400);
     }
@@ -3610,6 +3691,7 @@
         return { x: r.left + t.x, y: r.top + t.y + m.th / 2, tw: m.tw };
       },
       castleType: function () { return castleSel.type; },
+      keepStyle: doKeepStyle,
       debugAddMerit: function (n) {
         const res = C.addMerit(state, n);
         state = res.state;

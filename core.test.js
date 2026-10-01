@@ -1009,6 +1009,50 @@ test('城: 10x10 のマスのうち、はじめは真ん中の 8x8 だけ使え�
   assert.deepStrictEqual([info.level, info.xp, info.from, info.next], [3, 420, 400, 700]);
 });
 
+test('城: 大きな土台は 2x2 マスを使う。どのマスを押しても丸ごと取り壊せる。保存して読み直しても形が崩れない', () => {
+  let s = townState();
+  const a = 2 * 10 + 2;   // (2,2)
+  assert.deepStrictEqual(Core.footprint('castle', a, 2), [22, 23, 32, 33]);
+  s = build(s, 'castle', a, 'base');
+  assert.deepStrictEqual([22, 23, 32, 33].map((i) => s.castle.cells[i]), ['base', '+22', '+22', '+22']);
+  assert.strictEqual(Core.countBuildings(s, 'base'), 1);
+  assert.strictEqual(Core.anchorOf(s, 'castle', 33), 22);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 33, 'flags'), false, '使っているマスには建てられない');
+  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 11, 'base'), false, '重なる所には置けない (11 から 2x2 は 22 にかかる)');
+  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 88, 'base'), false, '使える土地 (8x8) からはみ出す所には置けない');
+  assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 77, 'base'), true);
+  const back = Core.sanitizeState(JSON.parse(JSON.stringify(s)));
+  assert.deepStrictEqual(back.castle.cells, s.castle.cells, '読み直しても印がそろう');
+  const d = Core.demolish(s, 'castle', 33);
+  assert.ok(d.ok && [22, 23, 32, 33].every((i) => d.state.castle.cells[i] === null), '印のマスを押しても丸ごと取り壊す');
+  // 壊れた保存: 印だけ・重なり
+  const broken = JSON.parse(JSON.stringify(s)); broken.castle.cells[44] = '+5'; broken.castle.cells[23] = 'flags';
+  const fixed = Core.sanitizeState(broken);
+  assert.strictEqual(fixed.castle.cells[44], null, '元の無い印は捨てる');
+  assert.strictEqual(fixed.castle.cells[22], null, '重なる大きな土台は捨てる');
+  assert.strictEqual(fixed.castle.cells[23], 'flags');
+});
+
+test('城: 天守の姿は城レベルと天下統一で開き、開いた物だけ選べる (見た目だけ)', () => {
+  let s = townState();
+  const open = (st) => Core.KEEP_STYLES.filter((k) => Core.isKeepStyleOpen(st, k.id)).map((k) => k.id);
+  assert.deepStrictEqual(open(s), ['normal', 'white', 'black']);
+  assert.strictEqual(Core.setKeepStyle(s, 'blue').ok, false);
+  s = Object.assign({}, s, { castle: Object.assign({}, s.castle, { xp: 1200 }) });
+  assert.deepStrictEqual(open(s), ['normal', 'white', 'black', 'blue', 'red', 'sakura']);
+  const r = Core.setKeepStyle(s, 'red');
+  assert.ok(r.ok && Core.keepStyle(r.state) === 'red');
+  assert.strictEqual(Core.setKeepStyle(s, 'gold').ok, false, '金のシャチホコは天下統一から');
+  const u = Object.assign({}, s, { realm: Object.assign({}, s.realm || {}, { unified: true }) });
+  assert.ok(Core.setKeepStyle(u, 'gold').ok && Core.setKeepStyle(u, 'moon').ok);
+  // 保存して読み直しても姿が残る
+  assert.strictEqual(Core.keepStyle(Core.sanitizeState(JSON.parse(JSON.stringify(r.state)))), 'red');
+  // 合戦の強さは変わらない
+  const b0 = Core.createBattle(build(townState(), 'castle', CC(0), 'keep'), Core.mulberry32(1));
+  const b1 = Core.createBattle(Core.setKeepStyle(build(townState(), 'castle', CC(0), 'keep'), 'white').state, Core.mulberry32(1));
+  assert.strictEqual(b1.enemies[0].reward, b0.enemies[0].reward);
+});
+
 test('城: 前の版 (城 6x6) の保存データは、真ん中へ引っ越し、建っている物の値段から城レベルが決まる', () => {
   const cells = new Array(36).fill(null);
   cells[0] = 'keep'; cells[7] = 'mansion'; cells[35] = 'flags';   // 6x6 の (0,0)・(1,1)・(5,5)
