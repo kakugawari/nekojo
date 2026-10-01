@@ -1,6 +1,7 @@
 /*
  * 城の画面の見本 (art/castle-mock.png, 1672x941) と、あとからもらった絵 (art/castle-extras.png: 施設の帯のしるし・
  * 桜と菊の飾り。背景はマゼンタ) から、画面の飾りを切り出して img/u-*.webp に置く。
+ * 村の見本 (art/village-mock.png) からは、下の帯のしるし・題の肉球・村人猫の顔・「村を発展させる」の札。
  * 城の背景 (art/castle-bg.png, 1086x1448) は JPEG 品質0.92 に焼き直して img/castle-bg.jpg に置く。
  *
  *   node tools/extract-castle-ui.js      (要 playwright。ブラウザの canvas で処理する)
@@ -34,7 +35,7 @@ const PIECES = [
   ['tab-realm', 'mask', 30, 258, 100, 328, { bg: NAVY }],
   ['tab-vassals', 'mask', 30, 388, 100, 456, { bg: NAVY }],
   ['tab-castle', 'mask', 28, 520, 104, 592, { bg: GOLD }],
-  ['tab-village', 'mask', 30, 652, 100, 722, { bg: NAVY }],
+  // 村のタブは、村の見本の家 (猫の耳つき) を使う (VILLAGE の tab-village)
   // 「建築する」の金づち (金の札の上に紺)
   ['hammer', 'mask', 1318, 795, 1372, 850, { bg: [238, 196, 100] }],
   // 題の札 (肉球と「城」の字と金の雲)。左の雲は紺の帯にかかっているので、帯の手前で切ってぼかす
@@ -65,7 +66,20 @@ const EXTRAS = [
   ['sakura', 'magenta', 36, 757, 490, 918],
   ['kiku', 'magenta', 1148, 722, 1642, 922],
 ];
-const SOURCES = [['castle-mock.png', PIECES], ['castle-extras.png', EXTRAS]];
+// 村の見本 (art/village-mock.png, 1672x941): 下の帯のしるし 4 つ・題の肉球の丸・村人猫の顔・「村を発展させる」の金の札
+const VILLAGE = [
+  // 村のタブのアイコン (選ばれた金の札の上に紺の家。城の見本の村のアイコンより、家だと分かりやすい)
+  ['tab-village', 'mask', 28, 648, 96, 706, { bg: GOLD }],
+  ['vbar-house', 'mask', 236, 820, 298, 878, { bg: 'auto' }],
+  ['vbar-food', 'mask', 470, 822, 534, 874, { bg: 'auto' }],
+  ['vbar-happy', 'mask', 696, 820, 752, 874, { bg: 'auto' }],
+  ['vbar-land', 'mask', 926, 826, 988, 876, { bg: 'auto' }],
+  ['vpaw', 'key', 170, 8, 262, 98, { circle: [216, 53, 42] }],
+  ['vcat', 'key', 586, 33, 638, 80],
+  // 金づちと字の所は消す (両はしの梅は残す)
+  ['vbuild', 'raw', 1186, 778, 1630, 872, { key: [[251, 245, 230]], fill: [1262, 795, 1555, 852] }],
+];
+const SOURCES = [['castle-mock.png', PIECES], ['castle-extras.png', EXTRAS], ['village-mock.png', VILLAGE]];
 
 async function main() {
   let chromium;
@@ -228,7 +242,7 @@ function writeOut(res) {
     console.log(('u-' + r.name).padEnd(16), r.w + 'x' + r.h);
   }
   const html = '<!doctype html><meta charset="utf-8"><body style="margin:0;font:12px sans-serif;display:flex;flex-wrap:wrap;gap:6px;padding:6px;background:#888">' +
-    res.map((r) => '<div style="padding:4px;text-align:center;background:' + (/^tab-|hammer|^fac-(?!paw)/.test(r.name) ? '#22364f' : '#cfe3c8') +
+    res.map((r) => '<div style="padding:4px;text-align:center;background:' + (/^tab-|hammer|^fac-(?!paw)|^vbar-/.test(r.name) ? '#22364f' : '#cfe3c8') +
       '"><img src="' + r.url + '" style="display:block;width:' + r.w * 2 + 'px"><span>' + r.name + '</span></div>').join('') + '</body>';
   const previewPath = process.env.PARTS_PREVIEW || path.join(require('node:os').tmpdir(), 'castle-ui.html');
   fs.writeFileSync(previewPath, html);

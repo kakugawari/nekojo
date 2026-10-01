@@ -36,7 +36,8 @@
     castleFacilities: $('castleFacilities'), castleList: $('castleList'), castleBuilt: $('castleBuilt'), castleHint: $('castleHint'),
     castleBuild: $('castleBuild'), castleBuildLabel: $('castleBuildLabel'),
     materialCountVillage: $('materialCountVillage'), villageLocked: $('villageLocked'), villageContent: $('villageContent'),
-    popLabel: $('popLabel'), popFill: $('popFill'),
+    popLabel: $('popLabel'), popFill: $('popFill'), villageStats: $('villageStats'), villageList: $('villageList'), villageBuilt: $('villageBuilt'),
+    villageHint: $('villageHint'), villageBuild: $('villageBuild'), villageBuildLabel: $('villageBuildLabel'),
     toast: $('toast'), cutin: $('cutin'), invasionBar: $('invasionBar'),
     storyModal: $('storyModal'), btnStory: $('btnStory'),
     rankModal: $('rankModal'), rankUpName: $('rankUpName'), rankUpArt: $('rankUpArt'), rankUpText: $('rankUpText'), btnRankOk: $('btnRankOk')
@@ -51,14 +52,14 @@
     'face-normal', 'face-smile', 'face-serious', 'face-surprised', 'face-angry', 'face-shy', 'pose-jarashi', 'pose-punch', 'b-villager',
     'r-coin', 'r-catcoin', 'r-swords', 'r-tag-strength', 'r-tag-reward',
     'guide-main', 'guide-stand', 'guide-walk', 'guide-hello', 'guide-cheer', 'guide-worry',
-    'b-castle', 'b-sakura', 'b-house', 'b-farm', 'b-woodfence', 'b-nobori']   // 戦場の組み立てた景色・天下の札・出世の札で使う (城の建物の絵は c-* になった)
+    'b-castle', 'b-sakura', 'b-house', 'b-farm', 'b-woodfence', 'b-nobori', 'b-barrels']   // 戦場 (組み立てた景色・樽の山)・天下の札・出世の札で使う (城と村の建物の絵は c-* と v-* になった)
     .concat(Object.keys(C.BUILDINGS).map(function (t) { return C.BUILDINGS[t].img; }))
     .concat(C.KEEP_STYLES.map(function (k) { return 'c-keep-' + k.id; }))
     .filter(function (n, i, a) { return a.indexOf(n) === i; });
   const imgs = {};
   IMG_NAMES.forEach(function (n) {
     const im = new Image();
-    im.src = './img/' + n + (n.indexOf('c-') === 0 ? '.webp' : '.png');   // 城のパーツ (c-*) は透明を残すため WebP
+    im.src = './img/' + n + (/^[cv]-/.test(n) ? '.webp' : '.png');   // 城と村のパーツ (c-* / v-*) は透明を残すため WebP
     imgs[n] = im;
   });
   /** 建物の絵。お城は選んだ天守の姿 */
@@ -1726,7 +1727,7 @@
   function makeTownMap(zone) {
     const root = $(zone + 'Map');
     const m = {
-      zone: zone, root: root, fill: zone === 'castle',
+      zone: zone, root: root, fill: true,
       bg: root.querySelector('.map-bg'), fg: root.querySelector('.map-fg'),
       w: 0, h: 0, dpr: 1, tw: 0, th: 0, ox: 0, oy: 0, walkers: [], area: null, N: C.MAP_SIZE
     };
@@ -1736,8 +1737,7 @@
       const r = m.fg.getBoundingClientRect();
       const idx = cellAt(m, e.clientX - r.left, e.clientY - r.top);
       if (idx < 0) return;
-      if (zone === 'castle') castleTapCell(idx);
-      else selectCell(zone, idx);
+      zoneTapCell(zone, idx);
     });
     return m;
   }
@@ -1749,7 +1749,7 @@
     const N = area.n;
     let h, tw, oy;
     if (m.fill) {
-      // 城: 入れ物いっぱい (高さは CSS で決まる)。下の施設の帯 (48px) をよけて、真ん中に置く
+      // 城と村: 入れ物いっぱい (高さは CSS で決まる)。下の帯 (施設・村のようす。48px) をよけて、真ん中に置く
       h = m.root.clientHeight;
       if (!(h >= 1)) return;
       const bottom = 52;
@@ -1816,8 +1816,8 @@
     const B = { x: m.ox, y: m.oy + N * m.th };
     const Rr = { x: m.ox + N * m.tw / 2, y: m.oy + N * m.th / 2 };
     const depth = m.th * (castle ? 1.1 : 0.7);
-    if (castle) {
-      // 台の影 (雲の上に浮かぶ見本のように、下にやわらかい影)
+    {
+      // 台の影 (浮かぶ見本のように、下にやわらかい影)
       ctx.fillStyle = 'rgba(80,70,50,.16)';
       ctx.beginPath(); ctx.ellipse(B.x, B.y + depth + m.th * 0.6, (Rr.x - L.x) * 0.48, m.th * 1.4, 0, 0, Math.PI * 2); ctx.fill();
     }
@@ -1872,6 +1872,7 @@
     if (def.ground) w = m.tw * C.sizeOf(type) * 1.04;                    // 地面の物: 使うマスの幅ぴったり
     else if (def.big) w = m.tw * (def.img.indexOf('c-') === 0 ? 1.9 : 2.2);  // お城 (天守)
     else if (def.img.indexOf('c-') === 0) w = im.naturalWidth * (m.tw / 112); // 城のパーツの絵は、ふつうの建物が幅 140px ほど (1 マスの 1.25 倍)
+    else if (def.img.indexOf('v-') === 0) w = im.naturalWidth * (m.tw / 124); // 村のパーツの絵は、ふつうの建物が幅 155px ほど (1 マスの 1.25 倍)
     else w = im.naturalWidth * (m.tw * 1.3 / 190);                        // 施設の絵は、ふつうの建物が幅 190px ほど
     return { w: w, h: w * im.naturalHeight / im.naturalWidth };
   }
@@ -2054,9 +2055,10 @@
       ctx.lineWidth = 3;
       ctx.stroke();
     });
-    // 城: 建てる物と場所を選んでいる間は、その場所に薄く建てて見せる (置けない所なら出さない)
-    const ghost = m.zone === 'castle' && castleSel.type && C.canPlaceBuilding(Object.assign({}, state, { materials: Infinity }), 'castle', sel, castleSel.type);
-    const items = buildingItems(m, ghost ? castleSel.type : null, sel);
+    // 建てる物と場所を選んでいる間は、その場所に薄く建てて見せる (置けない所なら出さない)
+    const gType = buildSel[m.zone];
+    const ghost = gType && C.canPlaceBuilding(Object.assign({}, state, { materials: Infinity }), m.zone, sel, gType);
+    const items = buildingItems(m, ghost ? gType : null, sel);
     walkers.forEach(function (w) { items.push({ depth: w.depth, walker: w }); });
     items.sort(function (a, b) { return a.depth - b.depth; });
     items.forEach(function (it) {
@@ -2079,37 +2081,14 @@
   function selectedCells(zone) {
     const sel = selected[zone];
     if (sel === null) return [];
-    if (zone !== 'castle') return [sel];
-    const a = C.anchorOf(state, 'castle', sel);
-    if (a >= 0) return C.footprint('castle', a, C.sizeOf(state.castle.cells[a])) || [sel];
-    if (castleSel.type) return (C.footprint('castle', sel, C.sizeOf(castleSel.type)) || [sel]).filter(function (i) { return C.isOpenCell(state, 'castle', i); });
+    const a = C.anchorOf(state, zone, sel);
+    if (a >= 0) return C.footprint(zone, a, C.sizeOf(state[zone].cells[a])) || [sel];
+    if (buildSel[zone]) return (C.footprint(zone, sel, C.sizeOf(buildSel[zone])) || [sel]).filter(function (i) { return C.isOpenCell(state, zone, i); });
     return [sel];
   }
 
   /** 1 秒あたりの量を「1 分あたり」の字に (10 未満は小数 1 けた) */
   function perMin(x) { const m = x * 60; return m < 10 ? String(Math.round(m * 10) / 10) : String(Math.round(m)); }
-
-  function effectChips(zone) {
-    const fx = C.townEffects(state);
-    const pct = function (mul) { return Math.round((mul - 1) * 100); };
-    const chips = [];
-    if (zone === 'castle') {
-      if (fx.slots) chips.push('家臣の枠 +' + fx.slots);
-      if (fx.trainMul > 1) chips.push('自主練 +' + pct(fx.trainMul) + '%');
-      if (fx.laborMul > 1) chips.push('普請 +' + pct(fx.laborMul) + '%');
-      if (fx.atkMul > 1) chips.push('猫パンチ +' + pct(fx.atkMul) + '%');
-      if (fx.hpMul > 1) chips.push('体力 +' + pct(fx.hpMul) + '%');
-      if (fx.meritMul > 1) chips.push('小判と経験値 +' + pct(fx.meritMul) + '%');
-    } else {
-      chips.push('村人猫の上限 ' + C.villageCapacity(state) + '匹');
-      if (fx.matMul > 1) chips.push('資材 +' + pct(fx.matMul) + '%');
-      if (fx.popMatMul > 1) chips.push('村人の資材 +' + pct(fx.popMatMul) + '%');
-      if (fx.growthMul > 1) chips.push('増え方 +' + pct(fx.growthMul) + '%');
-      if (fx.recruitMul > 1) chips.push('兵の志願 +' + pct(fx.recruitMul) + '%');
-      if (fx.shops) chips.push('商店 ' + fx.shops + ' 軒');
-    }
-    return chips;
-  }
 
   function renderTownView(zone) {
     const unlocked = isUnlocked(zone);
@@ -2120,15 +2099,12 @@
     if (!unlocked) { naviSay(lockedEl, 'worry', lockedMessage(zone)); return; }
     sizeMap(townMaps[zone]);
     updateTownNumbers(zone);
-    if (zone === 'castle') { renderCastlePanel(); return; }
-    $(zone + 'Effects').innerHTML = effectChips(zone).map(function (c) { return '<span>' + c + '</span>'; }).join('');
-    renderSheet(zone);
+    renderZonePanel(zone);
   }
 
   function updateTownNumbers(zone) {
-    const matText = '資材 ' + Math.floor(state.materials);
+    const set = function (el, t) { if (el.textContent !== t) el.textContent = t; };
     if (zone === 'castle') {
-      const set = function (el, t) { if (el.textContent !== t) el.textContent = t; };
       set(els.materialCountCastle, String(Math.floor(state.materials)));
       set(els.castleCoin, String(Math.floor(state.merit)));
       // 城レベル: 次の段までの経験値 (建てた物の値段の合計)
@@ -2138,131 +2114,127 @@
       const f = lv.next === null ? 1 : (lv.xp - lv.from) / (lv.next - lv.from);
       const fw = Math.round(Math.max(0, Math.min(1, f)) * 100) + '%';
       if (els.castleLevelFill.style.width !== fw) els.castleLevelFill.style.width = fw;
-    } else {
-      els.materialCountVillage.textContent = matText;
-      const cap = C.villageCapacity(state);
-      els.popLabel.textContent = '村人猫 ' + Math.floor(state.village.population) + ' / ' + cap + ' 匹';
-      els.popFill.style.width = Math.min(100, state.village.population / cap * 100) + '%';
-      // 村は「増える所」: 村人猫が兵に志願し、商店で小判が入る
-      const vo = C.villageOutput(state);
-      const set = function (id, t) { const el = $(id); if (el.textContent !== t) el.textContent = t; el.hidden = !t; };
-      set('popTroops', vo.home
-        ? '⚔ 兵 +' + perMin(vo.troops) + '/分 → ' + C.prefOf(vo.home).name + ' (100 匹ずつ。いま ' + Math.floor(vo.waiting) + ')'
-        : '⚔ 兵の見習い ' + Math.floor(vo.waiting) + '/' + C.RECRUIT_WAIT_CAP + ' 匹 ・ 国を任されたら そこへ');
-      set('popCoins', vo.coins > 0 ? '🪙 商いの小判 +' + perMin(vo.coins) + '/分' : '');
-    }
-  }
-
-  function selectCell(zone, idx) {
-    selected[zone] = (selected[zone] === idx) ? null : idx;
-    renderSheet(zone);
-  }
-
-  function renderSheet(zone) {
-    const sheet = $(zone + 'Sheet');
-    const idx = selected[zone];
-    if (idx === null) { sheet.hidden = true; sheet.innerHTML = ''; return; }
-    sheet.hidden = false;
-    sheet.innerHTML = '';
-    const type = state[zone].cells[idx];
-    const head = document.createElement('div');
-    head.className = 'sheet-head';
-    head.innerHTML = '<span></span>';
-    head.firstChild.textContent = type ? '建っている物' : 'ここに建てる';
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'btn-paper';
-    close.textContent = 'とじる';
-    close.addEventListener('click', function () { selected[zone] = null; renderSheet(zone); });
-    head.appendChild(close);
-    sheet.appendChild(head);
-
-    if (type) {
-      const def = C.BUILDINGS[type];
-      const info = document.createElement('div');
-      info.className = 'built-info';
-      info.innerHTML = '<img alt=""><div><div class="name"></div><div class="effect"></div></div>';
-      info.querySelector('img').src = imgs[def.img].src;
-      info.querySelector('.name').textContent = def.name;
-      info.querySelector('.effect').textContent = def.deco ? C.DECO_EFFECT : def.effect;
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.className = 'btn-paper demolish';
-      del.textContent = '取り壊す (資材 +' + Math.floor(def.cost / 2) + ')';
-      del.addEventListener('click', function () { doDemolish(zone, idx); });
-      info.querySelector('div').appendChild(del);
-      sheet.appendChild(info);
       return;
     }
-
-    const grid = document.createElement('div');
-    grid.className = 'build-grid';
-    Object.keys(C.BUILDINGS).forEach(function (t) {
-      const def = C.BUILDINGS[t];
-      if (def.zone !== zone) return;
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'build-card';
-      card.dataset.type = t;
-      card.innerHTML = '<img alt=""><span class="name"></span><span class="effect"></span><span class="cost"></span>';
-      card.querySelector('img').src = imgs[def.img].src;
-      card.querySelector('.name').textContent = def.name;
-      card.querySelector('.effect').textContent = def.deco ? 'かざり・にぎわい' : def.effect;
-      card.addEventListener('click', function () { doPlaceBuilding(zone, idx, t); });
-      grid.appendChild(card);
-    });
-    sheet.appendChild(grid);
-    refreshSheet(zone);
+    set(els.materialCountVillage, String(Math.floor(state.materials)));
+    const cap = C.villageCapacity(state);
+    set(els.popLabel, '村人猫 ' + Math.floor(state.village.population) + ' / ' + cap + ' 匹');
+    const pw = Math.round(Math.min(1, state.village.population / cap) * 100) + '%';
+    if (els.popFill.style.width !== pw) els.popFill.style.width = pw;
+    // 村のめぐみ: 村人猫が兵に志願し、商店などで小判が入る
+    const vo = C.villageOutput(state);
+    const setH = function (id, t) { const el = $(id); if (el.textContent !== t) el.textContent = t; el.hidden = !t; };
+    setH('popTroops', vo.home
+      ? '⚔ 兵 +' + perMin(vo.troops) + '/分 → ' + C.prefOf(vo.home).name + ' (いま ' + Math.floor(vo.waiting) + '/100)'
+      : '⚔ 兵の見習い ' + Math.floor(vo.waiting) + '/' + C.RECRUIT_WAIT_CAP + ' 匹 (国を任されたら そこへ)');
+    setH('popCoins', vo.coins > 0 ? '🪙 小判 +' + perMin(vo.coins) + '/分' : '');
+    // 下の帯: 住居・食料・幸福度・空き地
+    const st = C.villageStats(state);
+    const v = { houses: st.houses + ' 軒', food: Math.round(st.food.ratio * 100) + '%', happy: st.happy + '%', free: String(st.free) };
+    els.villageStats.querySelectorAll('[data-v]').forEach(function (b) { set(b, v[b.dataset.v]); });
+    els.villageStats.querySelector('[data-k="food"]').classList.toggle('low', st.food.ratio < 0.6);
   }
 
-  // ---- 城の「建築・強化」の一覧 (見本の右の紺の札)。建てる物を選び、地図で場所を押し、「建築する」
-  const castleSel = { type: null };
+  // ---- 建てる一覧 (城は「建築・強化」、村は「村の管理」)。建てる物を選び、地図で場所を押し、「建築する」/「村を発展させる」
+  const buildSel = { castle: null, village: null };
+  const castleSel = { get type() { return buildSel.castle; }, set type(v) { buildSel.castle = v; } };   // 見張り (__app.castleType) が読む
   const CASTLE_TYPES = Object.keys(C.BUILDINGS).filter(function (t) { return C.BUILDINGS[t].zone === 'castle'; });
   const CASTLE_MAIN = CASTLE_TYPES.filter(function (t) { return !C.BUILDINGS[t].deco; });
+  const VILLAGE_TYPES = Object.keys(C.BUILDINGS).filter(function (t) { return C.BUILDINGS[t].zone === 'village'; });
+  // 村の管理の仕切り (見本の 住居・食料・施設 の札。村人配置のかわりに かざり・土台)
+  const VILLAGE_GROUPS = [
+    { id: 'home', name: '住居', img: 'v-house', desc: '村人猫の住む家を建てる' },
+    { id: 'food', name: '食料', img: 'v-farmhouse', desc: '田畑で食料を作る (足りないと増えにくい)' },
+    { id: 'work', name: '施設', img: 'v-training', desc: '兵・小判・資材を生む' },
+    { id: 'deco', name: 'かざり', img: 'v-sakura', desc: 'かざって 幸福度を上げる (兵と小判が増える)' },
+    { id: 'ground', name: '土台', img: 'v-base-pond', desc: '2x2 マスの土台を敷く (幸福度も少し)' }
+  ];
+  function villageGroupOf(t) { const d = C.BUILDINGS[t]; return d.group || (d.ground ? 'ground' : 'deco'); }
+  let villageCat = null;   // 村の管理で開いている仕切り (null なら仕切りの一覧)
 
-  /** 一覧と施設の帯を作る (開いたとき・建てたときだけ。数字は refreshCastle で書き換える) */
-  function renderCastlePanel() {
-    els.castleList.innerHTML = '';
-    const groupOf = function (t) { const d = C.BUILDINGS[t]; return !d.deco ? '建物' : d.ground ? '地面 (道・池・土台)' : 'かざり'; };
-    let lastGroup = '';
-    CASTLE_TYPES.slice().sort(function (a, b) {
-      const o = ['建物', 'かざり', '地面 (道・池・土台)'];
-      return o.indexOf(groupOf(a)) - o.indexOf(groupOf(b));
-    }).forEach(function (t) {
-      const def = C.BUILDINGS[t];
-      if (groupOf(t) !== lastGroup) {
-        lastGroup = groupOf(t);
-        const h = document.createElement('div');
-        h.className = 'cs-group';
-        h.textContent = lastGroup;
-        els.castleList.appendChild(h);
-      }
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'cs-card';
-      card.dataset.type = t;
-      card.innerHTML = '<img alt=""><span class="cs-card-main"><span class="cs-card-name"></span><span class="cs-card-effect"></span>' +
-        '<span class="cs-card-cost"><span aria-hidden="true">🪵</span> <b data-v="cost"></b><i data-v="count"></i></span></span><span class="cs-card-go" aria-hidden="true">›</span>';
-      card.querySelector('img').src = buildingImg(t).src;
-      card.querySelector('.cs-card-name').textContent = def.name;
-      card.querySelector('.cs-card-effect').textContent = def.deco ? (def.ground ? (C.sizeOf(t) > 1 ? '地面 (2x2 マス)・' : '地面・') + 'にぎわい' : 'かざり (にぎわい)') : def.effect;
-      card.addEventListener('click', function () { castleChoose(t); });
-      els.castleList.appendChild(card);
-    });
-    // 下の帯: 城内の施設 (効き目のある建物の数)
-    els.castleFacilities.innerHTML = '<span class="cs-fac-title"><img class="cs-fac-paw" src="./img/u-fac-paw.webp" alt="">城内の施設</span>' +
-      CASTLE_MAIN.map(function (t) {
-        const def = C.BUILDINGS[t];
-        return '<span class="cs-fac" data-type="' + t + '"><i class="cs-fac-icon" aria-hidden="true"></i><span><small>' + def.name + '</small><b data-v="fac"></b></span></span>';
-      }).join('');
-    refreshCastle();
+  const zoneEls = function (zone) {
+    return zone === 'castle'
+      ? { list: els.castleList, built: els.castleBuilt, hint: els.castleHint, build: els.castleBuild, label: els.castleBuildLabel }
+      : { list: els.villageList, built: els.villageBuilt, hint: els.villageHint, build: els.villageBuild, label: els.villageBuildLabel };
+  };
+
+  function buildCard(zone, t) {
+    const def = C.BUILDINGS[t];
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'cs-card';
+    card.dataset.type = t;
+    card.innerHTML = '<img alt=""><span class="cs-card-main"><span class="cs-card-name"></span><span class="cs-card-effect"></span>' +
+      '<span class="cs-card-cost"><span aria-hidden="true">🪵</span> <b data-v="cost"></b><i data-v="count"></i></span></span><span class="cs-card-go" aria-hidden="true">›</span>';
+    card.querySelector('img').src = buildingImg(t).src;
+    card.querySelector('.cs-card-name').textContent = def.name;
+    card.querySelector('.cs-card-effect').textContent = !def.deco ? def.effect
+      : (def.ground ? (C.sizeOf(t) > 1 ? '地面 (2x2 マス)・' : '地面・') : '') + C.decoEffect(t);
+    card.addEventListener('click', function () { zoneChoose(zone, t); });
+    return card;
   }
 
-  /** 一覧の値段・数・押せるか、「建築する」と案内の字、建っている物の札を書き換える (作り直さない) */
-  function refreshCastle() {
-    const sel = selected.castle;
-    const type = castleSel.type;
-    els.castleList.querySelectorAll('.cs-card').forEach(function (card) {
+  /** 一覧と下の帯を作る (開いたとき・建てたとき・仕切りを変えたときだけ。数字は refreshZonePanel で書き換える) */
+  function renderZonePanel(zone) {
+    const z = zoneEls(zone);
+    z.list.innerHTML = '';
+    if (zone === 'castle') {
+      const groupOf = function (t) { const d = C.BUILDINGS[t]; return !d.deco ? '建物' : d.ground ? '地面 (道・池・土台)' : 'かざり'; };
+      let lastGroup = '';
+      CASTLE_TYPES.slice().sort(function (a, b) {
+        const o = ['建物', 'かざり', '地面 (道・池・土台)'];
+        return o.indexOf(groupOf(a)) - o.indexOf(groupOf(b));
+      }).forEach(function (t) {
+        if (groupOf(t) !== lastGroup) {
+          lastGroup = groupOf(t);
+          const h = document.createElement('div');
+          h.className = 'cs-group';
+          h.textContent = lastGroup;
+          z.list.appendChild(h);
+        }
+        z.list.appendChild(buildCard(zone, t));
+      });
+      // 下の帯: 城内の施設 (効き目のある建物の数)
+      els.castleFacilities.innerHTML = '<span class="cs-fac-title"><img class="cs-fac-paw" src="./img/u-fac-paw.webp" alt="">城内の施設</span>' +
+        CASTLE_MAIN.map(function (t) {
+          const def = C.BUILDINGS[t];
+          return '<span class="cs-fac" data-type="' + t + '"><i class="cs-fac-icon" aria-hidden="true"></i><span><small>' + def.name + '</small><b data-v="fac"></b></span></span>';
+        }).join('');
+    } else if (villageCat === null) {
+      // 仕切りの一覧 (見本の 住居・食料・施設 の札)
+      VILLAGE_GROUPS.forEach(function (g) {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'cs-card vl-cat';
+        card.dataset.cat = g.id;
+        card.innerHTML = '<img alt=""><span class="cs-card-main"><span class="cs-card-name"></span><span class="cs-card-effect"></span><span class="vl-cat-stat" data-v="stat"></span></span><span class="cs-card-go" aria-hidden="true">›</span>';
+        card.querySelector('img').src = imgs[g.img].src;
+        card.querySelector('.cs-card-name').textContent = g.name;
+        card.querySelector('.cs-card-effect').textContent = g.desc;
+        card.addEventListener('click', function () { villageCat = g.id; renderZonePanel('village'); });
+        z.list.appendChild(card);
+      });
+    } else {
+      const g = VILLAGE_GROUPS.find(function (x) { return x.id === villageCat; });
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'vl-back';
+      back.dataset.act = 'cat-back';
+      back.innerHTML = '<span aria-hidden="true">‹</span> 村の管理 ・ <b></b>';
+      back.querySelector('b').textContent = g.name;
+      back.addEventListener('click', function () { villageCat = null; buildSel.village = null; renderZonePanel('village'); });
+      z.list.appendChild(back);
+      VILLAGE_TYPES.filter(function (t) { return villageGroupOf(t) === villageCat; }).forEach(function (t) { z.list.appendChild(buildCard(zone, t)); });
+    }
+    refreshZonePanel(zone);
+  }
+
+  /** 一覧の値段・数・押せるか、建てるボタンと案内の字、建っている物の札を書き換える (作り直さない) */
+  function refreshZonePanel(zone) {
+    const z = zoneEls(zone);
+    const sel = selected[zone];
+    const type = buildSel[zone];
+    z.list.querySelectorAll('.cs-card[data-type]').forEach(function (card) {
       const t = card.dataset.type, def = C.BUILDINGS[t];
       const n = C.countBuildings(state, t);
       const full = def.max !== null && n >= def.max;
@@ -2274,49 +2246,70 @@
       card.classList.toggle('poor', !full && state.materials < C.buildingCost(state, t));
       card.classList.toggle('on', t === type);
     });
-    els.castleFacilities.querySelectorAll('.cs-fac').forEach(function (el) {
-      const t = el.dataset.type, def = C.BUILDINGS[t];
-      const txt = C.countBuildings(state, t) + '/' + def.max;
-      const b = el.querySelector('[data-v="fac"]'); if (b.textContent !== txt) b.textContent = txt;
-    });
+    if (zone === 'castle') {
+      els.castleFacilities.querySelectorAll('.cs-fac').forEach(function (el) {
+        const t = el.dataset.type, def = C.BUILDINGS[t];
+        const txt = C.countBuildings(state, t) + '/' + def.max;
+        const b = el.querySelector('[data-v="fac"]'); if (b.textContent !== txt) b.textContent = txt;
+      });
+    } else {
+      // 仕切りの札の数: 住居 = 村人猫・食料 = %・施設 = 建てた数・かざり = 幸福度・土台 = 空き地
+      const st = C.villageStats(state);
+      const work = VILLAGE_TYPES.filter(function (t) { return villageGroupOf(t) === 'work'; }).reduce(function (n, t) { return n + C.countBuildings(state, t); }, 0);
+      const statOf = {
+        home: '村人猫 ' + Math.floor(state.village.population) + ' / ' + C.villageCapacity(state) + (st.nextOpen !== null ? ' ・ ' + st.nextOpen + ' 匹で土地が広がる' : ''),
+        food: '食料 ' + Math.round(st.food.ratio * 100) + '% (作る ' + Math.round(st.food.made) + ' / 食べる ' + Math.floor(st.food.need) + ')',
+        work: '建てた施設 ' + work,
+        deco: '幸福度 ' + st.happy + '%',
+        ground: '空き地 ' + st.free
+      };
+      z.list.querySelectorAll('.vl-cat').forEach(function (card) {
+        const el = card.querySelector('[data-v="stat"]'), t = statOf[card.dataset.cat];
+        if (el.textContent !== t) el.textContent = t;
+      });
+    }
     // 建っている物を選んでいるときは、その札 (取り壊す) を一覧の上に出す。お城なら天守の姿も選べる
-    const anchor = sel !== null ? C.anchorOf(state, 'castle', sel) : -1;
-    const built = anchor >= 0 ? state.castle.cells[anchor] : null;
-    const builtKey = built ? anchor + ':' + C.keepStyle(state) + ':' + C.castleLevel(state) : '';
-    if (els.castleBuilt.dataset.key !== builtKey) {
-      els.castleBuilt.dataset.key = builtKey;
-      els.castleBuilt.hidden = !built;
-      els.castleBuilt.innerHTML = '';
+    const anchor = sel !== null ? C.anchorOf(state, zone, sel) : -1;
+    const built = anchor >= 0 ? state[zone].cells[anchor] : null;
+    const builtKey = built ? anchor + ':' + (zone === 'castle' ? C.keepStyle(state) + ':' + C.castleLevel(state) : built) : '';
+    if (z.built.dataset.key !== builtKey) {
+      z.built.dataset.key = builtKey;
+      z.built.hidden = !built;
+      z.built.innerHTML = '';
       if (built) {
         const def = C.BUILDINGS[built];
-        els.castleBuilt.innerHTML = '<div class="cs-built-row"><img alt=""><div><div class="cs-built-name"></div><div class="cs-built-effect"></div></div></div>';
-        els.castleBuilt.querySelector('img').src = buildingImg(built).src;
-        els.castleBuilt.querySelector('.cs-built-name').textContent = def.name;
-        els.castleBuilt.querySelector('.cs-built-effect').textContent = def.deco ? C.DECO_EFFECT : def.effect;
+        z.built.innerHTML = '<div class="cs-built-row"><img alt=""><div><div class="cs-built-name"></div><div class="cs-built-effect"></div></div></div>';
+        z.built.querySelector('img').src = buildingImg(built).src;
+        z.built.querySelector('.cs-built-name').textContent = def.name;
+        z.built.querySelector('.cs-built-effect').textContent = def.deco ? C.decoEffect(built) : def.effect;
         const del = document.createElement('button');
         del.type = 'button';
         del.className = 'btn-paper demolish';
         del.textContent = '取り壊す (資材 +' + Math.floor(def.cost / 2) + ')';
-        del.addEventListener('click', function () { doDemolish('castle', anchor); });
-        els.castleBuilt.querySelector('.cs-built-row > div').appendChild(del);
-        if (built === 'keep') els.castleBuilt.appendChild(keepStylePicker());
+        del.addEventListener('click', function () { doDemolish(zone, anchor); });
+        z.built.querySelector('.cs-built-row > div').appendChild(del);
+        if (built === 'keep') z.built.appendChild(keepStylePicker());
       }
     }
-    // 「建築する」: 建てる物と空いた場所がそろい、資材が足りれば押せる
-    let label = '建築する', hint = '', ok = false;
-    const emptySel = sel !== null && !state.castle.cells[sel];
-    if (!type) hint = emptySel ? '一覧から 建てる物を えらぶにゃ' : built ? '' : '建てる物を えらんで、地図の 空いたマスを 押すにゃ';
-    else if (!emptySel) hint = '「' + C.BUILDINGS[type].name + '」を どこに建てる? 地図の 空いたマスを 押すにゃ';
+    // 建てるボタン: 建てる物と空いた場所がそろい、資材が足りれば押せる
+    const verb = zone === 'castle' ? '建築する' : '村を発展させる';
+    let label = verb, hint = '', ok = false;
+    const emptySel = sel !== null && !state[zone].cells[sel];
+    if (!type) {
+      hint = emptySel ? (zone === 'castle' ? '一覧から 建てる物を えらぶにゃ' : '村の管理から 建てる物を えらぶにゃ')
+        : built ? '' : zone === 'castle' || villageCat !== null ? '建てる物を えらんで、地図の 空いたマスを 押すにゃ' : '仕切りを押して 建てる物を えらび、地図の 空いたマスを 押すにゃ';
+    } else if (!emptySel) hint = '「' + C.BUILDINGS[type].name + '」を どこに建てる? 地図の 空いたマスを 押すにゃ';
     else {
       const need = C.buildingCost(state, type) - state.materials;
       if (need > 0) { label = '資材が あと ' + Math.ceil(need) + ' たりない'; }
-      else { label = '建築する ・ 資材 ' + C.buildingCost(state, type); ok = C.canPlaceBuilding(state, 'castle', sel, type); }
+      else { label = verb + ' ・ 資材 ' + C.buildingCost(state, type); ok = C.canPlaceBuilding(state, zone, sel, type); }
       hint = ok ? '「' + C.BUILDINGS[type].name + '」を ここに建てるにゃ' : '';
     }
-    if (els.castleBuildLabel.textContent !== label) els.castleBuildLabel.textContent = label;
-    els.castleBuild.disabled = !ok;
-    if (els.castleHint.textContent !== hint) els.castleHint.textContent = hint;
+    if (z.label.textContent !== label) z.label.textContent = label;
+    z.build.disabled = !ok;
+    if (z.hint.textContent !== hint) z.hint.textContent = hint;
   }
+  function refreshCastle() { refreshZonePanel('castle'); }
 
   /** 天守の姿を選ぶ札 (開いていない物は封の印と、開く条件) */
   function keepStylePicker() {
@@ -2345,38 +2338,35 @@
     if (!r.ok) return false;
     state = r.state;
     saveSoon();
-    renderCastlePanel();
+    renderZonePanel('castle');
     showToast(C.KEEP_STYLES.find(function (k) { return k.id === id; }).name + 'に した!', 1400);
     return true;
   }
 
-  function castleChoose(type) {
-    castleSel.type = castleSel.type === type ? null : type;
+  function zoneChoose(zone, type) {
+    buildSel[zone] = buildSel[zone] === type ? null : type;
     // 建っている物を選んでいたら外す (建てる場所を選び直す)
-    if (selected.castle !== null && state.castle.cells[selected.castle]) selected.castle = null;
-    refreshCastle();
+    if (selected[zone] !== null && state[zone].cells[selected[zone]]) selected[zone] = null;
+    refreshZonePanel(zone);
   }
+  function castleChoose(type) { zoneChoose('castle', type); }
 
-  function castleTapCell(idx) {
+  function zoneTapCell(zone, idx) {
     // 2x2 の物のどのマスを押しても、同じ物を選んだことにする (もう一度押すと閉じる)
-    const a = C.anchorOf(state, 'castle', idx);
-    const cur = selected.castle !== null ? C.anchorOf(state, 'castle', selected.castle) : -1;
-    selected.castle = (selected.castle === idx || (a >= 0 && a === cur)) ? null : idx;
-    refreshCastle();
+    const a = C.anchorOf(state, zone, idx);
+    const cur = selected[zone] !== null ? C.anchorOf(state, zone, selected[zone]) : -1;
+    selected[zone] = (selected[zone] === idx || (a >= 0 && a === cur)) ? null : idx;
+    refreshZonePanel(zone);
   }
+  function castleTapCell(idx) { zoneTapCell('castle', idx); }
 
   /** 資材が増えたときは、札を作り直さずに押せるかどうかと値段だけ直す (押している最中に札が入れ替わらないように) */
-  function refreshSheet(zone) {
-    if (zone === 'castle') { refreshCastle(); return; }
-    const idx = selected[zone];
-    if (idx === null) return;
-    $(zone + 'Sheet').querySelectorAll('.build-card').forEach(function (card) {
-      const t = card.dataset.type;
-      const def = C.BUILDINGS[t];
-      const n = C.countBuildings(state, t);
-      card.disabled = !C.canPlaceBuilding(state, zone, idx, t);
-      card.querySelector('.cost').textContent = '資材 ' + C.buildingCost(state, t) + (def.max ? ' (' + n + '/' + def.max + ')' : '');
-    });
+  function refreshSheet(zone) { refreshZonePanel(zone); }
+
+  /** 建てるボタン: 選んだ物を選んだマスに建てる */
+  function doBuildSelected(zone) {
+    if (selected[zone] === null || !buildSel[zone]) return false;
+    return doPlaceBuilding(zone, selected[zone], buildSel[zone]);
   }
 
   function doPlaceBuilding(zone, idx, type) {
@@ -2385,20 +2375,18 @@
     if (r.ok) {
       state = r.state;
       selected[zone] = null;
-      // 城: 同じ物を続けて建てられるように、選んだ物はそのまま (上限に届いたら外す)
-      if (zone === 'castle') {
-        const def = C.BUILDINGS[type];
-        if (def.max !== null && C.countBuildings(state, type) >= def.max) castleSel.type = null;
-      }
+      // 同じ物を続けて建てられるように、選んだ物はそのまま (上限に届いたら外す)
+      const def = C.BUILDINGS[type];
+      if (def.max !== null && C.countBuildings(state, type) >= def.max) buildSel[zone] = null;
       renderTownView(zone);
       saveSoon();
-      if (r.leveledUp) {
+      if (zone === 'castle' && r.leveledUp) {
         const lv = C.castleLevel(state), a = C.openArea(state, 'castle');
         const style = C.KEEP_STYLES.find(function (k) { return k.level === lv; });
         showToast('🏯 城レベル ' + lv + '! ' + (lv > 1 && C.CASTLE_LEVELS[lv - 1].open > C.CASTLE_LEVELS[lv - 2].open ? '土地が ' + a.n + 'x' + a.n + ' に広がった' : 'りっぱになった') +
           (style ? ' (天守の姿「' + style.name + '」が えらべる)' : ''), 3400);
-      } else if (!was && C.isCastleComplete(state)) showToast('🎉 お城の完成にゃ!', 3200);
-      else showToast(C.BUILDINGS[type].name + 'を建てた!', 1400);
+      } else if (zone === 'castle' && !was && C.isCastleComplete(state)) showToast('🎉 お城の完成にゃ!', 3200);
+      else showToast(def.name + 'を建てた!', 1400);
     }
     return r.ok;
   }
@@ -2412,6 +2400,19 @@
       saveSoon();
     }
     return r.ok;
+  }
+
+  /** 村の土地が広がったら知らせる (村人猫がいちばん多かったときの数で広がる。時の流れの中で起きる) */
+  let lastVillageLevel = 0;
+  function checkVillageGrowth() {
+    if (!isUnlocked('village')) return;
+    const lv = C.villageLevel(state);
+    if (lastVillageLevel && lv > lastVillageLevel) {
+      const a = C.openArea(state, 'village');
+      showToast('🏘 村が にぎやかになって、土地が ' + a.n + 'x' + a.n + ' に広がった!', 3400);
+      if (currentTab === 'village') renderTownView('village');
+    }
+    lastVillageLevel = lv;
   }
 
   // ---------------------------------------------------------- ボタン
@@ -3617,6 +3618,7 @@
     uiAcc += dt;
     if (uiAcc >= 0.25) {
       uiAcc = 0;
+      checkVillageGrowth();
       if ((currentTab === 'castle' || currentTab === 'village') && isUnlocked(currentTab)) {
         updateTownNumbers(currentTab);
         refreshSheet(currentTab);
@@ -3676,7 +3678,8 @@
     els.btnResume.addEventListener('click', resumeBattle);
     els.btnRetreat.addEventListener('click', retreat);
     els.btnRecruit.addEventListener('click', doRecruit);
-    els.castleBuild.addEventListener('click', function () { if (castleSel.type && selected.castle !== null) doPlaceBuilding('castle', selected.castle, castleSel.type); });
+    els.castleBuild.addEventListener('click', function () { doBuildSelected('castle'); });
+    els.villageBuild.addEventListener('click', function () { doBuildSelected('village'); });
     Object.keys(tabEls).forEach(function (tab) {
       tabEls[tab].addEventListener('click', function () { switchTab(tab); });
     });
@@ -3763,7 +3766,7 @@
       assignJob: doAssignJob,
       build: doPlaceBuilding,
       demolish: doDemolish,
-      select: selectCell,
+      select: zoneTapCell,
       selected: function (zone) { return selected[zone]; },
       walkers: function (zone) { return townMaps[zone].walkers.length; },
       /** マスの真ん中の、画面での位置 (指で押すテスト用) */
@@ -3775,6 +3778,8 @@
         return { x: r.left + t.x, y: r.top + t.y + m.th / 2, tw: m.tw };
       },
       castleType: function () { return castleSel.type; },
+      buildType: function (zone) { return buildSel[zone]; },
+      villageCat: function () { return villageCat; },
       /** 建っている物の絵を描き直した回数 (マスを選んでいない間は、変わったときだけ増えるはず) */
       townCacheDraws: function (zone) { return townMaps[zone].cacheDraws || 0; },
       /** 全部を描く描き方にする (見比べ用) */

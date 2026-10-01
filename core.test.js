@@ -865,6 +865,8 @@ function townState(extra) {
 }
 /** 城の使える土地 (はじめは 10x10 の真ん中 8x8) の n 番目のマス */
 const CC = (n) => Core.openCells(Core.createInitialState(1), 'castle')[n];
+/** 村の使える土地 (はじめは 10x10 の真ん中 8x8) の n 番目のマス */
+const VC = (n) => Core.openCells(Core.createInitialState(1), 'village')[n];
 function build(s, zone, idx, type) {
   const r = Core.placeBuilding(s, zone, idx, type);
   assert.strictEqual(r.ok, true, `${type} を ${zone}[${idx}] に建てられるはず`);
@@ -874,22 +876,24 @@ function build(s, zone, idx, type) {
 test('城と村: 城主になるまで建てられない', () => {
   const s = stateAt(1000, { materials: 100000 });
   assert.strictEqual(Core.canPlaceBuilding(s, 'castle', CC(0), 'keep'), false);
-  assert.strictEqual(Core.canPlaceBuilding(s, 'village', 0, 'house'), false);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'village', VC(0), 'house'), false);
 });
 
 test('城と村: 建物は決まった場所にしか建てられない (お城は城、民家は村)', () => {
   const s = townState();
-  assert.strictEqual(Core.canPlaceBuilding(s, 'village', 0, 'keep'), false);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'village', VC(0), 'keep'), false);
   assert.strictEqual(Core.canPlaceBuilding(s, 'castle', CC(0), 'house'), false);
   assert.strictEqual(Core.canPlaceBuilding(s, 'castle', CC(0), 'keep'), true);
-  assert.strictEqual(Core.canPlaceBuilding(s, 'village', 0, 'house'), true);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'village', VC(0), 'house'), true);
 });
 
 test('城と村: 空いているマスにしか建てられない。マスの外にも建てられない', () => {
-  let s = build(townState(), 'village', 5, 'house');
-  assert.strictEqual(Core.canPlaceBuilding(s, 'village', 5, 'farm'), false);
-  assert.strictEqual(Core.canPlaceBuilding(s, 'village', -1, 'farm'), false);
-  assert.strictEqual(Core.canPlaceBuilding(s, 'village', Core.MAP_CELLS, 'farm'), false);
+  let s = build(townState(), 'village', VC(5), 'house');
+  assert.strictEqual(Core.canPlaceBuilding(s, 'village', VC(5), 'farmhouse'), false);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'village', VC(6), 'farmhouse'), true);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'village', -1, 'farmhouse'), false);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'village', Core.MAP_CELLS, 'farmhouse'), false);
+  assert.strictEqual(Core.canPlaceBuilding(s, 'village', 0, 'farmhouse'), false, '村も、はじめは真ん中の 8x8 だけ');
 });
 
 test('城と村: 数に上限のある建物 (お城は1つ)', () => {
@@ -910,10 +914,10 @@ test('城と村: 民家は建てるほど高くなり、村人猫の上限が増
   let s = townState();
   const c0 = Core.buildingCost(s, 'house');
   const cap0 = Core.villageCapacity(s);
-  s = build(s, 'village', 0, 'house');
+  s = build(s, 'village', VC(0), 'house');
   assert.ok(Core.buildingCost(s, 'house') > c0);
   assert.strictEqual(Core.villageCapacity(s), cap0 + 8);
-  s = build(s, 'village', 1, 'well');
+  s = build(s, 'village', VC(1), 'well');
   assert.strictEqual(Core.villageCapacity(s), cap0 + 11);
 });
 
@@ -928,9 +932,9 @@ test('城と村: 取り壊すとマスが空き、元の値段の半分が戻る
 });
 
 test('城と村: 民家を壊して上限を割ったら、村人猫は上限まで減る', () => {
-  let s = build(townState(), 'village', 0, 'house');
+  let s = build(townState(), 'village', VC(0), 'house');
   s = Object.assign({}, s, { village: Object.assign({}, s.village, { population: Core.villageCapacity(s) }) });
-  const r = Core.demolish(s, 'village', 0);
+  const r = Core.demolish(s, 'village', VC(0));
   assert.strictEqual(r.state.village.population, Core.villageCapacity(r.state));
 });
 
@@ -951,7 +955,8 @@ test('城と村の効果: 武器屋でパンチ、見張り台で体力、お城
   assert.strictEqual(b1.player.maxHp, Math.round(b0.player.maxHp * 1.1));
   assert.strictEqual(b1.enemies[0].reward, Math.round(b0.enemies[0].reward * 1.2));
   // 村は「増える所」。合戦を強くする効き目は城だけ (城と村の役割を分けた)
-  const v = build(build(t, 'village', 0, 'onsen'), 'village', 1, 'shop');
+  let v = build(build(build(t, 'village', VC(0), 'training'), 'village', VC(1), 'shop'), 'village', VC(2), 'varmory');
+  v = build(build(v, 'village', VC(3), 'inn'), 'village', VC(4), 'diner');
   const b2 = Core.createBattle(v, Core.mulberry32(1));
   assert.deepStrictEqual([b2.player.atk, b2.player.maxHp, b2.enemies[0].reward], [b1.player.atk, b1.player.maxHp, b1.enemies[0].reward]);
 });
@@ -959,7 +964,7 @@ test('城と村の効果: 武器屋でパンチ、見張り台で体力、お城
 test('村: 村人猫が兵に志願する。天下で国を任される前は、見習いとして 2000 匹まで村で待つ', () => {
   // 民家 5 軒で上限 50 匹。村人猫 50 匹
   let s = townState();
-  for (let i = 30; i < 35; i++) s = build(s, 'village', i, 'house');
+  for (let i = 30; i < 35; i++) s = build(s, 'village', VC(i), 'house');
   s = Object.assign({}, s, { village: Object.assign({}, s.village, { population: 50 }) });
   const out = Core.villageOutput(s);
   assert.ok(Math.abs(out.troops - 0.25) < 1e-9, `村人猫 50 匹で 1 秒に 0.25 匹 (${out.troops})`);
@@ -978,14 +983,15 @@ test('村: 村人猫が兵に志願する。天下で国を任される前は、
   assert.strictEqual(Core.troopsAt(d, 23) - Core.troopsAt(c, 23), 300, '20 分で 300 匹 (村人猫 50 匹)');
 });
 
-test('村: 温泉で志願する兵が 1.5 倍、商店 1 軒ごとに村人猫の数に応じた小判が入る (経験値にはならない)', () => {
+test('村: 訓練所・馬小屋で志願する兵が増え、商店 1 軒ごとに村人猫の数に応じた小判が入る (経験値にはならない)', () => {
   let s = townState();
-  for (let i = 30; i < 35; i++) s = build(s, 'village', i, 'house');
+  for (let i = 30; i < 35; i++) s = build(s, 'village', VC(i), 'house');
   s = Object.assign({}, s, { village: Object.assign({}, s.village, { population: 50 }) });
   const t0 = Core.villageOutput(s).troops;
-  assert.ok(Math.abs(Core.villageOutput(build(s, 'village', 0, 'onsen')).troops - t0 * 1.5) < 1e-9, '温泉');
+  assert.ok(Math.abs(Core.villageOutput(build(s, 'village', VC(0), 'training')).troops - t0 * 1.4) < 1e-9, '訓練所 +40%');
+  assert.ok(Math.abs(Core.villageOutput(build(s, 'village', VC(0), 'vstable')).troops - t0 * 1.25) < 1e-9, '馬小屋 +25%');
   assert.strictEqual(Core.villageOutput(s).coins, 0, '商店が無いと小判は入らない');
-  const one = build(s, 'village', 0, 'shop'), two = build(one, 'village', 1, 'shop');
+  const one = build(s, 'village', VC(0), 'shop'), two = build(one, 'village', VC(1), 'shop');
   assert.ok(Math.abs(Core.villageOutput(one).coins - 0.125) < 1e-9, `村人猫 50 匹・商店 1 軒で 1 秒に小判 0.125 (${Core.villageOutput(one).coins})`);
   assert.ok(Math.abs(Core.villageOutput(two).coins - 0.25) < 1e-9, '2 軒で倍');
   const a = Core.tick(two, 100);
@@ -1013,18 +1019,86 @@ test('城と村の効果: 訓練場で自主練、厩舎で普請、工房で資
   const m0 = meritGain(s), g0 = matGain(s);
   assert.ok(meritGain(build(s, 'castle', CC(0), 'dojo')) > m0 * 1.4, '訓練場');
   assert.ok(matGain(build(s, 'castle', CC(0), 'stable')) > g0 * 1.1, '厩舎');
-  const w = build(s, 'village', 0, 'workshop');
+  const w = build(s, 'village', VC(0), 'workshop');
   assert.ok(matGain(w) > g0 * 1.4, '工房');
 });
 
-test('城と村の効果: 田んぼとかざりで村人猫が早く増える (かざりは +50% まで)', () => {
-  let s = build(townState(), 'village', 0, 'house');
-  const grow = (x) => Core.tick(x, 1).village.population - x.village.population;
-  const g0 = grow(s);
-  assert.ok(grow(build(s, 'village', 1, 'rice')) > g0 * 1.25, '田んぼ');
-  let d = s;
-  for (let i = 0; i < 20; i++) d = build(d, 'village', 2 + i, 'straw');
-  assert.strictEqual(Core.townEffects(d).growthMul, 1.5, 'かざり20個でも +50% まで');
+test('村: 食料 = 作る量 ÷ 村人猫。村人猫は食料のぶんまでは早く増え、それより多くはほとんど増えない (減りはしない)', () => {
+  let s = townState();
+  for (let i = 0; i < 5; i++) s = build(s, 'village', VC(i), 'house');      // 上限 50
+  const pop = (x, n) => Object.assign({}, x, { village: Object.assign({}, x.village, { population: n }) });
+  assert.strictEqual(Core.villageFood(pop(s, 10)).ratio, 1, 'はじめの畑 (10) で 10 匹は足りる');
+  assert.strictEqual(Core.villageFood(pop(s, 40)).ratio, 0.25, '40 匹には 4 分の 1');
+  assert.strictEqual(Core.villageFood(pop(s, 0)).ratio, 1, '村人猫がいないときは 100%');
+  // 田畑が無いと、民家があっても 10 匹ほどで止まる (1 時間でも 14 匹)
+  let a = pop(s, 2);
+  for (let k = 0; k < 3600; k++) a = Core.tick(a, 1);
+  assert.ok(a.village.population >= 10 && a.village.population < 15, `田畑が無いと 1 時間で ${a.village.population.toFixed(1)} 匹`);
+  // 農家・田んぼ・果樹園で 40 → 40 匹まですぐ増える
+  let b = build(build(build(pop(s, 2), 'village', VC(10), 'farmhouse'), 'village', VC(11), 'paddy'), 'village', VC(12), 'orchard');
+  assert.strictEqual(Core.villageFood(b).made, 40, '10 + 農家 12 + 田んぼ 8 + 果樹園 10');
+  for (let k = 0; k < 120; k++) b = Core.tick(b, 1);
+  assert.ok(b.village.population >= 39.9 && b.village.population <= 40.2, `食料があると 2 分で 40 匹まで (${b.village.population.toFixed(1)})`);
+  // 食料が減っても (田畑を壊しても) 村人猫は減らない
+  const c = Core.tick(Core.demolish(b, 'village', VC(10)).state, 60);
+  assert.ok(c.village.population >= b.village.population, '田畑を壊しても減らない');
+  assert.strictEqual(Core.villageFood(build(b, 'village', VC(13), 'vricehouse')).made, 48, '米蔵 +20%');
+});
+
+test('村: 幸福度は 50% から、かざり・見張り台で 100% まで上がり、兵と小判が 1〜1.5 倍になる', () => {
+  let s = townState();
+  for (let i = 0; i < 5; i++) s = build(s, 'village', VC(i), 'house');
+  s = build(s, 'village', VC(5), 'shop');
+  s = Object.assign({}, s, { village: Object.assign({}, s.village, { population: 50 }) });
+  assert.strictEqual(Core.villageHappiness(s), 50);
+  const o0 = Core.villageOutput(s);
+  let d = build(build(s, 'village', VC(6), 'sakura'), 'village', VC(7), 'vtower');
+  assert.strictEqual(Core.villageHappiness(d), 65, '桜 +5・見張り台 +10');
+  for (let i = 0; i < 20; i++) d = build(d, 'village', VC(10 + i), 'stall');
+  assert.strictEqual(Core.villageHappiness(d), 100, 'かざりをたくさん建てても 100% まで');
+  const o1 = Core.villageOutput(d);
+  assert.ok(Math.abs(o1.troops - o0.troops * 1.5) < 1e-9 && Math.abs(o1.coins - o0.coins * 1.5) < 1e-9, '兵と小判が 1.5 倍');
+  // 城のかざりは見た目だけ (幸福度は村のかざりで決まる)
+  assert.strictEqual(Core.villageHappiness(build(s, 'castle', CC(0), 'csakura')), 50);
+});
+
+test('村: 村人猫がいちばん多かったときの数で、土地が 8x8 → 9x9 (40 匹) → 10x10 (90 匹) に広がり、減っても狭くならない', () => {
+  let s = townState();
+  assert.deepStrictEqual(Core.openArea(s, 'village'), { o: 1, n: 8, size: 10 });
+  const pop = (x, n) => Object.assign({}, x, { village: Object.assign({}, x.village, { population: n }) });
+  for (let i = 0; i < 5; i++) s = build(s, 'village', VC(i), 'house');
+  let t = Core.tick(pop(s, 41), 0.01);
+  assert.deepStrictEqual(Core.openArea(t, 'village'), { o: 0, n: 9, size: 10 });
+  assert.strictEqual(Core.villageNextOpen(t), 90);
+  // 民家を壊して村人猫が減っても、土地は狭くならない
+  for (let i = 0; i < 5; i++) t = Core.demolish(t, 'village', VC(i)).state;
+  t = Core.tick(t, 1);
+  assert.ok(t.village.population <= 10 && Core.openArea(t, 'village').n === 9, `村人猫 ${Math.floor(t.village.population)} 匹でも 9x9 のまま`);
+  // 保存して読み直しても同じ
+  assert.strictEqual(Core.openArea(Core.sanitizeState(JSON.parse(JSON.stringify(t))), 'village').n, 9);
+});
+
+test('村: 前の版 (6x6) の村は真ん中へ引っ越し、前の建物は新しい建物になる (温泉は訓練所)', () => {
+  const s = townState();
+  const old = new Array(36).fill(null);
+  old[0] = 'house'; old[1] = 'farm'; old[2] = 'rice'; old[3] = 'onsen'; old[4] = 'workshop'; old[5] = 'shop'; old[6] = 'straw'; old[35] = 'nobori';
+  const raw = JSON.parse(JSON.stringify(Object.assign({}, s, { village: { population: 12, cells: old } })));
+  const v = Core.sanitizeState(raw);
+  const at = (gx, gy) => v.village.cells[(gy + 2) * 10 + gx + 2];
+  assert.deepStrictEqual([at(0, 0), at(1, 0), at(2, 0), at(3, 0), at(4, 0), at(5, 0), at(0, 1), at(5, 5)],
+    ['house', 'farmhouse', 'paddy', 'training', 'workshop', 'shop', 'scarecrow', 'vnobori']);
+  assert.ok(v.village.cells.every((c, i) => c === null || Core.isOpenCell(v, 'village', i)), '引っ越した物はみな使える土地の中');
+  assert.strictEqual(v.village.peak, 12);
+});
+
+test('建物の名前 (種類の鍵) は、城と村で重ならない', () => {
+  // 前は城の「橋」と村の「橋」が同じ鍵 (bridge) で、あとに書いた村の方だけが残り、城では橋を建てられなかった
+  const src = require('fs').readFileSync(require('path').join(__dirname, 'core.js'), 'utf8');
+  const body = src.slice(src.indexOf('const BUILDINGS = {'), src.indexOf('function decoEffect'));
+  const keys = [...body.matchAll(/^ {4}(\w+): \{ zone:/gm)].map((m) => m[1]);
+  assert.ok(keys.length > 60, `鍵を ${keys.length} 個読めた`);
+  assert.deepStrictEqual(keys.filter((k, i) => keys.indexOf(k) !== i), [], '重なる鍵が無い');
+  assert.strictEqual(Core.BUILDINGS.cbridge.zone, 'castle');
 });
 
 test('城: 10x10 のマスのうち、はじめは真ん中の 8x8 だけ使える。城レベルが上がると 9x9 → 10x10 に広がる', () => {
@@ -1034,7 +1108,7 @@ test('城: 10x10 のマスのうち、はじめは真ん中の 8x8 だけ使え�
   assert.strictEqual(Core.openCells(s, 'castle').length, 64);
   assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 0, 'flags'), false, 'いちばん奥の角 (まだ使えない)');
   assert.strictEqual(Core.canPlaceBuilding(s, 'castle', 11, 'flags'), true, '8x8 の奥の角');
-  assert.strictEqual(Core.openArea(s, 'village').n, 6, '村は 6x6 のまま');
+  assert.strictEqual(Core.openArea(s, 'village').n, 8, '村は村人猫の数で広がる (城レベルとは別)');
   // 建てると経験値 (値段ぶん) が入り、区切りを越えるとレベルが上がる
   assert.strictEqual(Core.castleLevel(s), 1);
   let r = Core.placeBuilding(s, 'castle', CC(0), 'keep');   // 300

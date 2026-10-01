@@ -193,25 +193,39 @@
   </section>
 
   <!-- ================================================= 村 -->
-  <section class="view view-page" id="view-village" data-view="village" hidden>
-    <div class="page-head">
-      <h2 class="tag-title">村</h2>
-      <div class="page-sub" id="materialCountVillage">資材 0</div>
-    </div>
+  <section class="view castle-view village-view" id="view-village" data-view="village" hidden>
     <div class="locked-art paper" id="villageLocked" hidden>
-      <img src="./img/b-village.png" alt="">
+      <img src="./img/v-bighouse.webp" alt="">
       <div class="navi-say"><img class="navi-img" data-pose="worry" alt="" draggable="false"><p class="navi-bubble"></p></div>
     </div>
-    <div id="villageContent" class="page-body" hidden>
-      <div class="pop paper">
-        <div class="pop-label" id="popLabel">村人猫 0 / 0</div>
-        <div class="next-bar"><div class="next-fill" id="popFill"></div></div>
-        <div class="pop-out" id="popOut"><span id="popTroops"></span><span id="popCoins"></span></div>
+    <!-- 村: 見本 (art/village-mock.png) の並び。上に題・村人猫の帯・資材、真ん中に地図と村のめぐみ・下の帯 (住居・食料・幸福度・空き地)、
+         右 (縦は下) に「村の管理」(仕切りを押すと建てる物の一覧) と「村を発展させる」 -->
+    <div class="castle-body" id="villageContent" hidden>
+      <div class="cs-head vl-head">
+        <h2 class="vl-title"><img src="./img/u-vpaw.webp" alt="">村</h2>
+        <div class="vl-pop">
+          <img src="./img/u-vcat.webp" alt="">
+          <div class="vl-pop-main"><span id="popLabel">村人猫 0 / 0 匹</span><div class="vl-bar"><i id="popFill"></i></div></div>
+        </div>
+        <div class="cs-res vl-res"><span class="cs-res-item"><img class="cs-res-icon" src="./img/u-wood.webp" alt="">資材 <b id="materialCountVillage">0</b></span></div>
       </div>
-      <div class="town-map" id="villageMap"><canvas class="map-bg"></canvas><canvas class="map-fg"></canvas></div>
-      <div class="navi-say navi-small map-hint"><img class="navi-img" data-pose="walk" alt="" draggable="false"><p class="navi-bubble">村人猫が増えるほど、兵と小判が増えるにゃ。マスを押して建てよう</p></div>
-      <div class="town-effects" id="villageEffects"></div>
-      <div class="build-sheet paper" id="villageSheet" hidden></div>
+      <div class="cs-stage vl-stage" id="villageStage">
+        <div class="town-map castle-map" id="villageMap"><canvas class="map-bg"></canvas><canvas class="map-fg"></canvas></div>
+        <div class="cs-level vl-out" id="villageOut"><span id="popTroops"></span><span id="popCoins"></span></div>
+        <div class="cs-facilities vl-stats" id="villageStats">
+          <span class="vl-stat" data-k="houses"><i class="vl-stat-icon" aria-hidden="true"></i><span><small>住居</small><b data-v="houses"></b></span></span>
+          <span class="vl-stat" data-k="food"><i class="vl-stat-icon" aria-hidden="true"></i><span><small>食料</small><b data-v="food"></b></span></span>
+          <span class="vl-stat" data-k="happy"><i class="vl-stat-icon" aria-hidden="true"></i><span><small>幸福度</small><b data-v="happy"></b></span></span>
+          <span class="vl-stat" data-k="free"><i class="vl-stat-icon" aria-hidden="true"></i><span><small>空き地</small><b data-v="free"></b></span></span>
+        </div>
+      </div>
+      <aside class="cs-panel" id="villagePanel">
+        <div class="cs-panel-head"><img src="./img/u-plum.webp" alt="">村の管理</div>
+        <div class="cs-built" id="villageBuilt" hidden></div>
+        <div class="cs-list" id="villageList"></div>
+        <p class="cs-hint" id="villageHint"></p>
+        <button type="button" class="btn-gold cs-build vl-build" id="villageBuild"><span class="cs-build-icon" aria-hidden="true"></span><span id="villageBuildLabel">村を発展させる</span></button>
+      </aside>
     </div>
   </section>
 

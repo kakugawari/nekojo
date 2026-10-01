@@ -929,14 +929,17 @@
 
   // ---------------------------------------------------------- 城と村 (マスに建てる)
   //
-  // 村は 6x6 のマス、城は 10x10 のマス (はじめは真ん中の 8x8 だけ使え、城レベルが上がると 9x9 → 10x10 と広がる)。
+  // 城も村も 10x10 のマス。はじめは真ん中の 8x8 だけ使え、9x9 → 10x10 と広がる
+  // (城は城レベル = 建てた物の値段の合計、村は村人猫がいちばん多かったときの数で)。
   // 1 マスに 1 つ建てる。建物ごとに建てられる場所 (zone) が決まっている。
   // 効果は townEffects にまとめ、家臣の枠・時の流れ・合戦の強さから読む。
 
-  const MAP_SIZE = 6;                         // 村
+  const MAP_SIZE = 10;                        // 村 (いちばん広がったとき)
   const MAP_CELLS = MAP_SIZE * MAP_SIZE;
   const CASTLE_SIZE = 10;                     // 城 (いちばん広がったとき)
   const CASTLE_CELLS = CASTLE_SIZE * CASTLE_SIZE;
+  const OLD_SIZE = 6;                         // 前の版の城と村 (6x6)。読み込むときに真ん中へ引っ越す
+  const OLD_CELLS = OLD_SIZE * OLD_SIZE;
   const ZONES = ['castle', 'village'];
   function zoneSize(zone) { return zone === 'castle' ? CASTLE_SIZE : MAP_SIZE; }
 
@@ -957,11 +960,26 @@
     const lv = castleLevel(state);
     return { level: lv, xp: castleXp(state), from: CASTLE_LEVELS[lv - 1].xp, next: lv < CASTLE_LEVELS.length ? CASTLE_LEVELS[lv].xp : null, max: CASTLE_LEVELS.length };
   }
+  // 村の土地: 村人猫がいちばん多かったときの数 (peak。減らない) で広がる。民家 4 軒で 42 匹、大きな民家 2 軒と民家 5 軒で 90 匹
+  const VILLAGE_LEVELS = [{ pop: 0, open: 8 }, { pop: 40, open: 9 }, { pop: 90, open: 10 }];
+  function villagePeak(state) { return Math.max((state.village && state.village.peak) || 0, Math.floor((state.village && state.village.population) || 0)); }
+  function villageLevel(state) {
+    const p = villagePeak(state);
+    let lv = 1;
+    VILLAGE_LEVELS.forEach(function (l, i) { if (p >= l.pop) lv = i + 1; });
+    return lv;
+  }
+  /** 村の土地が次に広がる村人猫の数 (もう広がらないなら null) */
+  function villageNextOpen(state) {
+    const lv = villageLevel(state);
+    return lv < VILLAGE_LEVELS.length ? VILLAGE_LEVELS[lv].pop : null;
+  }
+
   /** 使える土地 (正方形): 左上のマス o と一辺 n。広がっても、前の土地を含むように真ん中から広げる */
   function openArea(state, zone) {
-    if (zone !== 'castle') return { o: 0, n: MAP_SIZE, size: MAP_SIZE };
-    const n = CASTLE_LEVELS[castleLevel(state) - 1].open;
-    return { o: Math.floor((CASTLE_SIZE - n) / 2), n: n, size: CASTLE_SIZE };
+    const n = zone === 'castle' ? CASTLE_LEVELS[castleLevel(state) - 1].open : VILLAGE_LEVELS[villageLevel(state) - 1].open;
+    const size = zoneSize(zone);
+    return { o: Math.floor((size - n) / 2), n: n, size: size };
   }
   function isOpenCell(state, zone, i) {
     const a = openArea(state, zone);
@@ -1002,33 +1020,67 @@
     // 城の地面のかざり (土台のパーツ)。建物の下に敷く。大きな土台は 2x2 マス (size: 2)
     road: { zone: 'castle', name: '道', img: 'c-road-curve', cost: 5, max: null, deco: true, ground: true },
     stairs: { zone: 'castle', name: '石段', img: 'c-stairs', cost: 10, max: null, deco: true, ground: true },
-    bridge: { zone: 'castle', name: '橋', img: 'c-bridge', cost: 20, max: null, deco: true, ground: true },
+    cbridge: { zone: 'castle', name: '橋', img: 'c-bridge', cost: 20, max: null, deco: true, ground: true },
     pond: { zone: 'castle', name: '池', img: 'c-pond', cost: 20, max: null, deco: true, ground: true },
     cgarden: { zone: 'castle', name: '庭園', img: 'c-garden', cost: 25, max: null, deco: true, ground: true },
     base: { zone: 'castle', name: '石垣の台', img: 'c-base', cost: 40, max: null, deco: true, ground: true, size: 2 },
     baseStep: { zone: 'castle', name: '段差のある台', img: 'c-base-step', cost: 50, max: null, deco: true, ground: true, size: 2 },
     basePond: { zone: 'castle', name: '池のある台', img: 'c-base-pond', cost: 50, max: null, deco: true, ground: true, size: 2 },
     baseCross: { zone: 'castle', name: '十字の台', img: 'c-base-cross', cost: 50, max: null, deco: true, ground: true, size: 2 },
-    // 村
-    house: { zone: 'village', name: '民家', img: 'b-house', cost: 30, costStep: 20, max: null, effect: '村人猫の上限 +8' },
-    farm: { zone: 'village', name: '農場', img: 'b-farm', cost: 40, max: 4, effect: '村人の集める資材 +50%' },
-    rice: { zone: 'village', name: '田んぼ', img: 'b-rice', cost: 30, max: 4, effect: '村人猫が早く増える +30%' },
-    workshop: { zone: 'village', name: '工房', img: 'b-workshop', cost: 80, max: 4, effect: '資材 +50%' },
-    shop: { zone: 'village', name: '商店', img: 'b-shop', cost: 90, max: 2, effect: '村人猫が商いをして、小判が入る' },
-    onsen: { zone: 'village', name: '温泉', img: 'b-onsen', cost: 150, max: 1, effect: '兵に志願する村人猫 +50%' },
-    well: { zone: 'village', name: '井戸', img: 'b-well', cost: 20, max: 2, effect: '村人猫の上限 +3' },
-    sakura: { zone: 'village', name: '桜の木', img: 'b-sakura', cost: 25, max: null, deco: true },
-    garden: { zone: 'village', name: '庭', img: 'b-garden', cost: 25, max: null, deco: true },
-    bridge: { zone: 'village', name: '橋', img: 'b-bridge', cost: 20, max: null, deco: true },
-    lantern: { zone: 'village', name: '石灯籠', img: 'b-lantern', cost: 8, max: null, deco: true },
-    signboard: { zone: 'village', name: '看板', img: 'b-signboard', cost: 5, max: null, deco: true },
-    barrels: { zone: 'village', name: '樽・箱', img: 'b-barrels', cost: 5, max: null, deco: true },
-    cart: { zone: 'village', name: '荷車', img: 'b-cart', cost: 8, max: null, deco: true },
-    straw: { zone: 'village', name: '藁の束', img: 'b-straw', cost: 3, max: null, deco: true },
-    woodfence: { zone: 'village', name: '木の柵', img: 'b-woodfence', cost: 3, max: null, deco: true },
-    nobori: { zone: 'village', name: 'のぼり', img: 'b-nobori', cost: 3, max: null, deco: true }
+    // 村 (絵はもらった村のパーツ art/village-parts.png から切り出した img/v-*.webp)。
+    // 村は「増える所」: 住む (村人猫の上限)・食料 (増え方)・施設 (兵・小判・資材)・かざり (幸福度)。合戦を強くする効き目は城だけ。
+    // group は「村の管理」の仕切り。food は食料の量、happy は幸福度 (%)。宿屋・食堂・武具屋は絵では兵の回復・装備だが、かざり
+    house: { zone: 'village', group: 'home', name: '民家', img: 'v-house', cost: 30, costStep: 20, max: null, effect: '村人猫の上限 +8' },
+    bighouse: { zone: 'village', group: 'home', name: '大きな民家', img: 'v-bighouse', cost: 120, costStep: 60, max: null, effect: '村人猫の上限 +20' },
+    well: { zone: 'village', group: 'home', name: '井戸', img: 'v-well', cost: 20, max: 4, effect: '村人猫の上限 +3' },
+    farmhouse: { zone: 'village', group: 'food', name: '農家', img: 'v-farmhouse', cost: 50, max: 4, food: 12, effect: '食料 +12' },
+    paddy: { zone: 'village', group: 'food', name: '田んぼ', img: 'v-paddy', cost: 30, max: 6, food: 8, effect: '食料 +8' },
+    orchard: { zone: 'village', group: 'food', name: '果樹園', img: 'v-orchard', cost: 40, max: 4, food: 10, effect: '食料 +10' },
+    vricehouse: { zone: 'village', group: 'food', name: '米蔵', img: 'v-ricehouse', cost: 60, max: 2, effect: '食料 +20%' },
+    vstore: { zone: 'village', group: 'food', name: '倉庫', img: 'v-storehouse', cost: 50, max: 2, effect: '食料 +15% (たくわえて むだにしない)' },
+    training: { zone: 'village', group: 'work', name: '訓練所', img: 'v-training', cost: 100, max: 2, effect: '兵に志願する村人猫 +40%' },
+    vstable: { zone: 'village', group: 'work', name: '馬小屋', img: 'v-stable', cost: 80, max: 2, effect: '兵に志願する村人猫 +25%' },
+    shop: { zone: 'village', group: 'work', name: '商店', img: 'v-shop', cost: 90, max: 2, effect: '村人猫が商いをして、小判が入る' },
+    brewery: { zone: 'village', group: 'work', name: '醸造店', img: 'v-brewery', cost: 120, max: 2, effect: '酒やみそを売って、小判が入る' },
+    vbamboo: { zone: 'village', group: 'work', name: '竹林', img: 'v-bamboo', cost: 25, max: 4, effect: '竹細工で、小判が少し入る' },
+    lumber: { zone: 'village', group: 'work', name: '材木置き場', img: 'v-lumber', cost: 40, max: 4, effect: '村人の集める資材 +50%' },
+    workshop: { zone: 'village', group: 'work', name: '工房', img: 'v-workshop', cost: 80, max: 4, effect: '資材 +50%' },
+    vtower: { zone: 'village', group: 'work', name: '見張り台', img: 'v-tower', cost: 60, max: 2, happy: 10, effect: '村が安心して、幸福度 +10%' },
+    inn: { zone: 'village', name: '宿屋', img: 'v-inn', cost: 60, max: null, deco: true, happy: 6 },
+    diner: { zone: 'village', name: '食堂', img: 'v-diner', cost: 50, max: null, deco: true, happy: 6 },
+    varmory: { zone: 'village', name: '武具屋', img: 'v-armory', cost: 50, max: null, deco: true, happy: 5 },
+    sakura: { zone: 'village', name: '桜の木', img: 'v-sakura', cost: 25, max: null, deco: true, happy: 5 },
+    stall: { zone: 'village', name: '市場の屋台', img: 'v-stall', cost: 20, max: null, deco: true, happy: 5 },
+    watermill: { zone: 'village', name: '水車', img: 'v-watermill', cost: 20, max: null, deco: true, happy: 4 },
+    tanuki: { zone: 'village', name: 'たぬきの置物', img: 'v-tanuki', cost: 15, max: null, deco: true, happy: 4 },
+    flowerbed: { zone: 'village', name: '花壇', img: 'v-flowerbed', cost: 12, max: null, deco: true, happy: 4 },
+    vbridge: { zone: 'village', name: '橋', img: 'v-bridge', cost: 20, max: null, deco: true, happy: 3 },
+    shrub: { zone: 'village', name: '草花', img: 'v-shrub', cost: 8, max: null, deco: true, happy: 3 },
+    lantern: { zone: 'village', name: '石灯籠', img: 'v-lantern', cost: 8, max: null, deco: true, happy: 3 },
+    scarecrow: { zone: 'village', name: 'かかし', img: 'v-scarecrow', cost: 6, max: null, deco: true, happy: 3 },
+    bench: { zone: 'village', name: '縁台', img: 'v-bench', cost: 6, max: null, deco: true, happy: 3 },
+    cart: { zone: 'village', name: '荷車', img: 'v-cart', cost: 8, max: null, deco: true, happy: 2 },
+    tub: { zone: 'village', name: '水桶', img: 'v-tub', cost: 5, max: null, deco: true, happy: 2 },
+    signboard: { zone: 'village', name: '看板', img: 'v-signboard', cost: 5, max: null, deco: true, happy: 2 },
+    vfence: { zone: 'village', name: '柵', img: 'v-fence', cost: 8, max: null, deco: true, happy: 2 },
+    vgate: { zone: 'village', name: '柵・門', img: 'v-gate', cost: 5, max: null, deco: true, happy: 2 },
+    vnobori: { zone: 'village', name: 'のぼり', img: 'v-nobori', cost: 3, max: null, deco: true, happy: 2 },
+    vflags: { zone: 'village', name: '旗・のぼり', img: 'v-flags', cost: 5, max: null, deco: true, happy: 2 },
+    // 村の土台 (地面のかざり・2x2 マス)
+    vbase: { zone: 'village', name: '基本の土台', img: 'v-base', cost: 40, max: null, deco: true, ground: true, size: 2, happy: 3 },
+    vbasePond: { zone: 'village', name: '池のある土台', img: 'v-base-pond', cost: 50, max: null, deco: true, ground: true, size: 2, happy: 4 },
+    vbaseStep: { zone: 'village', name: '段差のある土台', img: 'v-base-step', cost: 50, max: null, deco: true, ground: true, size: 2, happy: 4 },
+    vbasePlaza: { zone: 'village', name: '広場のある土台', img: 'v-base-plaza', cost: 50, max: null, deco: true, ground: true, size: 2, happy: 4 },
+    vbaseCross: { zone: 'village', name: '十字の土台', img: 'v-base-cross', cost: 50, max: null, deco: true, ground: true, size: 2, happy: 4 }
   };
-  const DECO_EFFECT = 'にぎわい (村人猫が少し早く増える)';
+  /** かざりの効き目の字 (城のかざりは見た目だけ、村のかざりは幸福度) */
+  function decoEffect(type) {
+    const def = BUILDINGS[type];
+    return def && def.zone === 'village' ? 'かざり (幸福度 +' + (def.happy || 0) + '%)' : 'かざり (見た目)';
+  }
+  // 前の版の村の建物 → 新しい建物 (似た役目・似た絵の物へ)。温泉の「兵 +50%」は訓練所へ
+  const OLD_VILLAGE = { farm: 'farmhouse', rice: 'paddy', onsen: 'training', garden: 'flowerbed', bridge: 'vbridge',
+    barrels: 'stall', straw: 'scarecrow', woodfence: 'vgate', nobori: 'vnobori' };
 
   // 2x2 の物は、左上 (奥) のマスに種類を、ほかの 3 マスに '+<左上のマス>' の印を入れる
   function sizeOf(type) { return (BUILDINGS[type] && BUILDINGS[type].size) || 1; }
@@ -1066,6 +1118,43 @@
     return n;
   }
 
+  // 食料: 村人猫 1 匹が 1 食べる。作る量は、村のまわりの畑 (はじめから 10) + 田畑 (food)、米蔵・倉庫で増える。
+  // 村人猫は食料のぶんまでは早く増えるが、それより多くは、ほとんど増えない (17 分に 1 匹ほど。減りはしない)。
+  // 前は「足りないと 2 割の速さ」にしていたが、増え方がもともと速いので、田畑が 1 つも無くても 75 分で上限まで増えた
+  const FOOD_BASE = 10;
+  const HUNGRY_GROWTH = 0.001;
+  function villageFood(state) {
+    let made = FOOD_BASE, boost = 1;
+    state.village.cells.forEach(function (c) {
+      const d = c && BUILDINGS[c];
+      if (!d || d.zone !== 'village') return;
+      if (d.food) made += d.food;
+    });
+    boost += 0.2 * countBuildings(state, 'vricehouse') + 0.15 * countBuildings(state, 'vstore');
+    made *= boost;
+    const pop = state.village.population;
+    return { made: made, need: pop, ratio: pop <= 0 ? 1 : Math.min(1, made / pop) };
+  }
+  // 幸福度 (%): 50 から、村のかざり・見張り台 (happy) で上がる。100 まで。兵の志願と商いの小判に効く (50% で 1 倍、100% で 1.5 倍)
+  const HAPPY_BASE = 50;
+  function villageHappiness(state) {
+    let h = HAPPY_BASE;
+    state.village.cells.forEach(function (c) { const d = c && BUILDINGS[c]; if (d && d.zone === 'village' && d.happy) h += d.happy; });
+    return Math.min(100, h);
+  }
+  /** 村の下の帯に出す数: 住居 (民家の数)・食料・幸福度・空き地 */
+  function villageStats(state) {
+    const open = openCells(state, 'village');
+    return {
+      houses: countBuildings(state, 'house') + countBuildings(state, 'bighouse'),
+      food: villageFood(state),
+      happy: villageHappiness(state),
+      free: open.filter(function (i) { return state.village.cells[i] === null; }).length,
+      level: villageLevel(state),
+      nextOpen: villageNextOpen(state)
+    };
+  }
+
   function buildingCost(state, type) {
     const def = BUILDINGS[type];
     return def.cost + (def.costStep || 0) * countBuildings(state, type);
@@ -1078,15 +1167,17 @@
       slots: 2 * n('mansion'),
       trainMul: 1 + 0.5 * n('dojo'),
       laborMul: 1 + 0.25 * n('stable'),
-      popMatMul: 1 + 0.5 * n('farm'),
+      popMatMul: 1 + 0.5 * n('lumber'),
       matMul: 1 + 0.5 * n('workshop'),
-      growthMul: 1 + 0.3 * n('rice') + Math.min(0.5, 0.05 * countDeco(state)),
       atkMul: 1 + 0.15 * n('armory'),
       hpMul: 1 + 0.1 * n('tower'),
       meritMul: 1 + 0.2 * n('keep'),
-      // 村は「増える所」: 村人猫が兵に志願し (温泉で増える)、商店で小判が入る。合戦を強くする効き目は城だけ
-      recruitMul: 1 + 0.5 * n('onsen'),
-      shops: n('shop')
+      // 村は「増える所」: 村人猫が兵に志願し (訓練所・馬小屋で増える)、商店・醸造店・竹林で小判が入る。
+      // どちらも幸福度で 1〜1.5 倍。合戦を強くする効き目は城だけ
+      happyMul: 0.5 + villageHappiness(state) / 100,
+      recruitMul: 1 + 0.4 * n('training') + 0.25 * n('vstable'),
+      shops: n('shop'),
+      coinRate: SHOP_COIN_PER_POP * n('shop') + 0.002 * n('brewery') + 0.0005 * n('vbamboo')
     };
   }
 
@@ -1148,15 +1239,15 @@
     const fx = townEffects(state);
     const pop = isTownUnlocked(state) ? state.village.population : 0;
     return {
-      troops: pop * RECRUIT_PER_POP * fx.recruitMul,
-      coins: pop * SHOP_COIN_PER_POP * fx.shops,
+      troops: pop * RECRUIT_PER_POP * fx.recruitMul * fx.happyMul,
+      coins: pop * fx.coinRate * fx.happyMul,
       waiting: state.village.recruits || 0,
       home: hasRealm(state) ? state.realm.home : null
     };
   }
 
   function villageCapacity(state) {
-    return 10 + 8 * countBuildings(state, 'house') + 3 * countBuildings(state, 'well');
+    return 10 + 8 * countBuildings(state, 'house') + 20 * countBuildings(state, 'bighouse') + 3 * countBuildings(state, 'well');
   }
 
   function isCastleComplete(state) {
@@ -1644,10 +1735,19 @@
     let village = state.village;
     if (isTownUnlocked(state)) {
       const capacity = villageCapacity(state);
-      const growthRate = Math.max(0.15, (capacity - state.village.population) * 0.12) * fx.growthMul;
-      const population = Math.min(capacity, state.village.population + growthRate * dt);
+      // 食料のぶんまでは早く増え、食料より多くなると、ほとんど増えない (HUNGRY_GROWTH。減りはしない)
+      const pop0 = state.village.population;
+      const fed = villageFood(state).made;
+      let population;
+      if (pop0 < fed) {
+        const growthRate = Math.max(0.15, (capacity - pop0) * 0.12);
+        population = Math.min(capacity, fed, pop0 + growthRate * dt);
+      } else {
+        population = Math.min(capacity, pop0 + HUNGRY_GROWTH * dt);
+      }
+      population = Math.max(population, Math.min(pop0, capacity));
       materialGain += population * 0.02 * fx.popMatMul;
-      village = Object.assign({}, state.village, { population: population });
+      village = Object.assign({}, state.village, { population: population, peak: Math.max(villagePeak(state), Math.floor(population)) });
     }
 
     // 村から: 兵の志願と商いの小判 (この間の村人猫の数は、増える前と後の真ん中で数える)
@@ -1695,7 +1795,7 @@
       battlesWon: 0,
       storySeen: false,
       hero: { hp: 0, atk: 0 },
-      village: { population: 0, recruits: 0, cells: new Array(MAP_CELLS).fill(null) },
+      village: { population: 0, peak: 0, recruits: 0, cells: new Array(MAP_CELLS).fill(null) },
       castle: { cells: new Array(CASTLE_CELLS).fill(null), xp: 0 },
       realm: null
     };
@@ -1763,8 +1863,10 @@
     out.village = {
       population: (raw.village && Number.isFinite(raw.village.population)) ? Math.max(0, raw.village.population) : 0,
       recruits: (raw.village && Number.isFinite(raw.village.recruits)) ? Math.max(0, raw.village.recruits) : 0,
+      peak: (raw.village && Number.isFinite(raw.village.peak)) ? Math.max(0, Math.floor(raw.village.peak)) : 0,
       cells: new Array(MAP_CELLS).fill(null)
     };
+    out.village.peak = Math.max(out.village.peak, Math.floor(out.village.population));
     const put = function (zone, type) {
       const i = openCells(out, zone).find(function (k) { return out[zone].cells[k] === null; });
       if (i !== undefined) out[zone].cells[i] = type;
@@ -1773,34 +1875,46 @@
     const isCastle = function (c) { return BUILDINGS[c] && BUILDINGS[c].zone === 'castle'; };
     if (oldCastle.length === CASTLE_CELLS) {
       oldCastle.forEach(function (c, i) { if (isCastle(c)) out.castle.cells[i] = c; });
-    } else if (oldCastle.length === MAP_CELLS) {
+    } else if (oldCastle.length === OLD_CELLS) {
       // 前の版 (城 6x6) から: 真ん中へ置く (はじめに使える 8x8 の内側。並びはそのまま)
-      const off = (CASTLE_SIZE - MAP_SIZE) / 2;
-      oldCastle.forEach(function (c, i) { if (isCastle(c)) out.castle.cells[(Math.floor(i / MAP_SIZE) + off) * CASTLE_SIZE + (i % MAP_SIZE) + off] = c; });
+      const off = (CASTLE_SIZE - OLD_SIZE) / 2;
+      oldCastle.forEach(function (c, i) { if (isCastle(c)) out.castle.cells[(Math.floor(i / OLD_SIZE) + off) * CASTLE_SIZE + (i % OLD_SIZE) + off] = c; });
     } else {
       // 前の版 (城 4x4・家は数だけ) からの引っ越し。似た役目の建物に置き換える
       const OLD = { keep: ['castle', 'keep'], barracks: ['castle', 'mansion'], wall: ['castle', 'stonewall'],
         storehouse: ['village', 'workshop'], well: ['village', 'well'] };
       oldCastle.forEach(function (c) { if (OLD[c]) put(OLD[c][0], OLD[c][1]); });
     }
-    // 城レベルの経験値。前の版には無いので、いま建っている物の値段から決める (建ててあるのにレベル 1 にならないように)
     // 2x2 の物の印を作り直す (印は読み捨てて、左上のマスの種類から引き直す。重なる物は捨てる)
-    out.castle.cells = out.castle.cells.map(function (c) { return isPartMark(c) ? null : c; });
-    out.castle.cells.forEach(function (c, i) {
-      if (!c || sizeOf(c) === 1) return;
-      const fp = footprint('castle', i, sizeOf(c));
-      if (!fp || fp.some(function (k) { return k !== i && out.castle.cells[k] !== null; })) { out.castle.cells[i] = null; return; }
-      fp.forEach(function (k) { if (k !== i) out.castle.cells[k] = '+' + i; });
-    });
+    const remark = function (zone) {
+      out[zone].cells = out[zone].cells.map(function (c) { return isPartMark(c) ? null : c; });
+      out[zone].cells.forEach(function (c, i) {
+        if (!c || sizeOf(c) === 1) return;
+        const fp = footprint(zone, i, sizeOf(c));
+        if (!fp || fp.some(function (k) { return k !== i && out[zone].cells[k] !== null; })) { out[zone].cells[i] = null; return; }
+        fp.forEach(function (k) { if (k !== i) out[zone].cells[k] = '+' + i; });
+      });
+    };
+    remark('castle');
+    // 城レベルの経験値。前の版には無いので、いま建っている物の値段から決める (建ててあるのにレベル 1 にならないように)
     const builtXp = out.castle.cells.reduce(function (n, c) { return n + (c && BUILDINGS[c] ? BUILDINGS[c].cost : 0); }, 0);
     out.castle.xp = raw.castle && Number.isFinite(raw.castle.xp) ? Math.max(builtXp, raw.castle.xp) : builtXp;
     if (raw.castle && keepStyleOf(raw.castle.keepStyle)) out.castle.keepStyle = raw.castle.keepStyle;
     const oldVillage = raw.village && Array.isArray(raw.village.cells) ? raw.village.cells : null;
+    const isVillage = function (c) { return typeof c === 'string' && (BUILDINGS[c] && BUILDINGS[c].zone === 'village' || isPartMark(c)); };
     if (oldVillage && oldVillage.length === MAP_CELLS) {
-      oldVillage.forEach(function (c, i) { if (BUILDINGS[c] && BUILDINGS[c].zone === 'village') out.village.cells[i] = c; });
+      oldVillage.forEach(function (c, i) { if (isVillage(c)) out.village.cells[i] = c; });
+    } else if (oldVillage && oldVillage.length === OLD_CELLS) {
+      // 前の版 (村 6x6) から: 真ん中へ置き、前の建物は新しい建物へ (OLD_VILLAGE)
+      const off = (MAP_SIZE - OLD_SIZE) / 2;
+      oldVillage.forEach(function (c, i) {
+        const t = OLD_VILLAGE[c] || c;
+        if (isVillage(t) && !isPartMark(t)) out.village.cells[(Math.floor(i / OLD_SIZE) + off) * MAP_SIZE + (i % OLD_SIZE) + off] = t;
+      });
     } else if (raw.village && Number.isInteger(raw.village.houses)) {
-      for (let i = 0; i < Math.min(raw.village.houses, MAP_CELLS); i++) put('village', 'house');
+      for (let i = 0; i < Math.min(raw.village.houses, OLD_CELLS); i++) put('village', 'house');
     }
+    remark('village');
     out.village.population = Math.min(out.village.population, villageCapacity(out));
     out.realm = sanitizeRealm(raw.realm);
     if (!out.realm) out.village.recruits = Math.min(RECRUIT_WAIT_CAP, out.village.recruits);
@@ -1879,7 +1993,13 @@
     setKeepStyle: setKeepStyle,
     ZONES: ZONES,
     BUILDINGS: BUILDINGS,
-    DECO_EFFECT: DECO_EFFECT,
+    decoEffect: decoEffect,
+    villageFood: villageFood,
+    villageHappiness: villageHappiness,
+    villageStats: villageStats,
+    villageLevel: villageLevel,
+    villageNextOpen: villageNextOpen,
+    VILLAGE_LEVELS: VILLAGE_LEVELS,
     isTownUnlocked: isTownUnlocked,
     countBuildings: countBuildings,
     countDeco: countDeco,

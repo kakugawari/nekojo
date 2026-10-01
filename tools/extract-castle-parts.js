@@ -40,13 +40,21 @@ const PARTS = [
   ['keep-black', 700, 810, 842, 972], ['keep-blue', 838, 810, 978, 972], ['keep-red', 972, 805, 1112, 972], ['keep-moon', 1098, 795, 1250, 972]
 ];
 
-async function main() {
+/**
+ * 切り出す。opts: { src: 元の絵, parts: [[名前, x0, y0, x1, y1]], prefix: 書き出す名前の頭 ('c-' など),
+ *   pill: 字の札の色 { r: [下, 上], g: 上, b: [下, 上] }, pillMinW: 札の幅の下限, preview: 見本の置き場 }
+ * 村のパーツ (tools/extract-village-parts.js) もこれを使う
+ */
+async function run(opts) {
   let chromium;
   try { ({ chromium } = require('playwright')); } catch (e) { console.error('playwright が要ります'); process.exit(1); }
   const browser = await chromium.launch();
   const page = await browser.newPage();
-  const data = 'data:image/png;base64,' + fs.readFileSync(SRC).toString('base64');
-  const out = await page.evaluate(async ({ data, PARTS }) => {
+  const data = 'data:image/png;base64,' + fs.readFileSync(opts.src).toString('base64');
+  const PARTS = opts.parts;
+  const PILL = opts.pill || { r: [60, 115], g: 14, b: [85, 135] };
+  const PILL_MIN_W = opts.pillMinW || 50;
+  const out = await page.evaluate(async ({ data, PARTS, PILL, PILL_MIN_W }) => {
     const im = new Image(); im.src = data; await im.decode();
     const W = im.width, H = im.height;
     const c = document.createElement('canvas'); c.width = W; c.height = H;
@@ -72,7 +80,7 @@ async function main() {
       }
     }
     // 字の札を消す: 札の色の画素の塊のうち、札の形 (幅 50px 以上・高さ 18〜40px) の物の四角
-    const isPill = (i) => d[i * 4 + 1] < 14 && d[i * 4] > 60 && d[i * 4] < 115 && d[i * 4 + 2] > 85 && d[i * 4 + 2] < 135;
+    const isPill = (i) => d[i * 4 + 1] < PILL.g && d[i * 4] > PILL.r[0] && d[i * 4] < PILL.r[1] && d[i * 4 + 2] > PILL.b[0] && d[i * 4 + 2] < PILL.b[1];
     const seen = new Uint8Array(W * H);
     let pills = 0;
     for (let i = 0; i < W * H; i++) {
@@ -83,7 +91,7 @@ async function main() {
         if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
         for (const m of [px > 0 ? k - 1 : -1, px < W - 1 ? k + 1 : -1, k - W, k + W]) if (m >= 0 && m < W * H && !seen[m] && isPill(m)) { seen[m] = 1; st.push(m); }
       }
-      if (x1 - x0 >= 50 && y1 - y0 >= 18 && y1 - y0 <= 40) {
+      if (x1 - x0 >= PILL_MIN_W && x1 - x0 > y1 - y0 && y1 - y0 >= 18 && y1 - y0 <= 40) {
         pills++;
         for (let y = Math.max(0, y0 - 2); y <= Math.min(H - 1, y1 + 2); y++) for (let x = Math.max(0, x0 - 2); x <= Math.min(W - 1, x1 + 2); x++) alpha[y * W + x] = 0;
       }
@@ -151,22 +159,23 @@ async function main() {
       return { name, url: cut.toDataURL('image/webp', 0.9), w: cw, h: ch, pieces: keep.size, touch, src: [x0, y0, cw, ch] };
     });
     return { parts, pills };
-  }, { data, PARTS });
+  }, { data, PARTS, PILL, PILL_MIN_W });
   console.log('消した字の札', out.pills);
   const res = out.parts;
   const meta = {};
   for (const r of res) {
-    fs.writeFileSync(path.join(OUT, 'c-' + r.name + '.webp'), Buffer.from(r.url.split(',')[1], 'base64'));
+    fs.writeFileSync(path.join(OUT, opts.prefix + r.name + '.webp'), Buffer.from(r.url.split(',')[1], 'base64'));
     meta[r.name] = { w: r.w, h: r.h };
     console.log(r.name.padEnd(12), r.w + 'x' + r.h, '塊 ' + r.pieces, r.touch ? '★四角のふちから大きくはみ出す塊がある' : '', '元 ' + r.src.join(','));
   }
   // 目で確かめる見本
   const html = '<!doctype html><meta charset="utf-8"><body style="margin:0;background:#cfe3c8;font:12px sans-serif;display:flex;flex-wrap:wrap;gap:6px;padding:6px">' +
     res.map((r) => '<div style="background:#e9dfc8;padding:4px;text-align:center"><img src="' + r.url + '" style="display:block;max-width:300px"><span>' + r.name + '</span></div>').join('') + '</body>';
-  const previewPath = process.env.PARTS_PREVIEW || path.join(require('node:os').tmpdir(), 'castle-parts.html');
+  const previewPath = process.env.PARTS_PREVIEW || opts.preview || path.join(require('node:os').tmpdir(), 'castle-parts.html');
   fs.writeFileSync(previewPath, html);
   console.log('見本:', previewPath);
   await browser.close();
 }
 
-main();
+module.exports = { run };
+if (require.main === module) run({ src: SRC, parts: PARTS, prefix: 'c-' });

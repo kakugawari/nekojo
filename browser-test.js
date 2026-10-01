@@ -600,10 +600,21 @@ async function run() {
 
     await phone.locator('#tab-village').tap();
     await phone.waitForTimeout(100);
-    await tapCell('village', 0);
-    await phone.locator('#villageSheet .build-card[data-type="house"]').tap();
+    // 村も城と同じ流れ: マスを押す → 村の管理の仕切り (住居) → 民家 → 「村を発展させる」。土地は 10x10 の真ん中 8x8 (角は 11)
+    const vpick = await tapCell('village', 11);
+    await phone.locator('#villageList .vl-cat[data-cat="home"]').tap();
     await phone.waitForTimeout(60);
-    ok(await phone.evaluate(() => window.__app.state().village.cells[0] === 'house'), '村の角のマスに民家を建てられる');
+    await phone.locator('#villageList .cs-card[data-type="house"]').tap();
+    await phone.waitForTimeout(60);
+    const vlabel = await phone.evaluate(() => document.getElementById('villageBuildLabel').textContent);
+    await phone.locator('#villageBuild').tap();
+    await phone.waitForTimeout(60);
+    ok(vpick === 11 && vlabel.includes('村を発展させる') && await phone.evaluate(() => window.__app.state().village.cells[11] === 'house'),
+      `村の角のマスを押し、住居 → 民家 → 「${vlabel}」で建てられる`);
+    // 仕切りから「村の管理」へ戻れる
+    await phone.locator('#villageList [data-act="cat-back"]').tap();
+    await phone.waitForTimeout(60);
+    ok(await phone.evaluate(() => window.__app.villageCat() === null && document.querySelectorAll('#villageList .vl-cat').length === 5), '「‹ 村の管理」で仕切りの一覧 (住居・食料・施設・かざり・土台) へ戻る');
     const popBefore = await phone.evaluate(() => window.__app.state().village.population);
     await phone.waitForTimeout(2000);
     const popAfter = await phone.evaluate(() => window.__app.state().village.population);
@@ -611,8 +622,9 @@ async function run() {
     const walkers = await phone.evaluate(() => window.__app.walkers('village'));
     ok(walkers === Math.min(16, Math.floor(popAfter)), `村人猫が地図の上を歩いている (${walkers}匹)`);
     const mapPx = await phone.evaluate(() => {
-      const c = document.querySelector('#villageMap .map-bg');
-      const d = c.getContext('2d').getImageData(Math.floor(c.width / 2), Math.floor(c.height * 0.6), 1, 1).data;
+      const c = document.querySelector('#villageMap .map-bg'), r = c.getBoundingClientRect(), p = window.__app.cellPoint('village', 55);
+      const k = c.width / r.width;
+      const d = c.getContext('2d').getImageData(Math.floor((p.x - r.left) * k), Math.floor((p.y - r.top) * k), 1, 1).data;
       return d[1] > d[0] && d[3] > 0;
     });
     ok(mapPx, '村の地面 (草のマス) が描かれている');
@@ -755,7 +767,7 @@ async function run() {
       }
       ok(wideTabs.length === 0, '家臣・城・村のタブも、横で横スクロールが出ない' + (wideTabs.length ? ' (' + wideTabs.join(',') + ')' : ''));
       const vm = await rectOf('#villageMap');
-      ok(vm.width <= 470 && vm.left >= tab.right, `村の地図は読みやすい幅に収まる (${Math.round(vm.width)}px)`);
+      ok(vm.left >= tab.right, `村の地図はタブの帯の右に収まる (左 ${Math.round(vm.left)} / 帯 ${Math.round(tab.right)})`);
       await land.close();
     }
 
@@ -837,6 +849,33 @@ async function run() {
         if (vw < vh ? L.panel.t < L.stage.b - 1 : L.panel.l < L.stage.r - 1) bad.push('札が地図に重なる');
         ok(bad.length === 0, `${tag}: 城レベル ${xp ? 5 : 1} (${L.n}x${L.n}) で、土地の四隅が見え、札・建築する・上の帯が画面に収まる${bad.length ? ' (' + bad.join('・') + ')' : ''}`);
       }
+      // 村も同じ並び (見本 art/village-mock.png): 上に題・村人猫の帯・資材、地図と村のめぐみ・下の帯、右 (縦は下) に村の管理
+      await cp.evaluate(() => window.__app.setTab('village'));
+      await cp.waitForTimeout(200);
+      for (const peak of [0, 90]) {
+        await cp.evaluate((p) => window.__app.debugSetState((s) => Object.assign({}, s, { village: Object.assign({}, s.village, { peak: p }) })), peak);
+        await cp.waitForTimeout(150);
+        const V = await cp.evaluate(() => {
+          const r = (q) => { const b = document.querySelector(q).getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
+          const open = window.Core.openArea(window.__app.state(), 'village');
+          const corners = [[0, 0], [open.n - 1, 0], [0, open.n - 1], [open.n - 1, open.n - 1]].map(([x, y]) => (y + open.o) * 10 + (x + open.o));
+          return { title: r('.vl-title'), pop: r('.vl-pop'), res: r('.vl-res'), stage: r('#villageStage'), panel: r('#villagePanel'), build: r('#villageBuild'), out: r('#villageOut'), stats: r('#villageStats'),
+            tabs: r('#tabbar'), n: open.n, pts: corners.map((i) => window.__app.cellPoint('village', i)) };
+        });
+        const inside = (a, b) => a.l >= b.l - 1 && a.r <= b.r + 1 && a.t >= b.t - 1 && a.b <= b.b + 1;
+        const hit = (p, b) => p.x >= b.l && p.x <= b.r && p.y >= b.t && p.y <= b.b;
+        const screen = vw < vh ? { l: 0, t: sf.t, r: vw, b: V.tabs.t } : { l: V.tabs.r, t: 0, r: vw - sf.r, b: vh - sf.b };
+        const bad = [];
+        if (!inside(V.panel, screen)) bad.push('村の管理が画面の外');
+        if (!inside(V.build, V.panel) || !inside(V.build, screen)) bad.push('村を発展させるが札の外');
+        if (![V.title, V.pop, V.res].every((x) => inside(x, screen))) bad.push('上の題・村人猫・資材が画面の外');
+        if (V.title.r > V.pop.l + 1 || V.pop.r > V.res.l + 1) bad.push('上の題・村人猫・資材が重なる');
+        if (V.pts.some((p) => !hit(p, V.stage))) bad.push('土地の角が地図の外');
+        if (V.pts.some((p) => hit(p, V.out) || hit(p, V.stats))) bad.push('土地の角が村のめぐみか下の帯の下');
+        ok(bad.length === 0, `${tag}: 村 (${V.n}x${V.n}) で、土地の四隅が見え、村の管理・村を発展させる・上の帯が画面に収まる${bad.length ? ' (' + bad.join('・') + ')' : ''}`);
+      }
+      await cp.evaluate(() => window.__app.setTab('castle'));
+      await cp.waitForTimeout(200);
       // 建っている物は、変わったときだけ描いておき、毎コマは貼るだけ (歩くねこの手前の建物だけ切り抜いて描き直す)。
       // 前は毎コマ全部を描いていて、10x10 を全部うめると CPU4倍遅で 97コマ/2秒に落ちた (いまは 121)
       {
@@ -934,11 +973,11 @@ async function run() {
       await vp.waitForFunction(() => window.__app);
       await vp.addStyleTag({ content: ':root{--safe-t:59px;--safe-b:34px}' });
       await vp.evaluate(() => { const a = window.__app; a.start(); a.closeStory(); a.debugAddMerit(6000); a.closeModals(); a.debugSetMaterials(100000); a.setTab('village');
-        for (let i = 0; i < 5; i++) a.build('village', i, 'house'); a.build('village', 5, 'shop'); });
+        const oc = window.Core.openCells(a.state(), 'village'); for (let i = 0; i < 5; i++) a.build('village', oc[i], 'house'); a.build('village', oc[5], 'shop'); });
       await vp.evaluate(() => window.__app.debugSetState((s) => Object.assign({}, s, { village: Object.assign({}, s.village, { population: 50, recruits: 340 }) })));
       await vp.waitForTimeout(400);
       const v1 = await vp.evaluate(() => ({ t: document.getElementById('popTroops').textContent, c: document.getElementById('popCoins').textContent }));
-      ok(/兵の見習い 34\d\/2000/.test(v1.t) && /小判 \+\d/.test(v1.c), `村の画面に、兵の見習いと商いの小判が出る (${v1.t} / ${v1.c})`);
+      ok(/兵の見習い 34\d\/2000/.test(v1.t) && /小判 \+\d/.test(v1.c), `村の画面に、兵の見習いと小判が出る (${v1.t} / ${v1.c})`);
       await vp.evaluate(() => { window.__app.setTab('realm'); window.__app.startRealm(23); });
       await vp.waitForTimeout(400);
       await vp.evaluate(() => window.__app.selectPref(23));
@@ -949,6 +988,29 @@ async function run() {
       await vp.waitForTimeout(300);
       const v2 = await vp.evaluate(() => document.getElementById('popTroops').textContent);
       ok(/→ 愛知/.test(v2), `国を任されたあとは、村の画面に兵の行き先が出る (${v2})`);
+      // 見本から切り出した村の飾りと、村のパーツの絵がすべて読めている
+      const vpics = await vp.evaluate(async () => {
+        const urls = [...document.querySelectorAll('#view-village img')].map((e) => e.src).filter((u) => /u-|v-/.test(u));
+        const css = [getComputedStyle(document.getElementById('villageBuild')).borderImageSource,
+          ...[...document.querySelectorAll('#villageStats .vl-stat-icon')].map((e) => getComputedStyle(e).webkitMaskImage)];
+        for (const c of css) for (const m of c.matchAll(/url\("?([^")]+)"?\)/g)) urls.push(m[1]);
+        const parts = Object.values(window.Core.BUILDINGS).filter((d) => d.zone === 'village').map((d) => './img/' + d.img + '.webp');
+        const all = urls.concat(parts);
+        const res = await Promise.all(all.map((u) => new Promise((r) => { const im = new Image(); im.onload = () => r(im.naturalWidth > 0); im.onerror = () => r(false); im.src = u; })));
+        return { n: all.length, bad: all.filter((u, i) => !res[i]).map((u) => u.split('/').pop().slice(0, 24)) };
+      });
+      ok(vpics.n >= 45 && vpics.bad.length === 0, `村の飾りとパーツの絵 ${vpics.n} 枚が読めている${vpics.bad.length ? ' (読めない: ' + vpics.bad.join(', ') + ')' : ''}`);
+      // 下の帯: 食料が足りないと赤くなり、かざりを建てると幸福度が上がる
+      const bar = async () => vp.evaluate(() => ({ food: document.querySelector('#villageStats [data-v="food"]').textContent, low: document.querySelector('#villageStats [data-k="food"]').classList.contains('low'),
+        happy: document.querySelector('#villageStats [data-v="happy"]').textContent }));
+      await vp.evaluate(() => window.__app.debugSetState((s) => Object.assign({}, s, { village: Object.assign({}, s.village, { population: 50 }) })));
+      await vp.waitForTimeout(400);
+      const b0 = await bar();
+      await vp.evaluate(() => { const a = window.__app, oc = window.Core.openCells(a.state(), 'village'); a.build('village', oc[20], 'farmhouse'); a.build('village', oc[21], 'farmhouse'); a.build('village', oc[22], 'farmhouse'); a.build('village', oc[23], 'sakura'); });
+      await vp.waitForTimeout(400);
+      const b1 = await bar();
+      ok(b0.low && parseInt(b0.food) < 30 && !b1.low && parseInt(b1.food) > 80 && parseInt(b1.happy) === parseInt(b0.happy) + 5,
+        `下の帯: 食料が足りないと赤く (${b0.food})、農家を建てると戻り (${b1.food})、桜で幸福度が上がる (${b0.happy} → ${b1.happy})`);
       await vc.close();
     }
 
