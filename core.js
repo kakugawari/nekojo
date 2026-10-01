@@ -828,8 +828,9 @@
   /**
    * 国とりの合戦の結果を国に反映する。
    * 勝ち: 攻め込んだ県が自分の国になり、生き残った兵がそこに入る。
-   * 負け・退却: 連れて行った兵の半分が戻らない。そのかわり、倒した敵のぶん守りの兵も減る (挑み直すと楽になる)。
+   * 負け・退却: 連れて行った兵の半分 (100 匹ずつに切り上げ) が戻らない。そのかわり、倒した敵のぶん守りの兵も減る (挑み直すと楽になる)。
    * 合戦の最中に兵を動かしていても、元の国にいる数より多くは減らさない。
+   * 攻めてきている大名の国を取ったら、その大名の兵は帰る国が無くなって散る (攻めてくる知らせを取り消す)。
    */
   function applyConquest(state, b) {
     const c = b.conquest;
@@ -844,12 +845,13 @@
         r.troops[c.from - 1] -= sent;
         r.mine[c.to - 1] = true;
         r.troops[c.to - 1] = Math.max(TROOP_UNIT, sent - lost);
-        if (!r.unified && r.mine.every(Boolean)) { r.unified = true; out.unified = true; }
+        if (r.invasion && r.invasion.from === c.to) { out.scattered = r.invasion; r.invasion = null; }
+        if (!r.unified && r.mine.every(Boolean)) { r.unified = true; out.unified = true; r.invasion = null; }
       });
       return { state: next, conquest: out };
     }
     const downs = b.enemies.filter(function (e) { return !e.alive; }).length;
-    out.lost = roundTroops(sent / 2);
+    out.lost = defeatLoss(sent);
     out.cut = Math.min(roundTroops(c.garrison * 0.5 * downs / b.enemies.length), Math.max(0, troopsAt(state, c.to) - TROOP_UNIT));
     const next = withRealm(state, function (r) {
       r.troops[c.from - 1] -= out.lost;
@@ -858,14 +860,39 @@
     return { state: next, conquest: out };
   }
 
+  /**
+   * 負け・退却で戻らない兵: 連れて行った兵の半分を 100 匹ずつに切り上げる。
+   * 切り下げると、100 匹で攻めたときに 1 匹も減らず、「100 匹で挑んで、だめなら退却」が損なしでできてしまった
+   */
+  function defeatLoss(sent) { return Math.min(sent, Math.ceil(sent / 2 / TROOP_UNIT) * TROOP_UNIT); }
+
+  /**
+   * 迎え撃つ合戦に負けた・退却したとき: 何もしなかったときと同じく、兵の数で決める。
+   * ただし倒した敵のぶん、攻めてきた兵は減っている (戦ったぶんは無駄にならない)。
+   * 前は負けるとかならず取られたので、守りの兵が十分にあっても、迎え撃つと国も兵も失うことがあった
+   */
+  function defenseFallback(state, b) {
+    const inv = state.realm.invasion;
+    const downs = b.enemies.filter(function (e) { return !e.alive; }).length;
+    const attackers = Math.max(TROOP_UNIT, roundTroops(inv.troops * (1 - 0.5 * downs / Math.max(1, b.enemies.length))));
+    const defenders = troopsAt(state, inv.to);
+    return { attackers: attackers, defenders: defenders, repel: defenders >= attackers, home: state.realm.home === inv.to };
+  }
+
   /** 合戦の結果を state に反映する。勝てば手柄・資材、負けても出世は下がらない。国とりなら国も */
   function applyBattleResult(state, b) {
     const res = applyBattleRewards(state, b);
     if (b.conquest && b.conquest.defense) {
-      // 迎え撃つ合戦: 勝てば追い返す、負け・退却なら取られる (はじめの国は兵が半分になるだけ)
+      // 迎え撃つ合戦: 勝てば追い返す。負け・退却なら兵の数で決まる (倒したぶん攻めてきた兵は減っている)
       const inv = hasRealm(res.state) && res.state.realm.invasion;
       if (inv && inv.to === b.conquest.to && isMine(res.state, inv.to)) {
-        const d = settleInvasion(res.state, b.phase === 'won');
+        let won = b.phase === 'won', st = res.state;
+        if (!won) {
+          const fb = defenseFallback(st, b);
+          st = Object.assign({}, st, { realm: Object.assign({}, st.realm, { invasion: Object.assign({}, inv, { troops: fb.attackers }) }) });
+          won = fb.repel;
+        }
+        const d = settleInvasion(st, won);
         res.state = d.state;
         res.defense = d.result;
       }
@@ -1319,7 +1346,12 @@
   function stepRealm(state, dt, rng) {
     if (!(dt > 0) || !hasRealm(state) || state.realm.unified) return { state: state, events: [] };
     const random = rng || Math.random;
-    const r0 = state.realm;
+    let r0 = state.realm;
+    if (r0.invasion && isMine(state, r0.invasion.from)) {
+      // 攻めてくる大名の国を、もう取っている (兵は散った)
+      r0 = Object.assign({}, r0, { invasion: null });
+      state = Object.assign({}, state, { realm: r0 });
+    }
     if (r0.invasion) {
       const left = r0.invasion.left - dt;
       if (left > 0) {
@@ -1475,7 +1507,7 @@
       ? raw.lord.map(function (l, i) { return prefOf(l) ? l : i + 1; })
       : PREFS.map(function (p) { return p.id; });
     const iv = raw.invasion;
-    const invasion = iv && prefOf(iv.from) && prefOf(iv.to) && mine[iv.to - 1] && Number.isFinite(iv.troops) && Number.isFinite(iv.left)
+    const invasion = iv && raw.unified !== true && prefOf(iv.from) && prefOf(iv.to) && mine[iv.to - 1] && !mine[iv.from - 1] && Number.isFinite(iv.troops) && Number.isFinite(iv.left)
       ? { from: iv.from, to: iv.to, troops: Math.max(TROOP_UNIT, roundTroops(iv.troops)), left: Math.max(0, Math.min(INVASION_WARN, iv.left)), lord: prefOf(iv.lord) ? iv.lord : iv.from }
       : null;
     return {
@@ -1714,6 +1746,8 @@
     rollRecruitOffer: rollRecruitOffer,
     applyBattleResult: applyBattleResult,
     lossReward: lossReward,
+    defeatLoss: defeatLoss,
+    defenseFallback: defenseFallback,
 
     createInitialState: createInitialState,
     sanitizeState: sanitizeState,

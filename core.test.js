@@ -1129,7 +1129,7 @@ test('天下: 勝つとその県が自分の国になり、生き残った兵が
   assert.strictEqual(res.state.totalMerit, s.totalMerit + 130);
 });
 
-test('天下: 負け・退却では連れて行った兵の半分が戻らない。そのかわり、倒したぶん敵の守りも減る', () => {
+test('天下: 負け・退却では連れて行った兵の半分 (100 匹ずつに切り上げ) が戻らない。そのかわり、倒したぶん敵の守りも減る', () => {
   const s = realmState(23);
   const g = Core.troopsAt(s, 22);
   const b = Core.createBattle(s, Core.mulberry32(3), Core.attackPlan(s, 23, 22, 500));
@@ -1138,9 +1138,20 @@ test('天下: 負け・退却では連れて行った兵の半分が戻らない
   const res = Core.applyBattleResult(s, b);
   assert.strictEqual(res.conquest.captured, false);
   assert.strictEqual(Core.isMine(res.state, 22), false);
-  assert.strictEqual(Core.troopsAt(res.state, 23), 500 - 200, '500 のうち半分 (100 匹ずつに切り下げ) が戻らない');
+  assert.strictEqual(Core.troopsAt(res.state, 23), 500 - 300, '500 のうち半分 (100 匹ずつに切り上げ) が戻らない');
   assert.ok(Core.troopsAt(res.state, 22) < g, `守りが減る (${g} → ${Core.troopsAt(res.state, 22)})`);
   assert.ok(Core.troopsAt(res.state, 22) >= 100, '守りは 100 より減らない');
+});
+
+test('天下: 100 匹だけ連れて行っても、負ければ兵は減る (「100 匹で挑んで、だめなら退却」を損なしにしない)', () => {
+  // 前は半分を 100 匹ずつに切り下げていたので、100 匹で負けても 1 匹も減らなかった
+  assert.deepStrictEqual([100, 200, 300, 500, 1000].map(Core.defeatLoss), [100, 100, 200, 300, 500]);
+  const s = realmState(23);
+  const b = Core.createBattle(s, Core.mulberry32(3), Core.attackPlan(s, 23, 22, 100));
+  b.phase = 'lost';
+  const res = Core.applyBattleResult(s, b);
+  assert.strictEqual(res.conquest.lost, 100);
+  assert.strictEqual(Core.troopsAt(res.state, 23), 400);
 });
 
 test('天下: 合戦の最中に兵を動かしても、元の国にいる数より多くは減らない', () => {
@@ -1250,6 +1261,7 @@ test('手ごたえ (天下): ふつうに遊べば天下統一できる。兵を
   // 溜めない子でも、小判を先に修行に使い、兵を 2 倍連れて行けば、たいてい天下統一できる。
   // 1 戦の勝ち負けで道すじが分かれる (勝って守りの多い県へ進むと負け続けることがある) ので、5 つの国から見る。
   // 測った値 (アイテムをやめたあと): 北海道 67・東京 56・広島 58・沖縄 63 戦、愛知だけ届かない (前の版も 5 つ中 4 つ)
+  // 負けたときの兵を切り上げにしたあと: 北海道 66・東京 76・愛知 63・広島 60・沖縄 63 戦 (5 つすべて)
   const tapDone = [1, 13, 23, 34, 47].map((home) => campaign(home, 2, tapper, home, 1)).filter((t) => t.unified && t.battles <= 80);
   assert.ok(tapDone.length >= 3, `溜めない子も、修行して兵を 2 倍にすれば、たいてい天下統一 (${tapDone.length}/5 の国から)`);
 });
@@ -1349,12 +1361,65 @@ test('攻めてくる: 迎え撃つ合戦。最後は攻めてきた大名。勝
   won.phase = 'won'; won.enemies.forEach((e) => { e.alive = false; });
   const w = Core.applyBattleResult(r.s, won);
   assert.ok(w.defense.repelled && Core.isMine(w.state, r.inv.to) && w.state.realm.invasion === null, '追い返した');
-  // 負ける
-  const lost = Core.createBattle(r.s, Core.mulberry32(2), plan);
+  // 負ける (守りの兵が少ない)
+  const thin = JSON.parse(JSON.stringify(r.s)); thin.realm.troops[r.inv.to - 1] = 0;
+  const lost = Core.createBattle(thin, Core.mulberry32(2), Core.defensePlan(thin));
   lost.phase = 'lost';
-  const l = Core.applyBattleResult(r.s, lost);
+  const l = Core.applyBattleResult(thin, lost);
   assert.ok(!l.defense.repelled && l.state.realm.invasion === null);
-  if (r.inv.to !== 23) assert.ok(l.defense.fell && !Core.isMine(l.state, r.inv.to), '負けると取られる');
+  if (r.inv.to !== 23) assert.ok(l.defense.fell && !Core.isMine(l.state, r.inv.to), '守りが少ないまま負けると取られる');
+});
+
+test('攻めてくる: 迎え撃って負けても・退却しても、何もしなかったときより悪くならない (兵の数で決まる)', () => {
+  // 前は負けるとかならず取られた。守り 2000 に 600 が攻めてきても、迎え撃って退却すると国も兵も失った
+  const r = untilInvade(threeLands());
+  const s = JSON.parse(JSON.stringify(r.s));
+  const to = r.inv.to === 23 ? 22 : r.inv.to;   // はじめの国でない所で試す
+  s.realm.invasion = Object.assign({}, s.realm.invasion, { to: to, troops: 600 });
+  s.realm.troops[to - 1] = 2000;
+  const b = Core.createBattle(s, Core.mulberry32(2), Core.defensePlan(s));   // phase は fight のまま = 退却
+  const res = Core.applyBattleResult(s, b);
+  assert.ok(res.defense.repelled && !res.defense.fell && Core.isMine(res.state, to), '守りが多ければ、退却しても追い返す');
+  assert.ok(Core.troopsAt(res.state, to) >= 1500, `守りの兵はほとんど残る (${Core.troopsAt(res.state, to)})`);
+  assert.strictEqual(res.state.realm.invasion, null);
+  // 守りが少し足りなくても、倒したぶん攻めてきた兵が減るので、追い返せることがある
+  const close = JSON.parse(JSON.stringify(s)); close.realm.troops[to - 1] = 400;
+  const b2 = Core.createBattle(close, Core.mulberry32(2), Core.defensePlan(close));
+  b2.enemies.forEach((e, i) => { if (i < b2.enemies.length - 1) e.alive = false; });
+  b2.phase = 'lost';
+  const fb = Core.defenseFallback(close, b2);
+  assert.ok(fb.attackers < 600 && fb.attackers >= 300, `倒したぶん攻めてきた兵が減る (600 → ${fb.attackers})`);
+  const none = Core.createBattle(close, Core.mulberry32(2), Core.defensePlan(close));
+  none.phase = 'lost';
+  assert.ok(Core.applyBattleResult(close, none).defense.fell, '1 匹も倒せずに負け、守りも足りなければ取られる');
+});
+
+test('攻めてくる: 攻めてきている大名の国を取ると、その兵は散る。天下統一したら知らせも消える', () => {
+  // 前は残ったままで、天下統一のあとも赤い帯が「あと 60 秒」で止まって出続け、倒した大名と迎え撃つ合戦ができた
+  const r = untilInvade(threeLands());
+  const s = JSON.parse(JSON.stringify(r.s));
+  const src = Core.attackSource(s, r.inv.from);
+  s.realm.troops[src - 1] = 1000;
+  const b = Core.createBattle(s, Core.mulberry32(2), Core.attackPlan(s, src, r.inv.from, 1000));
+  b.phase = 'won';
+  const res = Core.applyBattleResult(s, b);
+  assert.ok(Core.isMine(res.state, r.inv.from));
+  assert.strictEqual(res.state.realm.invasion, null, '攻めてくる知らせが消える');
+  assert.ok(res.conquest.scattered, '散ったことを知らせる');
+  // 最後の 1 国が攻めてきている最中に、その国を取って天下統一
+  const last = JSON.parse(JSON.stringify(realmState(23)));
+  last.realm.mine = last.realm.mine.map((_, i) => i + 1 !== 47);
+  last.realm.troops = last.realm.troops.map((t, i) => (i + 1 === 47 ? 1000 : 500));
+  last.realm.nextInvasion = 0.01;
+  const inv = Core.stepRealm(last, 1, Core.mulberry32(1)).state;
+  assert.strictEqual(inv.realm.invasion.from, 47);
+  const fin = Core.createBattle(inv, Core.mulberry32(2), Core.attackPlan(inv, 46, 47, 300));
+  fin.phase = 'won';
+  const u = Core.applyBattleResult(inv, fin).state;
+  assert.ok(u.realm.unified && u.realm.invasion === null && Core.defensePlan(u) === null, '天下統一したら、攻めてくる知らせは無い');
+  // 保存データに残っていても、読み込むと捨てる
+  const saved = JSON.parse(Core.serialize(inv)); saved.realm.mine[46] = true; saved.realm.unified = true;
+  assert.strictEqual(Core.sanitizeState(saved).realm.invasion, null);
 });
 
 test('攻めてくる: 取られた県は、攻めてきた大名が守る。攻め返すと、その大名が出てくる', () => {

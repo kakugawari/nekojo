@@ -850,6 +850,26 @@ async function run() {
         await cdp.detach();
       }
 
+      // 全体の札 (背が低い) から敵の県を押しても、選んだ県と攻めに出る国 (愛知) は、出てきた背の高い札に隠れない。
+      // 前は見る範囲を決めてから札を作っていたので、縦で静岡が札の下に入った (静岡 y518・札の上端 478)
+      {
+        const hid = [];
+        for (const id of [22, 24, 21, 20]) {
+          await rp.evaluate(() => { window.__app.selectPref(null); window.__app.realmFitAll(); });
+          await rp.waitForTimeout(80);
+          await tapPref(id); await settle();
+          if (await rp.evaluate(() => window.__app.selectedPref()) !== id) { await tapPref(id); await settle(); }
+          const fr = await rp.evaluate(() => window.__app.realmFreeRect());
+          const guide = await rp.evaluate(() => ['realmBubble', 'realmGuideImg'].map((q) => { const r = document.getElementById(q).getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; }));
+          for (const p of [id, 23]) {
+            const pt = await rp.evaluate((i) => window.__app.prefPoint(i), p);
+            const under = guide.some((g) => pt.x >= g.l && pt.x <= g.r && pt.y >= g.t && pt.y <= g.b);
+            if (under || pt.y > fr.bottom || pt.y < fr.top || pt.x < fr.left || pt.x > fr.right) hid.push(id + ':' + p + '@' + Math.round(pt.x) + ',' + Math.round(pt.y) + (under ? '(案内猫)' : ''));
+          }
+        }
+        ok(hid.length === 0, `${tag}: 全体の地図から敵の県を押しても、その県と愛知の名前は札にも案内猫にも隠れない${hid.length ? ' (だめ: ' + hid.join(' ') + ')' : ''}`);
+      }
+
       // 兵を指で買う
       await rp.evaluate(() => { window.__app.debugSetState((s) => Object.assign({}, s, { merit: 175 })); window.__app.realmFitAll(); });
       await tapPref(22); await settle();
@@ -898,7 +918,16 @@ async function run() {
       await rp.locator('#btnRetreat').tap();
       await rp.waitForTimeout(300);
       const after = await rp.evaluate(() => ({ tab: window.__app.tab(), t: window.Core.troopsAt(window.__app.state(), 22) }));
-      ok(rt.includes('半分') && after.tab === 'realm' && after.t === 200, `${tag}: 退却すると兵が半分 (400 → ${after.t}) になって地図へ戻る。退却のボタンにもそう書いてある`);
+      ok(rt.includes('200 匹') && after.tab === 'realm' && after.t === 200, `${tag}: 退却すると兵が半分 (400 → ${after.t}) になって地図へ戻る。退却のボタンに戻らない数が書いてある (${rt})`);
+      // 100 匹だけ連れて行っても、退却すると 100 匹戻らない (前は 0 匹で、損なしに何度でも挑めた)
+      await rp.evaluate(() => { window.__app.selectPref(14); window.__app.setSend(100); window.__app.attack(); });
+      await rp.waitForTimeout(150);
+      await rp.locator('#btnPause').tap();
+      const rt1 = await rp.evaluate(() => document.getElementById('btnRetreat').textContent);
+      await rp.locator('#btnRetreat').tap();
+      await rp.waitForTimeout(300);
+      const t1 = await rp.evaluate(() => window.Core.troopsAt(window.__app.state(), 22));
+      ok(rt1.includes('100 匹') && t1 === 100, `${tag}: 100 匹で攻めて退却すると、100 匹が戻らない (200 → ${t1}・${rt1})`);
 
       // 「もどる」で合戦へ
       await rp.locator('#btnRealmBack').tap();
@@ -946,6 +975,26 @@ async function run() {
         const l4 = await rp.evaluate(() => window.__app.state().realm.invasion.left);
         await rp.waitForTimeout(800);
         ok(await rp.evaluate(() => window.__app.state().realm.invasion.left) === l4, `${tag}: 合戦の最中は秒読みが止まる`);
+        // 合戦を開いたまま天下の画面へ行っても、別の合戦を始めたり、兵を動かしたりできない。
+        // 前はできたので、迎え撃つ合戦が罰なしで消え、攻めの合戦の途中で兵をよそへ移すと、兵を失わずに国が取れた
+        {
+          await rp.evaluate(() => { window.__app.setTab('realm'); window.__app.selectPref(14); });
+          await rp.waitForTimeout(150);
+          const lock = await rp.evaluate(() => {
+            const q = (a) => document.querySelector('[data-act="' + a + '"]');
+            const before = window.__app.battle();
+            const started = window.__app.attack();
+            return { atk: q('attack') && q('attack').disabled, buy: q('buy') && q('buy').disabled, gather: q('gather') && q('gather').disabled,
+              back: !!q('back-battle') && !q('back-battle').disabled, started, same: window.__app.battle() === before };
+          });
+          ok(lock.atk && lock.buy && lock.gather && lock.back && !lock.started && lock.same,
+            `${tag}: 合戦の最中に天下の画面へ来ても、攻める・兵を買う・集めるは押せず、「合戦に もどる」だけ押せる (${JSON.stringify(lock)})`);
+          await rp.waitForTimeout(600);
+          ok(await rp.evaluate(() => window.__app.state().realm.invasion.left) === l4, `${tag}: 迎え撃つ合戦を開いたまま天下の画面にいても、秒読みは止まったまま`);
+          await rp.locator('[data-act="back-battle"]').tap();
+          await rp.waitForTimeout(150);
+          ok(await rp.evaluate(() => window.__app.tab()) === 'battle', `${tag}: 「合戦に もどる」で合戦の画面へ`);
+        }
         const db = await rp.evaluate(() => { const b = window.__app.battle(); return { def: b && b.conquest && b.conquest.defense, mission: document.getElementById('missionText').textContent }; });
         ok(db.def && db.mission.includes('を守る'), `${tag}: 「迎え撃つ!」で守りの合戦になる (${db.mission})`);
         await rp.evaluate(() => { const b = window.__app.battle(); b.enemies.forEach((e, i) => { if (i < b.enemies.length - 1) { e.alive = false; e.hp = 0; e.state = 'down'; e.timer = 0.01; } }); b.current = b.enemies.length - 2; });
@@ -969,7 +1018,8 @@ async function run() {
       }
 
       // 最後の 1 国を取ると天下統一
-      await rp.evaluate(() => window.__app.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.mine = r.mine.map((m, i) => i !== 13); r.troops[21] = 3000; return Object.assign({}, s, { realm: r }); }));
+      // そのとき、最後の 1 国 (神奈川) が静岡へ攻めてきている (攻め返して天下統一する、いちばんありそうな道すじ)
+      await rp.evaluate(() => window.__app.debugSetState((s) => { const r = JSON.parse(JSON.stringify(s.realm)); r.mine = r.mine.map((m, i) => i !== 13); r.troops[21] = 3000; r.invasion = { from: 14, to: 22, troops: 600, left: 50, lord: 14 }; return Object.assign({}, s, { realm: r }); }));
       await rp.evaluate(() => window.__app.selectPref(14));
       await rp.locator('[data-act="attack"]').tap();
       await rp.evaluate(() => { const b = window.__app.battle(); b.enemies.forEach((e, i) => { if (i < b.enemies.length - 1) { e.alive = false; e.hp = 0; e.state = 'down'; e.timer = 0.01; } }); b.current = b.enemies.length - 2; });
@@ -978,6 +1028,11 @@ async function run() {
       await rp.waitForFunction(() => !document.getElementById('unifyModal').hidden, null, { timeout: 6000 }).catch(() => {});
       const uni = await rp.evaluate(() => ({ shown: !document.getElementById('unifyModal').hidden, all: window.Core.ownedCount(window.__app.state()) }));
       ok(uni.shown && uni.all === 47, `${tag}: 47 国そろうと「天下統一!」の札が出る`);
+      // 天下統一したら、攻めてくる知らせは消える (前は残ったままで、どの画面にも「あと 50 秒」の赤い帯が止まって出続けた)
+      await rp.evaluate(() => { window.__app.closeModals(); window.__app.setTab('vassals'); });
+      await rp.waitForTimeout(400);
+      const gone = await rp.evaluate(() => ({ inv: window.__app.state().realm.invasion, bar: !document.getElementById('invasionBar').hidden, def: window.__app.defend() }));
+      ok(gone.inv === null && !gone.bar && !gone.def, `${tag}: 攻めてきていた最後の 1 国を取って天下統一すると、攻めてくる知らせは消える (${JSON.stringify(gone)})`);
       const card = await rect('#unifyModal .modal-card');
       ok(card.top >= -1 && card.bottom <= vh + 1, `${tag}: 天下統一の札が画面に収まる`);
       await rc.close();

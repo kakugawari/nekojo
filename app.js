@@ -231,6 +231,20 @@
     return '「' + C.RANKS[C.CASTLE_UNLOCK_RANK].name + '」になると、自分の城と村を持てるにゃ。';
   }
 
+  /** 合戦が始まっていて、まだ決着していない (ほかの画面へ行っている間も含む) */
+  function battleOpen() { return !!(battle && battle.phase === 'fight'); }
+
+  /**
+   * 天下の時 (攻めてくる知らせ・秒読み) が進むか。合戦の画面で戦っている間は止める (見ている間に取られないように)。
+   * 合戦を開いたままほかの画面へ行っている間は進める (前は止まったままで、合戦を放っておけば攻めてこなくなった)。
+   * 迎え撃つ合戦は、その合戦が攻めてくる兵とのぶつかり合いなので、決着するまで止める
+   */
+  function realmClockRuns() {
+    if (titleShown || !C.hasRealm(state)) return false;
+    if (!battleOpen()) return true;
+    return currentTab !== 'battle' && !(battle.conquest && battle.conquest.defense);
+  }
+
   function switchTab(name) {
     if (!views[name]) return;
     currentTab = name;
@@ -1450,6 +1464,8 @@
       const gain = b.merit + b.bonus;
       let rows = '';
       if (cq) rows += row('🏯 手に入れた国', C.prefOf(cq.to).name) + row('入った兵', C.troopsAt(state, cq.to) + ' 匹') + row('失った兵', cq.lost + ' 匹');
+      // 攻めてきていた大名の国を取った: 攻めてきていた兵は、帰る国が無くなって散る
+      if (cq && cq.scattered) rows += row('🏳 攻めてきていた兵', cq.scattered.troops + ' 匹が 散った');
       if (df) rows += row('🛡 守った国', C.prefOf(df.to).name) + row('追い返した兵', df.attackers + ' 匹') + row('へった守りの兵', df.lost + ' 匹');
       rows += row('倒した敵', b.enemies.length + ' 匹') + row('小判', '+' + gain) + row('経験値', '+' + gain) + row('資材', '+' + b.materials);
       els.resultTitle.textContent = cq ? C.prefOf(cq.to).name + 'を 手に入れた!' : df ? C.prefOf(df.to).name + 'を 守りきった!' : '勝利!';
@@ -1475,12 +1491,14 @@
       const downs = b.enemies.filter(function (e) { return !e.alive; }).length;
       let rows = '';
       if (cq) rows += row('戻らなかった兵', cq.lost + ' 匹') + row(C.prefOf(cq.to).name + 'の守り', '−' + cq.cut + ' 匹');
-      if (df) rows += df.fell ? row('とられた国', C.prefOf(df.to).name) : row('へった守りの兵', df.lost + ' 匹');
+      // 迎え撃って負けたときは、兵の数で決まる (倒したぶん、攻めてきた兵は減っている)
+      if (df) rows += df.fell ? row('とられた国', C.prefOf(df.to).name)
+        : (df.repelled ? row('追い返した兵', df.attackers + ' 匹') : '') + row('へった守りの兵', df.lost + ' 匹');
       rows += row('倒した敵', downs + ' 匹') + row('持ち帰った小判', '+' + got);
       const advice = cq ? '兵を ふやして、もう一度!<br>兵が多いほど 敵が弱くなるにゃ。'
-        : df ? (df.fell ? '兵を集めて、取り返しに行こう!' : 'はじめの国は とられないにゃ。') + '<br>攻めてきた大名の国は、兵がへっているにゃ。'
+        : df ? (df.fell ? '兵を集めて、取り返しに行こう!' : df.repelled ? '守りの兵が 多かったから、追い返せたにゃ。' : 'はじめの国は とられないにゃ。') + '<br>攻めてきた大名の国は、兵がへっているにゃ。'
         : '小判で 修行して、もう一度!<br>MAX で ためて なぐると 強いにゃ。';
-      if (df) els.resultTitle.textContent = df.fell ? C.prefOf(df.to).name + 'を とられた…' : C.prefOf(df.to).name + 'は 守ったが…';
+      if (df) els.resultTitle.textContent = df.fell ? C.prefOf(df.to).name + 'を とられた…' : df.repelled ? C.prefOf(df.to).name + 'は 兵の数で 守った' : C.prefOf(df.to).name + 'は 守ったが…';
       els.resultRows.innerHTML = rows;
       els.resultRows.appendChild(makeNavi('worry', advice, 'result-navi'));
       els.offer.hidden = true;
@@ -1530,11 +1548,22 @@
 
   function pauseBattle() {
     if (!battle || battle.phase !== 'fight') return;
-    els.btnRetreat.textContent = battle.conquest ? (battle.conquest.defense ? '退却する (' + battle.conquest.name + 'を とられる)' : '退却する (連れて行った兵の半分が戻らない)') : '退却する (何も減らない)';
+    els.btnRetreat.textContent = retreatLabel(battle);
     battle.charge = { on: false, t: 0 }; // 溜めは捨てる (止めている間にたまらないように)
     els.btnPunch.classList.remove('charging');
     paused = true;
     els.pausePanel.hidden = false;
+  }
+
+  /** 退却したら何が起きるか (国とりなら戻らない兵の数、迎え撃つなら兵の数で決まる結果) */
+  function retreatLabel(b) {
+    const c = b.conquest;
+    if (!c) return '退却する (何も減らない)';
+    if (!c.defense) return '退却する (兵 ' + C.defeatLoss(Math.min(c.sent, C.troopsAt(state, c.from))) + ' 匹が 戻らない)';
+    const inv = C.hasRealm(state) && state.realm.invasion;
+    if (!inv || inv.to !== c.to) return '退却する';
+    const fb = C.defenseFallback(state, b);
+    return fb.repel ? '退却する (兵の数で 追い返せる)' : fb.home ? '退却する (守りの兵が 半分になる)' : '退却する (' + c.name + 'を とられる)';
   }
 
   function resumeBattle() {
@@ -1550,7 +1579,11 @@
       state = res.state;
       saveSoon();
       if (res.conquest) showToast('退却… 兵が ' + res.conquest.lost + ' 匹 戻らなかった', 2400);
-      if (res.defense) { realm.dirty = true; showToast(res.defense.fell ? C.prefOf(res.defense.to).name + 'を とられた…' : '退却… 守りの兵が へった', 2400); }
+      if (res.defense) {
+        realm.dirty = true;
+        const d = res.defense;
+        showToast(d.fell ? C.prefOf(d.to).name + 'を とられた…' : d.repelled ? '退却… 兵の数で ' + C.prefOf(d.to).name + 'は 守った' : '退却… 守りの兵が へった', 2400);
+      }
     }
     showReady();
     if (cq) backToRealm(cq.to);
@@ -2655,6 +2688,9 @@
     const pref = C.prefOf(id);
     const src = C.hasRealm(state) ? C.attackSource(state, id) : null;
     realm.send = src ? C.troopsAt(state, src) : 0;
+    // 札を先に作る。敵の県の札は全体の札より背が高いので、あとで作ると、決めた見る範囲に札がかぶる
+    realm.dirty = true;
+    renderRealmSheet();
     const shape = prefShapes[id - 1];
     // 県の名前が書けるほど大きく見えていなければ、寄る
     // 沖縄は左上の枠の中にあるので、鹿児島と沖縄はいっしょに入れない (日本全体になってしまう)
@@ -2664,9 +2700,36 @@
       let cam = frameCamera([id].concat(around));
       if (shape.lr * cam.k < 12) cam = centerOn(shape.lx, shape.ly, 12 / shape.lr);
       moveCamera(cam);
+    } else {
+      keepInView([id].concat(src ? [src] : []));
     }
-    realm.dirty = true;
-    renderRealmSheet();
+  }
+
+  /**
+   * 県の名前の点が、飾りや札に隠れていない所に入っていなければ、いまの大きさのまま真ん中へずらす。
+   * 左下の案内の猫と吹き出しも、名前を隠す (隠れていない所の四角には入れていない) ので避ける
+   */
+  function keepInView(ids) {
+    const cam = realm.anim ? realm.anim.to : realm.cam;
+    const f = freeRect(), M = 16;
+    const m = realmEls.map.getBoundingClientRect();
+    const guide = [realmEls.bubble, realmEls.guideImg].map(function (el) {
+      const b = el.getBoundingClientRect();
+      return { x0: b.left - m.left - M, y0: b.top - m.top - M, x1: b.right - m.left + M, y1: b.bottom - m.top + M };
+    });
+    const seen = function (id) {
+      const p = prefShapes[id - 1];
+      const x = (p.lx - cam.x) * cam.k + realm.w / 2, y = (p.ly - cam.y) * cam.k + realm.h / 2;
+      const underGuide = guide.some(function (g) { return x >= g.x0 && x <= g.x1 && y >= g.y0 && y <= g.y1; });
+      return !underGuide && x >= f.x0 + M && x <= f.x1 - M && y >= f.y0 + M && y <= f.y1 - M;
+    };
+    if (ids.every(seen)) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    ids.forEach(function (id) { const p = prefShapes[id - 1]; x0 = Math.min(x0, p.lx); x1 = Math.max(x1, p.lx); y0 = Math.min(y0, p.ly); y1 = Math.max(y1, p.ly); });
+    // 名前の点が全部入る大きさ (入らなければ、選んだ県だけ真ん中へ)
+    const fits = (x1 - x0) * cam.k <= f.x1 - f.x0 - 2 * M && (y1 - y0) * cam.k <= f.y1 - f.y0 - 2 * M;
+    const p0 = prefShapes[ids[0] - 1];
+    moveCamera(fits ? centerOn((x0 + x1) / 2, (y0 + y1) / 2, cam.k) : centerOn(p0.lx, p0.ly, cam.k));
   }
 
   // ---- 札 (買う・集める・攻める)
@@ -2705,6 +2768,7 @@
   function guideText() {
     if (!C.hasRealm(state)) return realm.sel ? ['「' + C.prefOf(realm.sel).name + '」でいいかにゃ?', 'main'] : ['ボクが案内するにゃ! 任される国を えらんでにゃ', 'hello'];
     if (state.realm.unified) return ['天下統一にゃ! おめでとう!', 'cheer'];
+    if (battleOpen()) return ['合戦の最中にゃ! 先に 決着をつけよう', 'worry'];
     const inv = state.realm.invasion;
     if (inv) {
       if (realm.sel === inv.to) return C.troopsAt(state, inv.to) >= inv.troops ? ['守りは十分にゃ! 迎え撃ってもいいにゃ', 'cheer'] : ['兵を集めるか、迎え撃つにゃ!', 'worry'];
@@ -2745,7 +2809,8 @@
     const sel = realm.sel;
     const mode = !has ? 'choose' : !sel ? 'overview' : C.isMine(state, sel) ? 'mine' : 'enemy';
     const inv = has ? state.realm.invasion : null;
-    const key = mode + '|' + (sel || 0) + '|' + (has && sel ? String(C.attackSource(state, sel)) : '') + '|' + (inv ? inv.from + '>' + inv.to : '');
+    const busy = battleOpen();
+    const key = mode + '|' + (sel || 0) + '|' + (has && sel ? String(C.attackSource(state, sel)) : '') + '|' + (inv ? inv.from + '>' + inv.to : '') + '|' + busy;
     if (key === realm.sheetKey) { updateRealmSheet(); return; }
     realm.sheetKey = key;
     const box = realmEls.sheet;
@@ -2756,6 +2821,13 @@
     const add = function (html, cls, tag) { const d = document.createElement(tag || 'div'); d.className = cls; d.innerHTML = html; box.appendChild(d); return d; };
     const castleImg = '<img src="' + imgs['b-castle'].src + '" alt="">';
     const head = function (img, name, note) { add(img + '<div><div class="sheet-name">' + name + '</div><div class="sheet-note">' + note + '</div></div>', 'rs-head'); };
+    // 合戦の最中 (ほかの画面へ来ている): 兵を動かしたり攻めたりはできない。合戦へ戻るボタンだけ
+    if (busy && has) {
+      const note = add('<b>⚔ 合戦の最中にゃ</b><span>決着するまで 兵は動かせない</span>', 'rs-alarm rs-busy');
+      const back = sheetButton('btn-paper', '合戦に もどる ▶', function () { switchTab('battle'); });
+      back.dataset.act = 'back-battle';
+      note.appendChild(back);
+    }
     // 敵が攻めてくる知らせ。攻められている国を見ているときは「迎え撃つ」、ほかは「見に行く」
     if (inv) {
       const lord = C.prefOf(inv.lord) || C.prefOf(inv.from);
@@ -2862,6 +2934,16 @@
 
   /** 札の数字と、押せるかどうかだけを直す (ボタンは作り直さない。押している最中に入れ替わると押したことにならない) */
   function updateRealmSheet() {
+    updateRealmSheetNumbers();
+    // 合戦の最中は、兵を動かす・攻めるボタンを押せなくする (合戦へ戻る・見に行くは押せる)
+    if (battleOpen()) {
+      realmEls.sheet.querySelectorAll('[data-act]').forEach(function (b) {
+        if (b.dataset.act !== 'back-battle' && b.dataset.act !== 'goto-inv') b.disabled = true;
+      });
+    }
+  }
+
+  function updateRealmSheetNumbers() {
     updateRealmNumbers();
     const box = realmEls.sheet;
     const set = function (v, text) { const el = box.querySelector('[data-v="' + v + '"]'); if (el && el.textContent !== text) el.textContent = text; };
@@ -2961,7 +3043,7 @@
   /** ほかの画面にいても分かるように、攻めてくる知らせを下に出す (押すと天下の地図へ) */
   function updateInvasionBar() {
     const inv = C.hasRealm(state) ? state.realm.invasion : null;
-    const show = !!inv && currentTab !== 'realm' && !titleShown && !(battle && battle.phase === 'fight');
+    const show = !!inv && currentTab !== 'realm' && realmClockRuns();
     if (els.invasionBar.hidden === !show && !show) return;
     els.invasionBar.hidden = !show;
     if (!show) return;
@@ -2972,6 +3054,7 @@
 
   /** 迎え撃つ合戦を始める */
   function doDefend() {
+    if (battleOpen()) return false;   // 合戦の最中は動かせない (途中で兵をよそへ移すと、兵を失わずに国が取れた)
     const plan = C.defensePlan(state);
     if (!plan) return false;
     switchTab('battle');
@@ -3003,6 +3086,7 @@
   }
 
   function doBuyTroops(id) {
+    if (battleOpen()) return false;   // 合戦の最中は動かせない (途中で兵をよそへ移すと、兵を失わずに国が取れた)
     const r = C.buyTroops(state, id);
     if (!r.ok) return false;
     state = r.state;
@@ -3013,6 +3097,7 @@
   }
 
   function doGather(id) {
+    if (battleOpen()) return false;   // 合戦の最中は動かせない (途中で兵をよそへ移すと、兵を失わずに国が取れた)
     const r = C.gatherTroops(state, id);
     if (!r.ok) return false;
     state = r.state;
@@ -3024,6 +3109,7 @@
   }
 
   function doAttack() {
+    if (battleOpen()) return false;   // 合戦の最中は動かせない (途中で兵をよそへ移すと、兵を失わずに国が取れた)
     const to = realm.sel;
     const from = to ? C.attackSource(state, to) : null;
     if (!from || !C.canAttack(state, from, to, realm.send)) return false;
@@ -3118,8 +3204,8 @@
       renderHud(false);
     }
 
-    // 攻めてくる大名の知らせと秒読み (合戦の最中・タイトルの間は止まる)
-    if (dt > 0 && !titleShown && !(battle && battle.phase === 'fight') && C.hasRealm(state)) realmStep(Math.min(dt, 1));
+    // 攻めてくる大名の知らせと秒読み (合戦の画面で戦っている間・タイトルの間は止まる)
+    if (dt > 0 && realmClockRuns()) realmStep(Math.min(dt, 1));
 
     if (currentTab === 'realm' && isUnlocked('realm')) realmFrame(Math.min(dt, 0.1));
 
